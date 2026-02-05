@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Domino Pernambucano - 2v2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <meta name="theme-color" content="#166534">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCbfXAy3Z_Hs_mQRNHCLk30Ext4sq3k-jA",
+      authDomain: "domino-pernambuco.firebaseapp.com",
+      databaseURL: "https://domino-pernambuco-default-rtdb.firebaseio.com",
+      projectId: "domino-pernambuco",
+      storageBucket: "domino-pernambuco.firebasestorage.app",
+      messagingSenderId: "464393298578",
+      appId: "1:464393298578:web:f5781c8ccc0edffed7fc4b"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    function App() {
+      const [screen, setScreen] = useState('menu');
+      const [roomCode, setRoomCode] = useState('');
+      const [playerName, setPlayerName] = useState('');
+      const [playerId, setPlayerId] = useState(null);
+      const [playerSlot, setPlayerSlot] = useState(null); // 0 = human1, 2 = human2
+      const [gameState, setGameState] = useState(null);
+      const [error, setError] = useState('');
+      const [inputCode, setInputCode] = useState('');
+      const [choosingTile, setChoosingTile] = useState(null);
+      const [showStarterChoice, setShowStarterChoice] = useState(false);
+      const [handVisible, setHandVisible] = useState(true);
+      const [humanCount, setHumanCount] = useState(2);
+      const [starterCountdown, setStarterCountdown] = useState(null);
+
+      const roomRef = useRef(null);
+      const boardRef = useRef(null);
+
+      const HUMAN_FILL_ORDER = [0, 2, 1, 3];
+      const getHumanSlots = (count) => HUMAN_FILL_ORDER.slice(0, count);
+
+      const generateRoomCode = () => {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 5; i++) {
+          code += chars[Math.floor(Math.random() * chars.length)];
+        }
+        return code;
+      };
+
+      const generatePlayerId = () => {
+        return 'player_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      };
+
+      const createDeck = () => {
+        const deck = [];
+        for (let i = 0; i <= 6; i++) {
+          for (let j = i; j <= 6; j++) {
+            deck.push({ left: i, right: j, id: i + '-' + j });
+          }
+        }
+        return deck;
+      };
+
+      const shuffleDeck = (deck) => {
+        const shuffled = [...deck];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+      };
+
+      const createRoom = async () => {
+        if (!playerName.trim()) {
+          setError('Digite seu nome!');
+          return;
+        }
+        
+        const code = generateRoomCode();
+        const pid = generatePlayerId();
+        
+        const humanSlots = getHumanSlots(humanCount);
+        let botNum = 1;
+        const players = {};
+        for (let s = 0; s < 4; s++) {
+          if (s === 0) {
+            players[s] = { name: playerName, id: pid, connected: true, isHuman: true };
+          } else if (humanSlots.includes(s)) {
+            players[s] = null; // waiting for human to join
+          } else {
+            players[s] = { name: 'Bot ' + botNum, id: 'bot' + botNum, connected: true, isHuman: false };
+            botNum++;
+          }
+        }
+
+        const initialState = {
+          roomCode: code,
+          config: { humanCount: humanCount, humanSlots: humanSlots },
+          players: players,
+          gameStarted: false,
+          gameEnded: false,
+          waitingForStarterChoice: false,
+          lastWinningTeam: null,
+          createdAt: Date.now()
+        };
+
+        try {
+          await db.ref('rooms/' + code).set(initialState);
+          setRoomCode(code);
+          setPlayerId(pid);
+          setPlayerSlot(0);
+          setScreen('lobby');
+          
+          roomRef.current = db.ref('rooms/' + code);
+          roomRef.current.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+              setGameState(data);
+              if (data.gameStarted && !data.gameEnded) {
+                setScreen('game');
+              }
+              if (data.waitingForStarterChoice) {
+                setShowStarterChoice(true);
+              } else {
+                setShowStarterChoice(false);
+              }
+            }
+          });
+
+          roomRef.current.child('players/0/connected').onDisconnect().set(false);
+        } catch (err) {
+          setError('Erro ao criar sala: ' + err.message);
+        }
+      };
+
+      const joinRoom = async () => {
+        if (!playerName.trim()) {
+          setError('Digite seu nome!');
+          return;
+        }
+        if (!inputCode.trim()) {
+          setError('Digite o codigo da sala!');
+          return;
+        }
+
+        const code = inputCode.toUpperCase();
+        const pid = generatePlayerId();
+
+        try {
+          const snapshot = await db.ref('rooms/' + code).once('value');
+          const data = snapshot.val();
+          
+          if (!data) {
+            setError('Sala nao encontrada!');
+            return;
+          }
+
+          if (data.gameStarted) {
+            setError('Jogo ja comecou!');
+            return;
+          }
+
+          // Find next available human slot
+          const cfg = data.config || { humanCount: 2, humanSlots: [0, 2] };
+          const availableSlot = cfg.humanSlots.find(s => s !== 0 && (!data.players || !data.players[s]));
+          if (availableSlot === undefined) {
+            setError('Sala cheia!');
+            return;
+          }
+
+          await db.ref('rooms/' + code + '/players/' + availableSlot).set({
+            name: playerName,
+            id: pid,
+            connected: true,
+            isHuman: true
+          });
+
+          setRoomCode(code);
+          setPlayerId(pid);
+          setPlayerSlot(availableSlot);
+          setScreen('lobby');
+
+          roomRef.current = db.ref('rooms/' + code);
+          roomRef.current.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+              setGameState(data);
+              if (data.gameStarted && !data.gameEnded) {
+                setScreen('game');
+              }
+              if (data.waitingForStarterChoice) {
+                setShowStarterChoice(true);
+              } else {
+                setShowStarterChoice(false);
+              }
+            }
+          });
+
+          roomRef.current.child('players/' + availableSlot + '/connected').onDisconnect().set(false);
+        } catch (err) {
+          setError('Erro ao entrar: ' + err.message);
+        }
+      };
+
+      const startGameWithStarter = async (starterSlot) => {
+        // Tiles already dealt by newRound, just set the starter
+        await db.ref('rooms/' + roomCode).update({
+          waitingForStarterChoice: false,
+          starterChoiceDeadline: null,
+          currentPlayer: starterSlot,
+          message: gameState.players[starterSlot].name + ' comeca!'
+        });
+      };
+
+      const startGame = async () => {
+        const cfg = gameState?.config || { humanCount: 2, humanSlots: [0, 2] };
+        const allReady = cfg.humanSlots.every(s => gameState?.players?.[s]);
+        if (!allReady) {
+          setError('Aguardando jogadores!');
+          return;
+        }
+
+        const deck = shuffleDeck(createDeck());
+        const hands = [[], [], [], []];
+        for (let i = 0; i < 24; i++) {
+          hands[i % 4].push(deck[i]);
+        }
+
+        // Find highest double for first game
+        let startPlayer = 0;
+        let highestDouble = -1;
+        for (let p = 0; p < 4; p++) {
+          for (let tile of hands[p]) {
+            if (tile.left === tile.right && tile.left > highestDouble) {
+              highestDouble = tile.left;
+              startPlayer = p;
+            }
+          }
+        }
+
+        const game = {
+          ...gameState,
+          gameStarted: true,
+          hands: hands,
+          board: [],
+          leftEnd: null,
+          rightEnd: null,
+          currentPlayer: startPlayer,
+          passCount: 0,
+          teamScores: [0, 0],
+          extraPoints: 0,
+          message: gameState.players[startPlayer].name + ' tem a carroca ' + highestDouble + '-' + highestDouble + ' e comeca!',
+          matchTarget: 6
+        };
+
+        await db.ref('rooms/' + roomCode).set(game);
+      };
+
+      const canPlayTile = (tile) => {
+        if (!gameState || !gameState.board || gameState.board.length === 0) return true;
+        const { leftEnd, rightEnd } = gameState;
+        return tile.left === leftEnd || tile.right === leftEnd || 
+               tile.left === rightEnd || tile.right === rightEnd;
+      };
+
+      const canPlayOnBothEnds = (tile) => {
+        if (!gameState || !gameState.board || gameState.board.length === 0) return false;
+        const { leftEnd, rightEnd } = gameState;
+        if (leftEnd === rightEnd) return false;
+        const canLeft = tile.left === leftEnd || tile.right === leftEnd;
+        const canRight = tile.left === rightEnd || tile.right === rightEnd;
+        return canLeft && canRight;
+      };
+
+      const couldPlayOnBothEnds = (tile, left, right) => {
+        if (left === null || right === null) return false;
+        if (left === right) return false;
+        const canLeft = tile.left === left || tile.right === left;
+        const canRight = tile.left === right || tile.right === right;
+        return canLeft && canRight;
+      };
+
+      const findBestBotMove = (hand, leftEnd, rightEnd, boardLen) => {
+        const playable = hand.filter(t => {
+          if (boardLen === 0) return true;
+          return t.left === leftEnd || t.right === leftEnd || t.left === rightEnd || t.right === rightEnd;
+        });
+        if (playable.length === 0) return null;
+        
+        let bestTile = playable[0];
+        let bestScore = -1;
+        for (let tile of playable) {
+          let score = tile.left + tile.right;
+          if (tile.left === tile.right) score += 10;
+          if (score > bestScore) {
+            bestScore = score;
+            bestTile = tile;
+          }
+        }
+        return bestTile;
+      };
+
+      const executeTilePlay = async (tile, slot, side = null) => {
+        const newHands = gameState.hands.map(h => [...h]);
+        newHands[slot] = newHands[slot].filter(t => t.id !== tile.id);
+
+        let newBoard = [...(gameState.board || [])];
+        let newLeftEnd = gameState.leftEnd;
+        let newRightEnd = gameState.rightEnd;
+
+        if (!gameState.board || gameState.board.length === 0) {
+          newBoard = [tile];
+          newLeftEnd = tile.left;
+          newRightEnd = tile.right;
+        } else {
+          let placedTile = { ...tile };
+          if (side === 'left') {
+            if (tile.left === gameState.leftEnd) {
+              placedTile = { ...tile, left: tile.right, right: tile.left };
+            }
+            newBoard.unshift(placedTile);
+            newLeftEnd = placedTile.left;
+          } else if (side === 'right') {
+            if (tile.right === gameState.rightEnd) {
+              placedTile = { ...tile, left: tile.right, right: tile.left };
+            }
+            newBoard.push(placedTile);
+            newRightEnd = placedTile.right;
+          } else {
+            // Auto placement
+            if (tile.left === gameState.leftEnd) {
+              placedTile = { ...tile, left: tile.right, right: tile.left };
+              newBoard.unshift(placedTile);
+              newLeftEnd = placedTile.left;
+            } else if (tile.right === gameState.leftEnd) {
+              newBoard.unshift(placedTile);
+              newLeftEnd = placedTile.left;
+            } else if (tile.left === gameState.rightEnd) {
+              newBoard.push(placedTile);
+              newRightEnd = placedTile.right;
+            } else if (tile.right === gameState.rightEnd) {
+              placedTile = { ...tile, left: tile.right, right: tile.left };
+              newBoard.push(placedTile);
+              newRightEnd = placedTile.right;
+            }
+          }
+        }
+
+        // Check win
+        if (newHands[slot].length === 0) {
+          await handleWin(slot, tile, newHands, newBoard, newLeftEnd, newRightEnd);
+          return;
+        }
+
+        const nextPlayer = (slot + 1) % 4;
+        const updates = {
+          hands: newHands,
+          board: newBoard,
+          leftEnd: newLeftEnd,
+          rightEnd: newRightEnd,
+          currentPlayer: nextPlayer,
+          passCount: 0,
+          message: 'Vez de ' + gameState.players[nextPlayer].name + '!'
+        };
+
+        await db.ref('rooms/' + roomCode).update(updates);
+      };
+
+      const playTile = async (tile, side = null) => {
+        if (gameState.currentPlayer !== playerSlot) return;
+        if (!canPlayTile(tile)) return;
+
+        if (canPlayOnBothEnds(tile) && side === null) {
+          setChoosingTile(tile);
+          return;
+        }
+
+        await executeTilePlay(tile, playerSlot, side);
+      };
+
+      const handleWin = async (winner, lastTile, hands, board, leftEnd, rightEnd) => {
+        const isDouble = lastTile.left === lastTile.right;
+        const wasOnBothEnds = couldPlayOnBothEnds(lastTile, gameState.leftEnd, gameState.rightEnd);
+
+        let basePoints, scoreName;
+        if (isDouble && wasOnBothEnds) {
+          basePoints = 4;
+          scoreName = 'cruzada';
+        } else if (isDouble) {
+          basePoints = 2;
+          scoreName = 'com carroca';
+        } else if (wasOnBothEnds) {
+          basePoints = 3;
+          scoreName = 'la e lo';
+        } else {
+          basePoints = 1;
+          scoreName = 'normal';
+        }
+
+        const points = basePoints + (gameState.extraPoints || 0);
+        const winningTeam = winner % 2;
+        const newScores = [...gameState.teamScores];
+        newScores[winningTeam] += points;
+
+        const extraMsg = (gameState.extraPoints || 0) > 0 ? ' (' + basePoints + ' + ' + gameState.extraPoints + ' extra)' : '';
+        
+        const updates = {
+          hands: hands,
+          board: board,
+          leftEnd: leftEnd,
+          rightEnd: rightEnd,
+          teamScores: newScores,
+          extraPoints: 0,
+          gameEnded: newScores[winningTeam] >= gameState.matchTarget,
+          lastWinningTeam: winningTeam,
+          message: gameState.players[winner].name + ' bateu ' + scoreName + '! Time ' + (winningTeam + 1) + ' marcou ' + points + ' ponto(s)' + extraMsg + '!',
+          currentPlayer: -1
+        };
+
+        if (newScores[winningTeam] >= gameState.matchTarget) {
+          updates.message = 'PARTIDA GANHA! Time ' + (winningTeam + 1) + ' venceu com ' + newScores[winningTeam] + ' pontos!';
+        }
+
+        await db.ref('rooms/' + roomCode).update(updates);
+      };
+
+      const pass = async () => {
+        if (gameState.currentPlayer !== playerSlot) return;
+
+        const hasValid = gameState.hands[playerSlot].some(t => canPlayTile(t));
+        if (hasValid) {
+          setError('Voce tem peca valida!');
+          setTimeout(() => setError(''), 2000);
+          return;
+        }
+
+        const newPassCount = (gameState.passCount || 0) + 1;
+
+        if (newPassCount >= 4) {
+          await handleBlocked();
+          return;
+        }
+
+        const nextPlayer = (playerSlot + 1) % 4;
+        await db.ref('rooms/' + roomCode).update({
+          passCount: newPassCount,
+          currentPlayer: nextPlayer,
+          message: gameState.players[playerSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!'
+        });
+      };
+
+      const botPass = async (botSlot) => {
+        const newPassCount = (gameState.passCount || 0) + 1;
+
+        if (newPassCount >= 4) {
+          await handleBlocked();
+          return;
+        }
+
+        const nextPlayer = (botSlot + 1) % 4;
+        await db.ref('rooms/' + roomCode).update({
+          passCount: newPassCount,
+          currentPlayer: nextPlayer,
+          message: gameState.players[botSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!'
+        });
+      };
+
+      const handleBlocked = async () => {
+        const handValues = gameState.hands.map((hand, idx) => ({
+          player: idx,
+          points: hand.reduce((sum, t) => sum + t.left + t.right, 0)
+        }));
+
+        const minValue = Math.min(...handValues.map(h => h.points));
+        const winners = handValues.filter(h => h.points === minValue);
+        const handSummary = handValues.map(h => gameState.players[h.player].name + ': ' + h.points).join(' | ');
+
+        if (winners.length > 1 && winners.some(w => w.player % 2 === 0) && winners.some(w => w.player % 2 === 1)) {
+          await db.ref('rooms/' + roomCode).update({
+            extraPoints: (gameState.extraPoints || 0) + 1,
+            currentPlayer: -1,
+            message: 'Jogo travado! ' + handSummary + '. Empate! Proximo jogo +' + ((gameState.extraPoints || 0) + 1) + ' extra!'
+          });
+          return;
+        }
+
+        const winner = winners[0].player;
+        const points = 1 + (gameState.extraPoints || 0);
+        const winningTeam = winner % 2;
+        const newScores = [...gameState.teamScores];
+        newScores[winningTeam] += points;
+
+        await db.ref('rooms/' + roomCode).update({
+          teamScores: newScores,
+          extraPoints: 0,
+          currentPlayer: -1,
+          lastWinningTeam: winningTeam,
+          gameEnded: newScores[winningTeam] >= gameState.matchTarget,
+          message: 'Jogo travado! ' + handSummary + '. ' + gameState.players[winner].name + ' ganhou! Time ' + (winningTeam + 1) + ' marcou ' + points + '!'
+        });
+      };
+
+      const newRound = async () => {
+        const winTeam = gameState.lastWinningTeam;
+        const winTeamSlots = winTeam === 0 ? [0, 2] : [1, 3];
+        const winTeamHasHuman = winTeamSlots.some(s => gameState.players[s]?.isHuman);
+
+        // Deal tiles for the new round
+        const deck = shuffleDeck(createDeck());
+        const hands = [[], [], [], []];
+        for (let i = 0; i < 24; i++) {
+          hands[i % 4].push(deck[i]);
+        }
+
+        if (winTeamHasHuman) {
+          // Deal first so players can see their tiles, then let team choose
+          await db.ref('rooms/' + roomCode).update({
+            hands: hands,
+            board: [],
+            leftEnd: null,
+            rightEnd: null,
+            currentPlayer: -1,
+            passCount: 0,
+            waitingForStarterChoice: true,
+            starterChoiceDeadline: Date.now() + 30000,
+            message: 'Time ' + (winTeam + 1) + ' venceu! Veja suas pecas e escolha quem comeca (30s)!'
+          });
+        } else {
+          // Winning team is all bots - use highest double
+          let startPlayer = 0;
+          let highestDouble = -1;
+          for (let p = 0; p < 4; p++) {
+            for (let tile of hands[p]) {
+              if (tile.left === tile.right && tile.left > highestDouble) {
+                highestDouble = tile.left;
+                startPlayer = p;
+              }
+            }
+          }
+
+          await db.ref('rooms/' + roomCode).update({
+            hands: hands,
+            board: [],
+            leftEnd: null,
+            rightEnd: null,
+            currentPlayer: startPlayer,
+            passCount: 0,
+            waitingForStarterChoice: false,
+            message: gameState.players[startPlayer].name + ' tem a carroca ' + highestDouble + '-' + highestDouble + ' e comeca!'
+          });
+        }
+      };
+
+      // Bot AI - runs when it's a bot's turn
+      useEffect(() => {
+        if (!gameState || !gameState.gameStarted || gameState.gameEnded) return;
+        if (gameState.currentPlayer === -1) return;
+        if (gameState.waitingForStarterChoice) return;
+        
+        const currentSlot = gameState.currentPlayer;
+        const isBot = gameState.players[currentSlot] && !gameState.players[currentSlot].isHuman;
+        
+        if (!isBot) return;
+
+        // Only player 0 (host) handles bot moves to avoid duplicates
+        if (playerSlot !== 0) return;
+
+        const timeout = setTimeout(async () => {
+          const botHand = gameState.hands[currentSlot];
+          const botMove = findBestBotMove(botHand, gameState.leftEnd, gameState.rightEnd, gameState.board?.length || 0);
+
+          if (botMove) {
+            // Determine side if can play both
+            let side = null;
+            if (gameState.board && gameState.board.length > 0) {
+              const canLeft = botMove.left === gameState.leftEnd || botMove.right === gameState.leftEnd;
+              const canRight = botMove.left === gameState.rightEnd || botMove.right === gameState.rightEnd;
+              if (canLeft && !canRight) side = 'left';
+              else if (canRight && !canLeft) side = 'right';
+              else if (canLeft && canRight) side = Math.random() > 0.5 ? 'left' : 'right';
+            }
+            await executeTilePlay(botMove, currentSlot, side);
+          } else {
+            await botPass(currentSlot);
+          }
+        }, 1000);
+
+        return () => clearTimeout(timeout);
+      }, [gameState?.currentPlayer, gameState?.gameStarted]);
+
+      // Auto-start for solo mode (1 human)
+      useEffect(() => {
+        if (!gameState || gameState.gameStarted) return;
+        const cfg = gameState.config;
+        if (!cfg || cfg.humanCount !== 1) return;
+        if (playerSlot !== 0) return;
+        // All slots are filled (slot 0 is creator, rest are bots), start immediately
+        const allReady = cfg.humanSlots.every(s => gameState.players?.[s]);
+        if (allReady) {
+          startGame();
+        }
+      }, [gameState?.config, gameState?.gameStarted]);
+
+      // Starter choice countdown display
+      useEffect(() => {
+        if (!gameState?.waitingForStarterChoice || !gameState?.starterChoiceDeadline) {
+          setStarterCountdown(null);
+          return;
+        }
+        const updateCountdown = () => {
+          const remaining = Math.max(0, Math.ceil((gameState.starterChoiceDeadline - Date.now()) / 1000));
+          setStarterCountdown(remaining);
+        };
+        updateCountdown();
+        const interval = setInterval(updateCountdown, 1000);
+        return () => clearInterval(interval);
+      }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
+
+      // Auto-pick starter after timer expires (host only)
+      useEffect(() => {
+        if (!gameState?.waitingForStarterChoice || !gameState?.starterChoiceDeadline) return;
+        if (playerSlot !== 0) return;
+        const timeLeft = gameState.starterChoiceDeadline - Date.now();
+        if (timeLeft <= 0) {
+          const winTeam = gameState.lastWinningTeam;
+          const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
+          startGameWithStarter(winSlots[Math.floor(Math.random() * 2)]);
+          return;
+        }
+        const timeout = setTimeout(() => {
+          const winTeam = gameState.lastWinningTeam;
+          const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
+          startGameWithStarter(winSlots[Math.floor(Math.random() * 2)]);
+        }, timeLeft);
+        return () => clearTimeout(timeout);
+      }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
+
+      // Domino dots pattern
+      const DominoDots = ({ value, size = 'normal' }) => {
+        const dotSize = size === 'small' ? 'w-1 h-1' : 'w-1.5 h-1.5';
+        const containerSize = size === 'small' ? 'w-5 h-5' : 'w-8 h-8';
+        
+        const patterns = {
+          0: [],
+          1: [[1,1]],
+          2: [[0,0],[2,2]],
+          3: [[0,0],[1,1],[2,2]],
+          4: [[0,0],[0,2],[2,0],[2,2]],
+          5: [[0,0],[0,2],[1,1],[2,0],[2,2]],
+          6: [[0,0],[0,2],[1,0],[1,2],[2,0],[2,2]]
+        };
+        
+        const dots = patterns[value] || [];
+        
+        return (
+          <div className={containerSize + ' relative'}>
+            {dots.map((pos, idx) => (
+              <div 
+                key={idx}
+                className={dotSize + ' bg-gray-800 rounded-full absolute'}
+                style={{
+                  top: pos[0] === 0 ? '10%' : pos[0] === 1 ? '42%' : '74%',
+                  left: pos[1] === 0 ? '10%' : pos[1] === 1 ? '42%' : '74%'
+                }}
+              />
+            ))}
+          </div>
+        );
+      };
+
+      const DominoTile = ({ tile, playable, onClick }) => (
+        <div onClick={onClick} className={'inline-flex flex-col border-2 rounded-lg bg-amber-50 cursor-pointer w-11 h-22 shadow ' + (playable ? 'border-green-500 shadow-lg ring-2 ring-green-400' : 'border-gray-600 opacity-70')}>
+          <div className="flex-1 flex items-center justify-center border-b border-gray-400 p-0.5">
+            <DominoDots value={tile.left} />
+          </div>
+          <div className="flex-1 flex items-center justify-center p-0.5">
+            <DominoDots value={tile.right} />
+          </div>
+        </div>
+      );
+
+      const BoardTile = ({ tile, orientation, flipped }) => {
+        const isVertical = orientation === 'vertical';
+        const val1 = (flipped && !isVertical) ? tile.right : tile.left;
+        const val2 = (flipped && !isVertical) ? tile.left : tile.right;
+        return (
+          <div
+            className={'inline-flex border rounded shadow-sm border-gray-600 bg-amber-50 ' + (isVertical ? 'flex-col' : 'flex-row')}
+            style={isVertical ? { width: 22, height: 44 } : { width: 44, height: 22 }}
+          >
+            <div className={'flex-1 flex items-center justify-center ' + (isVertical ? 'border-b' : 'border-r') + ' border-gray-400'}>
+              <DominoDots value={val1} size="small" />
+            </div>
+            <div className="flex-1 flex items-center justify-center">
+              <DominoDots value={val2} size="small" />
+            </div>
+          </div>
+        );
+      };
+
+      // Menu Screen
+      if (screen === 'menu') {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-4 flex items-center justify-center">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
+              <h1 className="text-2xl font-bold text-green-800 text-center mb-2">Domino Pernambucano</h1>
+              <p className="text-center text-gray-600 mb-6">2v2 - Escolha o modo</p>
+
+              <input
+                type="text"
+                placeholder="Seu nome"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                className="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+                maxLength={15}
+              />
+
+              <div className="mb-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Jogadores humanos:</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setHumanCount(n)}
+                      className={'flex-1 py-2 rounded-lg font-bold text-sm border-2 ' + (humanCount === n ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300')}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-1 text-center">
+                  {humanCount === 1 && '1 humano + 3 bots (solo)'}
+                  {humanCount === 2 && '2 humanos (parceiros) + 2 bots'}
+                  {humanCount === 3 && '3 humanos + 1 bot'}
+                  {humanCount === 4 && '4 humanos (sem bots)'}
+                </p>
+              </div>
+
+              <button onClick={createRoom} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold text-lg mb-3">
+                Criar Sala
+              </button>
+
+              <div className="text-center text-gray-500 my-3">ou</div>
+
+              <input
+                type="text"
+                placeholder="Codigo da sala"
+                value={inputCode}
+                onChange={(e) => setInputCode(e.target.value.toUpperCase())}
+                className="w-full p-3 border-2 border-gray-300 rounded-lg mb-3 text-lg text-center tracking-widest"
+                maxLength={5}
+              />
+
+              <button onClick={joinRoom} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg">
+                Entrar na Sala
+              </button>
+
+              {error && <p className="text-red-500 text-center mt-3">{error}</p>}
+            </div>
+          </div>
+        );
+      }
+
+      // Lobby Screen
+      if (screen === 'lobby') {
+        const players = gameState?.players || {};
+        const cfg = gameState?.config || { humanCount: 2, humanSlots: [0, 2] };
+        const allHumansJoined = cfg.humanSlots.every(s => players[s] !== null && players[s] !== undefined);
+        const slotLabels = { 0: 'Jogador 1', 1: 'Jogador 2', 2: 'Jogador 3', 3: 'Jogador 4' };
+        const teamSlots = { 0: [0, 2], 1: [1, 3] };
+
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-4">
+            <div className="max-w-sm mx-auto">
+              <div className="bg-white rounded-lg shadow-xl p-6 mb-4">
+                <h2 className="text-xl font-bold text-center text-gray-800 mb-2">Sala</h2>
+                <div className="text-4xl font-bold text-center text-green-600 tracking-widest mb-4">{roomCode}</div>
+                {cfg.humanCount > 1 && (
+                  <p className="text-center text-gray-600 text-sm">Envie este codigo para os outros jogadores!</p>
+                )}
+                <p className="text-center text-gray-500 text-xs mt-1">{cfg.humanCount} humano(s) + {4 - cfg.humanCount} bot(s)</p>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-xl p-4 mb-4">
+                {[0, 1].map(team => (
+                  <div key={team} className={team === 1 ? 'mt-4' : ''}>
+                    <h3 className="font-bold text-gray-800 mb-3">Time {team + 1}</h3>
+                    <div className="space-y-2">
+                      {teamSlots[team].map(slot => {
+                        const player = players[slot];
+                        const isHumanSlot = cfg.humanSlots.includes(slot);
+                        const bgColor = isHumanSlot ? 'bg-blue-100' : 'bg-red-100';
+                        const textColor = isHumanSlot ? 'text-blue-800' : 'text-red-800';
+                        return (
+                          <div key={slot} className={'p-3 rounded-lg ' + bgColor}>
+                            <div className="flex items-center justify-between">
+                              <span className={'font-semibold ' + textColor}>{slotLabels[slot]}</span>
+                              {player ? (
+                                <span className={(player.isHuman ? 'text-green-600' : 'text-red-600') + ' font-bold'}>
+                                  {player.name} {!player.isHuman && '🤖'}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">Aguardando...</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {playerSlot === 0 && (
+                <button
+                  onClick={startGame}
+                  disabled={!allHumansJoined}
+                  className={'w-full py-3 rounded-lg font-bold text-lg ' + (!allHumansJoined ? 'bg-gray-400 text-gray-200' : 'bg-green-600 text-white')}
+                >
+                  {!allHumansJoined ? 'Aguardando jogadores...' : 'Comecar Jogo!'}
+                </button>
+              )}
+
+              {playerSlot !== 0 && (
+                <p className="text-center text-white">Aguardando o host iniciar o jogo...</p>
+              )}
+
+              {error && <p className="text-red-200 text-center mt-3">{error}</p>}
+            </div>
+          </div>
+        );
+      }
+
+      // Game Screen
+      if (screen === 'game' && gameState) {
+        const myHand = gameState.hands?.[playerSlot] || [];
+        const topSlot = (playerSlot + 2) % 4;
+        const leftSlot = (playerSlot + 1) % 4;
+        const rightSlot = (playerSlot + 3) % 4;
+        const isMyTurn = gameState.currentPlayer === playerSlot;
+        const isBot = (slot) => gameState.players?.[slot] && !gameState.players[slot].isHuman;
+
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-2">
+            <div className="max-w-2xl mx-auto">
+              {/* Scores - compact */}
+              <div className="bg-white rounded-lg shadow-lg p-2 mb-2">
+                <div className="flex justify-between items-center">
+                  <div className="text-center flex-1">
+                    <div className="font-bold text-blue-800 text-xs">Time 1</div>
+                    <div className="text-lg font-bold text-blue-700">{gameState.teamScores?.[0] || 0}/{gameState.matchTarget}</div>
+                  </div>
+                  <div className="text-gray-400 text-xs">vs</div>
+                  <div className="text-center flex-1">
+                    <div className="font-bold text-red-800 text-xs">Time 2</div>
+                    <div className="text-lg font-bold text-red-700">{gameState.teamScores?.[1] || 0}/{gameState.matchTarget}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Message */}
+              {gameState.message && (
+                <div className="bg-blue-100 border-l-4 border-blue-500 p-2 mb-2 rounded text-blue-800 text-xs font-semibold">
+                  {gameState.message}
+                </div>
+              )}
+
+              {/* Starter choice modal */}
+              {showStarterChoice && (() => {
+                const winTeam = gameState.lastWinningTeam;
+                const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
+                const isOnWinTeam = winSlots.includes(playerSlot);
+                const isHumanOnWinTeam = gameState.players?.[playerSlot]?.isHuman && isOnWinTeam;
+                if (!isHumanOnWinTeam) return null;
+                const partnerOnTeam = winSlots.find(s => s !== playerSlot);
+                return (
+                  <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 mb-2 shadow-lg text-center">
+                    <p className="font-bold mb-1 text-sm">Quem comeca a proxima rodada?</p>
+                    <p className="text-xs text-gray-500 mb-3">Veja suas pecas abaixo e escolha. Qualquer parceiro pode decidir.</p>
+                    {starterCountdown !== null && (
+                      <p className={'text-xs font-bold mb-2 ' + (starterCountdown <= 10 ? 'text-red-600' : 'text-gray-600')}>
+                        Tempo: {starterCountdown}s
+                      </p>
+                    )}
+                    <div className="flex gap-2 justify-center">
+                      <button onClick={() => startGameWithStarter(playerSlot)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold">
+                        Eu comeco
+                      </button>
+                      <button onClick={() => startGameWithStarter(partnerOnTeam)} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold">
+                        {gameState.players[partnerOnTeam]?.name} comeca
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Choice modal */}
+              {choosingTile && (
+                <div className="bg-white rounded-lg p-3 mb-2 shadow-lg text-center">
+                  <p className="font-bold mb-2 text-sm">Jogar {choosingTile.left}-{choosingTile.right} onde?</p>
+                  <div className="flex gap-2 justify-center">
+                    <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="bg-blue-500 text-white px-3 py-2 rounded-lg text-sm">Esq ({gameState.leftEnd})</button>
+                    <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="bg-green-500 text-white px-3 py-2 rounded-lg text-sm">Dir ({gameState.rightEnd})</button>
+                  </div>
+                  <button onClick={() => setChoosingTile(null)} className="mt-2 text-gray-500 text-xs">Cancelar</button>
+                </div>
+              )}
+
+              {/* Game Table Layout */}
+              <div className="bg-green-700 rounded-xl shadow-lg p-2 mb-2 relative">
+                
+                {/* Partner (top) */}
+                <div className={'rounded-lg p-2 mb-2 mx-10 ' + (gameState.currentPlayer === topSlot ? 'bg-green-500' : 'bg-green-600')}>
+                  <div className="text-xs font-semibold text-white text-center mb-1">
+                    {gameState.players?.[topSlot]?.name} {isBot(topSlot) ? '🤖' : '(Parceiro)'}
+                    {gameState.currentPlayer === topSlot && <span className="ml-1">🎯</span>}
+                  </div>
+                  <div className="flex gap-0.5 justify-center">
+                    {(gameState.hands?.[topSlot] || []).map((_, idx) => (
+                      <div key={idx} className={'w-5 h-8 rounded border shadow-inner ' + (isBot(topSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Middle row: Left opponent - Board (center) - Right opponent */}
+                <div className="flex items-stretch mb-2">
+
+                  {/* Left opponent */}
+                  <div className={'rounded-lg p-1 flex-shrink-0 w-10 flex flex-col ' + (gameState.currentPlayer === leftSlot ? 'bg-green-500' : 'bg-green-600')}>
+                    <div className="text-xs font-semibold text-white text-center mb-1">
+                      {isBot(leftSlot) ? '🤖' : '👤'} {gameState.currentPlayer === leftSlot && '🎯'}
+                    </div>
+                    <div className="flex flex-col gap-0 items-center flex-1 justify-center">
+                      {(gameState.hands?.[leftSlot] || []).map((_, idx) => (
+                        <div key={idx} className={'w-8 h-2 rounded-sm border shadow-inner ' + (isBot(leftSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Board (center) */}
+                  <div ref={boardRef} className="flex-1 bg-green-900 rounded-lg p-2 mx-1 min-h-44 border-4 border-green-950 overflow-auto flex flex-col items-center">
+                    {(!gameState.board || gameState.board.length === 0) ? (
+                      <div className="flex-1 flex items-center justify-center">
+                        <p className="text-green-600 text-sm">Mesa vazia</p>
+                      </div>
+                    ) : (() => {
+                      const board = gameState.board;
+                      const HW = 44, VW = 22, GAP = 2;
+                      const el = boardRef.current;
+                      const MAX_W = el ? el.clientWidth - 24 : 250;
+
+                      // Build rows by fitting tiles, respecting max width
+                      const rows = [];
+                      let cur = [], w = 0;
+                      for (let i = 0; i < board.length; i++) {
+                        const isD = board[i].left === board[i].right;
+                        const tw = isD ? VW : HW;
+                        const need = cur.length > 0 ? tw + GAP : tw;
+                        if (w + need > MAX_W && cur.length > 0) {
+                          rows.push(cur);
+                          cur = [i]; w = tw;
+                        } else {
+                          cur.push(i); w += need;
+                        }
+                      }
+                      if (cur.length > 0) rows.push(cur);
+
+                      return (
+                        <div style={{ margin: 'auto 0', width: '100%' }}>
+                          {rows.map((row, rIdx) => {
+                            const isOdd = rIdx % 2 === 1;
+                            const single = rows.length === 1;
+                            let flexDir = 'row';
+                            let justify = 'center';
+                            if (!single) {
+                              if (rIdx === 0) { justify = 'flex-end'; }
+                              else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
+                              else { justify = 'flex-start'; }
+                            }
+                            return (
+                              <div key={rIdx} style={{ display: 'flex', flexDirection: flexDir, justifyContent: justify, alignItems: 'center', gap: GAP, marginBottom: rIdx < rows.length - 1 ? GAP : 0 }}>
+                                {row.map(idx => {
+                                  const tile = board[idx];
+                                  const isD = tile.left === tile.right;
+                                  const isTurn = idx === row[0] && rIdx > 0;
+                                  return <BoardTile key={tile.id || idx} tile={tile} orientation={(isD || isTurn) ? 'vertical' : 'horizontal'} flipped={isOdd && !single} />;
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}</div>
+
+                  {/* Right opponent */}
+                  <div className={'rounded-lg p-1 flex-shrink-0 w-10 flex flex-col ' + (gameState.currentPlayer === rightSlot ? 'bg-green-500' : 'bg-green-600')}>
+                    <div className="text-xs font-semibold text-white text-center mb-1">
+                      {isBot(rightSlot) ? '🤖' : '👤'} {gameState.currentPlayer === rightSlot && '🎯'}
+                    </div>
+                    <div className="flex flex-col gap-0 items-center flex-1 justify-center">
+                      {(gameState.hands?.[rightSlot] || []).map((_, idx) => (
+                        <div key={idx} className={'w-8 h-2 rounded-sm border shadow-inner ' + (isBot(rightSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* My Hand (bottom) */}
+                <div className={'rounded-lg p-2 mx-10 ' + (isMyTurn ? 'bg-green-500 ring-2 ring-yellow-400' : 'bg-green-600')}>
+                  <div className="text-xs font-semibold text-white text-center mb-1">
+                    Voce ({myHand.length} pecas)
+                    {isMyTurn && <span className="ml-1">🎯 Sua vez!</span>}
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1 justify-center mb-2">
+                    {myHand.map(tile => (
+                      <DominoTile
+                        key={tile.id}
+                        tile={tile}
+                        playable={isMyTurn && canPlayTile(tile)}
+                        onClick={() => {
+                          if (!isMyTurn || !canPlayTile(tile)) return;
+                          if (canPlayOnBothEnds(tile)) {
+                            setChoosingTile(tile);
+                          } else {
+                            playTile(tile);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {isMyTurn && (
+                    <button onClick={pass} className="w-full bg-orange-500 text-white py-1 rounded text-xs">
+                      Passar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* New round button */}
+              {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
+                <button onClick={newRound} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">
+                  Proxima Rodada
+                </button>
+              )}
+
+              {gameState.gameEnded && playerSlot === 0 && (
+                <button onClick={startGame} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">
+                  Nova Partida
+                </button>
+              )}
+
+              {error && <p className="text-red-200 text-center mt-2 text-sm">{error}</p>}
+            </div>
+          </div>
+        );
+      }
+
+      return null;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
