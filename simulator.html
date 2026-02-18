@@ -89,14 +89,16 @@
     }
 
     function tileHTML(tile, cls = '', orient = 'v', extraCls = '', onClick = '') {
-      const dir = orient === 'v' ? 'tile-v' : 'tile-h';
-      const sm = cls.includes('board') ? true : false;
-      const base = cls.includes('board') ? 'board-tile' : 'tile';
+      const isBoard = cls.includes('board');
+      const base = isBoard ? 'board-tile' : 'tile';
       const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
       const clickAttr = onClick ? `onclick="${onClick}"` : '';
+      const halfContent = v => isBoard
+        ? `<div class="tile-half" style="font-size:14px;font-weight:800;color:#1e293b;user-select:none">${v}</div>`
+        : `<div class="tile-half">${renderDots(v, false)}</div>`;
       return `<div class="${base} ${dirB} ${extraCls}" title="${tile.left}-${tile.right}" ${clickAttr}>
-        <div class="tile-half">${renderDots(tile.left, sm)}</div>
-        <div class="tile-half">${renderDots(tile.right, sm)}</div>
+        ${halfContent(tile.left)}
+        ${halfContent(tile.right)}
       </div>`;
     }
 
@@ -513,15 +515,29 @@
       return { snapshots, outcome: { type: 'abort' } };
     }
 
-    function generateGame() {
+    function generateGame(forcedStarter = null) {
       const deck = shuffleDeck(ALL_TILES);
       const hands = [[],[],[],[]];
       for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
 
-      let hd = -1, hp = 0, ht = null;
-      for (let p = 0; p < 4; p++)
-        for (const t of hands[p])
-          if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+      let hp, ht;
+      if (forcedStarter !== null) {
+        // Winning team chose this player to start — they play their highest double, or highest tile
+        hp = forcedStarter;
+        const doubles = hands[hp].filter(t => t.left === t.right).sort((a,b) => b.left - a.left);
+        if (doubles.length > 0) {
+          ht = doubles[0];
+        } else {
+          ht = hands[hp].sort((a,b) => (b.left + b.right) - (a.left + a.right))[0];
+        }
+      } else {
+        // First game of match: highest double across all players
+        let hd = -1;
+        hp = 0; ht = null;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+      }
 
       const autoTile = {...ht};
       hands[hp] = hands[hp].filter(t => t.id !== ht.id);
@@ -848,6 +864,8 @@
     let gameMode = 'watch'; // 'watch' | 'quiz'
     let scoreMultiplier = 1; // dobrada: doubles after tied block
     let matchScore = [0, 0];  // team0 vs team1 score, first to 6 wins match
+    let lastWinTeam = null;   // null = first game of match, 0 or 1 = team that won last
+    let starterChoicePending = false; // true when waiting for user to pick starter
 
     // ========== MATCH EQUITY TABLE ==========
     // ME[s1][s2] = P(team1 wins match | score s1 vs s2), match to 6 pts
@@ -1365,6 +1383,7 @@
                     ${renderBoard(snap)}
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
+                  ${starterChoicePending ? renderStarterChoice() : ''}
                 </div>
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
@@ -1461,6 +1480,19 @@
           ${o.winner !== undefined ?
             `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
             `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
+        </div>
+      </div>`;
+    }
+
+    function renderStarterChoice() {
+      return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
+        <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-emerald-500 shadow-xl">
+          <div class="text-lg font-bold text-emerald-400 mb-1">Your team won!</div>
+          <div class="text-sm text-slate-300 mb-4">Choose who starts the next game:</div>
+          <div class="flex gap-3 justify-center">
+            <button class="btn btn-green px-5 py-2" onclick="chooseStarter(0)">You (P0)</button>
+            <button class="btn btn-blue px-5 py-2" onclick="chooseStarter(2)">Partner (P2)</button>
+          </div>
         </div>
       </div>`;
     }
@@ -2229,8 +2261,8 @@
               <div class="bg-slate-900 rounded-lg p-2">
                 <div class="flex items-center justify-between mb-1.5">
                   <span class="text-xs font-bold" style="color:${teamColors[p%2]}">${pNames[p]}</span>
-                  <span class="text-xs text-slate-400 tooltip">holds ${handSize}, could be ${possible.length} tiles
-                    <span class="tip-text">They have ${handSize} tiles. Probabilities estimated from ${200} MC samples.</span>
+                  <span class="text-xs text-slate-400 tooltip">${handSize} in hand
+                    <span class="tip-text">${pNames[p]} holds ${handSize} tiles. ${possible.length} tiles are still possible candidates (not yet eliminated by plays/passes). Probabilities from ${200} MC samples.</span>
                   </span>
                 </div>
                 ${dead.length > 0 ? `<div class="text-xs text-red-400 mb-1">Dead: {${dead.join(', ')}}</div>` : ''}
@@ -2273,7 +2305,9 @@
 
           <!-- Suit exhaustion summary -->
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-1">Suit Exhaustion</div>
+            <div class="text-xs font-bold text-slate-400 mb-1 tooltip">Suit Exhaustion
+              <span class="tip-text" style="white-space:normal;max-width:220px">How many tiles with each number (0-6) remain unplayed. Each number appears on 7 tiles total. Red = exhausted (no tiles left), Orange = scarce (1-2 left), Green = plenty available. Use this to read suits and predict opponent hands.</span>
+            </div>
             <div class="grid grid-cols-7 gap-1">
               ${[0,1,2,3,4,5,6].map(n => {
                 const rem = knowledge.remainingWithNumber(n);
@@ -2281,7 +2315,7 @@
                 const played = total - rem;
                 const pct = (played / total * 100).toFixed(0);
                 const color = rem === 0 ? '#ef4444' : rem <= 2 ? '#f97316' : '#22c55e';
-                return `<div class="text-center">
+                return `<div class="text-center" title="Suit ${n}: ${played} of 7 played, ${rem} remaining${rem === 0 ? ' — EXHAUSTED, no one can play this number' : rem <= 2 ? ' — scarce, hard to match' : ''}">
                   <div class="text-xs font-bold" style="color:${color}">${n}</div>
                   <div class="bg-slate-700 rounded-full h-1.5 mt-0.5">
                     <div class="h-1.5 rounded-full" style="width:${pct}%;background:${color}"></div>
@@ -2701,6 +2735,7 @@
       quizResult = null;
       quizShowingResult = false;
       quizSidePick = null;
+      starterChoicePending = false;
       render();
     }
 
@@ -2746,10 +2781,34 @@
       quizShowingResult = false;
       quizSidePick = null;
       mcResults = null;
-      analysisRunning = false; // cancel any in-progress analysis
+      analysisRunning = false;
+
+      // Check if winning team chooses starter (not first game, not a tie)
+      if (lastWinTeam !== null) {
+        if (lastWinTeam === 0) {
+          // User's team won — show starter choice UI
+          starterChoicePending = true;
+          render();
+          return;
+        } else {
+          // AI team won — auto-pick random from team 1
+          const aiStarter = Math.random() < 0.5 ? 1 : 3;
+          launchGame(aiStarter);
+          return;
+        }
+      }
+      launchGame(null); // first game — highest double rule
+    }
+
+    function chooseStarter(player) {
+      starterChoicePending = false;
+      launchGame(player);
+    }
+
+    function launchGame(forcedStarter) {
       stats.games++;
       saveStats();
-      currentGame = generateGame();
+      currentGame = generateGame(forcedStarter);
       // Apply dobrada multiplier to outcome points
       const o = currentGame.outcome;
       if (o && o.points) {
@@ -2765,20 +2824,24 @@
       if (lastSnap && lastSnap.outcome) {
         lastSnap.outcome = o;
       }
-      // Update match score
+      // Update match score and track winning team
       if (o && o.winner !== undefined && o.points) {
-        const winTeam = o.winner % 2; // 0 or 1
+        const winTeam = o.winner % 2;
         matchScore[winTeam] += o.points;
+        lastWinTeam = winTeam;
         // Check for match win — reset if match over
         if (matchScore[0] >= MATCH_TARGET || matchScore[1] >= MATCH_TARGET) {
-          // match over — will be shown in UI, reset next game
           matchScore = [0, 0];
           scoreMultiplier = 1;
+          lastWinTeam = null; // new match starts fresh
         }
+      } else if (o && o.type === 'tie') {
+        // Tie — same team gets to choose again (lastWinTeam unchanged)
+        // If first game tied, lastWinTeam stays null → highest double next
       }
       // Update multiplier for NEXT game
       if (o && o.type === 'tie') {
-        scoreMultiplier *= 2; // stack dobradas
+        scoreMultiplier *= 2;
       } else if (!o || o.type !== 'tie') {
         scoreMultiplier = 1;
       }
