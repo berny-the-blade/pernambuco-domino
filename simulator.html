@@ -992,8 +992,10 @@
         grade = 'bad';
       } else if (userTile.id === aiTile.id && userSide === aiSide) {
         grade = 'perfect';
-      } else if (equityLoss < 0.05) {
-        grade = 'perfect'; // negligible difference
+      } else if (userTile.id === aiTile.id) {
+        grade = equityLoss < 0.02 ? 'perfect' : 'good'; // right tile, suboptimal side
+      } else if (equityLoss < 0.02) {
+        grade = 'perfect'; // truly negligible — within MC noise
       } else if (equityLoss < 0.15) {
         grade = 'good';    // inaccuracy
       } else if (equityLoss < 0.40) {
@@ -1074,7 +1076,11 @@
       const pNames = PLAYER_NAMES_FULL;
 
       if (grade === 'perfect') {
-        lines.push({ type: 'success', text: `You picked the optimal play! [${aiTile.left}|${aiTile.right}] on ${aiSide}. Well done.` });
+        if (userTile.id === aiTile.id) {
+          lines.push({ type: 'success', text: `You picked the optimal play! [${userTile.left}|${userTile.right}] on ${userSide || aiSide}. Well done.` });
+        } else {
+          lines.push({ type: 'success', text: `Great pick! [${userTile.left}|${userTile.right}] on ${userSide} is essentially equal to [${aiTile.left}|${aiTile.right}] (negligible difference).` });
+        }
         if (aiReasons.length > 0) {
           lines.push({ type: 'info', text: `Why it's best: ${aiReasons.join('. ')}` });
         }
@@ -1549,7 +1555,7 @@
       // Equity loss display
       const eqLoss = r.equityLoss || 0;
       const eqSrc = r.equityLossSource || 'heuristic';
-      const eqColor = eqLoss < 0.05 ? '#22c55e' : eqLoss < 0.15 ? '#86efac' : eqLoss < 0.4 ? '#eab308' : '#ef4444';
+      const eqColor = eqLoss < 0.02 ? '#22c55e' : eqLoss < 0.15 ? '#86efac' : eqLoss < 0.4 ? '#eab308' : '#ef4444';
 
       // MC data for header
       const mcBest = r.mcResults && r.mcResults.length > 0 ? r.mcResults[0] : null;
@@ -1571,8 +1577,10 @@
                 <span class="text-xs text-slate-400">[${r.userTile.left}|${r.userTile.right}]</span>
                 <span class="text-xs text-slate-500">&rarr;</span>
                 <span class="text-xs text-slate-400">[${r.aiTile.left}|${r.aiTile.right}]</span>`}`;
-          })() : `<span class="text-xs font-mono text-emerald-400">EL: 0.00</span>
-            ${mcBest ? `<span class="text-xs font-mono text-emerald-400">E[pts]: ${fmtEP(mcBest.expectedPoints)}</span>` : ''}`}
+          })() : `<span class="text-xs font-mono text-emerald-400">EL: ${eqLoss.toFixed(2)}</span>
+            <span class="text-xs text-slate-400">[${r.userTile.left}|${r.userTile.right}]</span>
+            ${mcUser ? `<span class="text-xs font-mono text-emerald-400">${fmtEP(mcUser.expectedPoints)}</span>` : ''}
+            ${mcBest ? `<span class="text-xs font-mono text-emerald-400">E[pts]best: ${fmtEP(mcBest.expectedPoints)}</span>` : ''}`}
           <span class="text-xs text-slate-600 ml-auto">Match: ${matchScore[0]}-${matchScore[1]} | ME: ${(getMatchEquity(matchScore[0], matchScore[1]) * 100).toFixed(0)}%</span>
         </div>
 
@@ -2375,7 +2383,7 @@
         const eqLoss = best && played ? best.expectedPoints - played.expectedPoints : 0;
         let grade;
         if (best && s.tile.id === best.tile.id) grade = 'perfect';
-        else if (eqLoss < 0.05) grade = 'perfect';
+        else if (eqLoss < 0.02) grade = 'perfect';
         else if (eqLoss < 0.15) grade = 'good';
         else if (eqLoss < 0.40) grade = 'ok';
         else grade = 'bad';
