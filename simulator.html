@@ -283,6 +283,43 @@
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
           if (estPHand <= 2 && estPHand > 0) { ss += 15; sr.push(`Partner close (est. ${estPHand} tiles)`); }
 
+          // === CLOSING BONUS ===
+          // Instant win: playing this tile empties our hand
+          const remainAfter = hand.length - 1;
+          if (remainAfter === 0) {
+            // We go out immediately! Massive bonus.
+            const isD = tile.left === tile.right;
+            const wasBoth = bLen > 0 && couldPlayBothEnds(tile, lE, rE);
+            let closePts = 1;
+            if (isD && wasBoth) closePts = 4;
+            else if (isD) closePts = 2;
+            else if (wasBoth) closePts = 3;
+            ss += 200 + closePts * 30; // dominating bonus
+            sr.push(`GO OUT! Win ${closePts}pt${closePts > 1 ? ' (' + (isD && wasBoth ? 'cruzada' : isD ? 'carroca' : wasBoth ? 'la-e-lo' : 'normal') + ')' : ''}`);
+          }
+          // Near-close: playing this tile leaves 1 tile, check if it can play on new ends
+          else if (remainAfter === 1) {
+            const lastTile = hand.find(t => t.id !== tile.id);
+            if (lastTile) {
+              const canPlayLast = (lastTile.left === newEnd || lastTile.right === newEnd ||
+                                   lastTile.left === otherEnd || lastTile.right === otherEnd);
+              if (canPlayLast) {
+                ss += 80; sr.push(`Sets up going out next turn with [${lastTile.left}|${lastTile.right}]`);
+              } else {
+                ss -= 30; sr.push(`STRANDS last tile [${lastTile.left}|${lastTile.right}] — can't play on ${newEnd}/${otherEnd}`);
+              }
+            }
+          }
+          // 2 tiles remaining: check coverage of new ends
+          else if (remainAfter === 2) {
+            const others = hand.filter(t => t.id !== tile.id);
+            const coverCount = others.filter(t =>
+              t.left === newEnd || t.right === newEnd || t.left === otherEnd || t.right === otherEnd
+            ).length;
+            if (coverCount === 2) { ss += 25; sr.push('Both remaining tiles playable on new ends'); }
+            else if (coverCount === 0) { ss -= 15; sr.push('Neither remaining tile matches new ends'); }
+          }
+
           options.push({ tile, score: ss, reasons: sr, side });
         }
         return options;
@@ -338,6 +375,8 @@
 
     // ========== SIMULATION ENGINE ==========
 
+    const MC_SIMS_GENERATE = 30; // MC sims during game generation (endgame only)
+
     function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight, autoPlayer) {
       const hands = initHands.map(h => h.map(t => ({...t})));
       let board = [...initBoard], lE = initLeft, rE = initRight;
@@ -359,7 +398,32 @@
         moveNum++;
         // Get ALL scored options for this player
         const allOptions = smartAI(hands[cur], lE, rE, board.length, cur, knowledge, true);
-        const decision = allOptions.length > 0 ? allOptions[0] : null;
+        let decision = allOptions.length > 0 ? allOptions[0] : null;
+
+        // MC-assisted play: when player has ≤3 tiles and multiple options, use MC to pick
+        if (decision && hands[cur].length <= 3 && allOptions.length > 1) {
+          const snap = {
+            hands: hands.map(h => h.map(t => ({...t}))),
+            board: board.map(t => ({...t})),
+            leftEnd: lE, rightEnd: rE,
+            knowledge: knowledge.clone()
+          };
+          try {
+            const mcRes = monteCarloEval(snap, cur, MC_SIMS_GENERATE);
+            if (mcRes.length > 0) {
+              // Find the matching heuristic option for the MC best tile+side
+              const mcBest = mcRes[0];
+              const matched = allOptions.find(o => o.tile.id === mcBest.tile.id && o.side === mcBest.side)
+                           || allOptions.find(o => o.tile.id === mcBest.tile.id);
+              if (matched) {
+                decision = matched;
+                if (!decision.reasons.includes('MC override')) {
+                  decision.reasons = [...decision.reasons, `MC override (E[pts]:${mcBest.expectedPoints.toFixed(2)})`];
+                }
+              }
+            }
+          } catch(e) { /* MC failed, keep heuristic decision */ }
+        }
 
         if (decision) {
           passCount = 0;
