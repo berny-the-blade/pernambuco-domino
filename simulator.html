@@ -46,7 +46,7 @@
     .mode-btn.active { ring: 2px; box-shadow: 0 0 0 2px #22c55e; }
     .prob-cell { width: 20px; height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; }
     .strength-bar { height: 8px; border-radius: 4px; transition: width 0.5s, background 0.5s; }
-    .tab { padding: 6px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600; font-size: 12px; border: 1px solid #334155; border-bottom: none; }
+    .tab { padding: 6px 10px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600; font-size: 12px; border: 1px solid #334155; border-bottom: none; }
     .tab.active { background: #1e293b; color: #22c55e; border-color: #22c55e; }
     .tab:not(.active) { background: #0f172a; color: #64748b; }
     .grade-badge { padding: 2px 8px; border-radius: 12px; font-weight: 700; font-size: 11px; }
@@ -222,7 +222,7 @@
           // Suit control
           const myCount = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd || x.left === otherEnd || x.right === otherEnd)).length;
           ss += myCount * 15;
-          if (myCount > 0) sr.push(`${myCount} more tiles match ends ${newEnd}/${otherEnd}`);
+          if (myCount > 0) sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]`);
 
           // Blocking
           if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp1)}`); }
@@ -249,9 +249,12 @@
           if (pAff > 0) { ss += pAff * 8; sr.push(`Partner played ${partnerDetails.join(' & ')} — may have more`); }
           if (knowledge.cantHave[partner].has(newEnd)) { ss -= 10; sr.push(`Partner can't have ${newEnd}`); }
 
-          // Dump heavy
-          if (tile.left + tile.right >= 9) { ss += (tile.left+tile.right)*2; sr.push(`Dump heavy (${tile.left+tile.right} pips)`); }
-          else ss += (tile.left+tile.right)*2;
+          // Pip weight — prefer playing heavier tiles earlier
+          const tilePips = tile.left + tile.right;
+          ss += tilePips * 2;
+          if (tilePips >= 9) sr.push(`Dump heavy tile (${tilePips} pips)`);
+          else if (tilePips >= 6) sr.push(`Sheds ${tilePips} pips`);
+
 
           // Play doubles early
           if (tile.left === tile.right) { ss += 12; sr.push('Clear inflexible double'); }
@@ -277,18 +280,7 @@
 
       scored.sort((a, b) => b.score - a.score);
 
-      // Deduplicate: keep best side per tile
-      if (returnAll) {
-        const seen = new Set();
-        const deduped = [];
-        for (const opt of scored) {
-          if (!seen.has(opt.tile.id)) {
-            seen.add(opt.tile.id);
-            deduped.push(opt);
-          }
-        }
-        return deduped;
-      }
+      if (returnAll) return scored;
       return scored[0] || null;
     }
 
@@ -670,7 +662,8 @@
     let autoPlayTimer = null;
     let autoPlaySpeed = 1500;
     let gameMode = 'watch'; // 'watch' | 'quiz'
-    let rightPanelTab = 'reasoning'; // 'reasoning' | 'probability' | 'stats'
+    let scoreMultiplier = 1; // dobrada: doubles after tied block
+    let rightPanelTab = 'reasoning'; // 'reasoning' | 'probability' | 'stats' | 'guide'
     let deepAnalysis = false;        // Monte Carlo toggle
     let mcResults = null;            // cached MC results for current step
     let mcRunning = false;           // is MC currently computing?
@@ -776,10 +769,9 @@
       const scoreDiff = aiScore - userScore;
       let grade;
       if (userTile.id === aiTile.id && userSide === aiSide) grade = 'perfect';
-      else if (userTile.id === aiTile.id) grade = 'good';
-      else if (scoreDiff <= 5) grade = 'perfect';
-      else if (scoreDiff <= 15) grade = 'good';
-      else if (scoreDiff <= 30) grade = 'ok';
+      else if (userTile.id === aiTile.id) grade = 'good'; // right tile, suboptimal side
+      else if (scoreDiff <= 5) grade = 'good';  // different tile but very close
+      else if (scoreDiff <= 15) grade = 'ok';
       else grade = 'bad';
 
       const canP = canPlay(userTile, snap.leftEnd, snap.rightEnd, snap.board.length);
@@ -849,7 +841,7 @@
       const pNames = PLAYER_NAMES_FULL;
 
       if (grade === 'perfect') {
-        lines.push({ type: 'success', text: 'You picked the optimal play! Well done.' });
+        lines.push({ type: 'success', text: `You picked the optimal play! [${aiTile.left}|${aiTile.right}] on ${aiSide}. Well done.` });
         if (aiReasons.length > 0) {
           lines.push({ type: 'info', text: `Why it's best: ${aiReasons.join('. ')}` });
         }
@@ -1039,14 +1031,14 @@
         <div class="max-w-7xl mx-auto p-3">
           <!-- Header -->
           <div class="flex items-center justify-between mb-3">
-            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano — Strategy Trainer</h1>
+            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano — Strategy Trainer${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">DOBRADA x${currentGame.outcome.multiplier}</span>` : ''}</h1>
             <div class="flex gap-2 items-center">
               <div class="flex gap-1 mr-2">
                 <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch Mode</button>
                 <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">Quiz Mode</button>
                 <button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>
               </div>
-              <button class="btn btn-yellow text-sm" onclick="newGame()">New Game</button>
+              <button class="btn btn-yellow text-sm" onclick="newGame()">${scoreMultiplier > 1 ? `New Game (x${scoreMultiplier})` : 'New Game'}</button>
             </div>
           </div>
 
@@ -1061,8 +1053,8 @@
                 <div class="w-24 flex-shrink-0">
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
-                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] flex items-center justify-center relative">
-                  <div class="flex flex-wrap gap-1 items-center justify-center">
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] relative overflow-hidden" id="board-area">
+                  <div class="board-snake" id="board-snake">
                     ${renderBoard(snap)}
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
@@ -1112,7 +1104,7 @@
                 </div>
                 ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-3 py-1.5 text-center border border-emerald-500">
                   <div class="text-xs text-emerald-300">Result</div>
-                  <div class="text-sm font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt)` : ''}</div>
+                  <div class="text-sm font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt${snap.outcome.multiplier > 1 ? ' DOB' : ''})` : ''}</div>
                   ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">${pn(snap.outcome.winner)} (${pTeams[snap.outcome.winner]})</div>` : ''}
                 </div>` : ''}
               </div>
@@ -1126,10 +1118,12 @@
                   <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">Reasoning</div>
                   <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
+                  <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
                 </div>
 
                 ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
+                  rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
               </div>
             </div>
@@ -1149,10 +1143,15 @@
 
     function renderOutcomeOverlay(snap, pTeams) {
       const o = snap.outcome;
+      const mult = o.multiplier || 1;
+      const dobradaTag = mult > 1 ? `<div class="text-xs text-orange-400 mt-1">DOBRADA x${mult} applied!</div>` : '';
+      const nextDobrada = o.type === 'tie' ? `<div class="text-xs text-orange-300 mt-1">Next game is DOBRADA (x${scoreMultiplier} points)!</div>` : '';
       return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
         <div class="text-center">
           <div class="text-3xl font-bold text-emerald-400 mb-1">${o.winType || o.type.toUpperCase()}</div>
-          ${o.winner !== undefined ? `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt</div>` : `<div class="text-lg text-yellow-400">Tied!</div>`}
+          ${o.winner !== undefined ?
+            `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
+            `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
         </div>
       </div>`;
     }
@@ -1160,13 +1159,19 @@
     function renderPlayerArea(playerIdx, snap, names, teams, colors) {
       const hand = snap.hands[playerIdx] || [];
       const isActive = snap.currentPlayer === playerIdx;
+      const justPassed = snap.action === 'pass' && snap.player === playerIdx;
+      const justPlayed = snap.action === 'play' && snap.player === playerIdx;
+      const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
+      const highlight = autoPlayed || justPlayed;
 
       return `
-        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 ${justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700'} relative">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
-            <span class="text-xs ${isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${isActive ? 'PLAYING' : `${hand.length} tiles`}</span>
+            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : justPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'OPENED' : justPlayed ? 'PLAYED' : isActive ? 'PLAYING' : `${hand.length} tiles`}</span>
           </div>
+          ${justPassed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-red-400 font-black text-2xl animate-pulse drop-shadow-lg" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">PASSED!</span></div>` : ''}
+          ${autoPlayed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-yellow-400 font-black text-lg drop-shadow-lg" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">[${currentGame.autoTile.left}|${currentGame.autoTile.right}] OPENED</span></div>` : ''}
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[50px]">
             ${hand.map(() => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
           </div>
@@ -1177,6 +1182,7 @@
       const hand = snap.hands[0] || [];
       const isActive = snap.currentPlayer === 0;
       const playerIdx = 0;
+      const justPassed = snap.action === 'pass' && snap.player === 0;
 
       // Determine tile classes
       const getTileCls = (t) => {
@@ -1198,12 +1204,16 @@
         return '';
       };
 
+      const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === 0;
+
       return `
-        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 relative ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 relative ${justPassed ? 'border-red-500' : autoPlayed ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold" style="color:${colors[0]}">${names[0]} (${teams[0]})</span>
-            <span class="text-xs ${isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${isActive ? 'YOUR TURN' : `${hand.length} tiles`}</span>
+            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'YOU OPENED' : isActive ? 'YOUR TURN' : `${hand.length} tiles`}</span>
           </div>
+          ${justPassed ? `<div class="text-center mb-1"><span class="text-red-400 font-black text-lg animate-pulse" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">YOU PASSED!</span></div>` : ''}
+          ${autoPlayed ? `<div class="text-center mb-1"><span class="text-yellow-400 font-bold text-sm" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">You opened with [${currentGame.autoTile.left}|${currentGame.autoTile.right}]</span></div>` : ''}
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
             ${hand.map(t => tileHTML(t, '', 'v', getTileCls(t), getTileClick(t))).join('')}
           </div>
@@ -1296,17 +1306,17 @@
         ${r.allOptions && r.allOptions.length > 1 ? `
         <div class="border-t border-slate-700 pt-1.5 mt-1.5">
           <div class="text-xs text-slate-500 mb-1">Tile ranking:</div>
-          ${r.allOptions.slice(0, 5).map((o, i) => {
+          ${r.allOptions.slice(0, 6).map((o, i) => {
             const q = scoreToQuality(o.score, allScores);
-            const isAi = o.tile.id === r.aiTile.id;
-            const isUser = o.tile.id === r.userTile.id;
+            const isAi = o.tile.id === r.aiTile.id && o.side === r.aiSide;
+            const isUser = o.tile.id === r.userTile.id && o.side === r.userSide;
             const marker = isAi ? ' (best)' : isUser ? ' (yours)' : '';
             const mc = r.mcResults ? r.mcResults.find(m => m.tile.id === o.tile.id) : null;
             const mcStr = mc ? `<span class="text-blue-400 font-mono">${(mc.winRate*100).toFixed(0)}%</span>` : '';
             return `<div class="text-xs mb-1">
               <div class="flex items-center gap-1">
                 <span class="font-mono w-3 text-slate-500">${i+1}.</span>
-                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'}">[${o.tile.left}|${o.tile.right}]</span>
+                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'}">[${o.tile.left}|${o.tile.right}] ${o.side}</span>
                 <span class="${q.cls}">${q.label}</span>
                 ${mcStr}
                 ${marker ? `<span class="${isAi ? 'text-emerald-500' : 'text-yellow-500'}">${marker}</span>` : ''}
@@ -1345,13 +1355,55 @@
     }
 
     function renderBoard(snap) {
-      if (!snap.board || snap.board.length === 0) return '<div class="text-green-700 text-sm">Empty board</div>';
-      return snap.board.map((t, i) => {
+      if (!snap.board || snap.board.length === 0) return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
+
+      const TW = 49; // horizontal tile width + gap
+      const TH = 27; // horizontal tile height + gap
+      const DW = 27; // double (vertical) width + gap
+      const DH = 49; // double (vertical) height
+
+      // Calculate positions in a snake pattern
+      const boardEl = document.getElementById('board-area');
+      const maxW = boardEl ? boardEl.clientWidth - 30 : 520; // available width minus padding
+
+      const positions = [];
+      let x = 0, y = 0, dir = 1; // dir: 1=right, -1=left
+
+      for (let i = 0; i < snap.board.length; i++) {
+        const t = snap.board[i];
         const isD = t.left === t.right;
-        const orient = isD ? 'v' : 'h';
+        const w = isD ? DW : TW;
+        const h = isD ? DH : TH;
+
+        // Check if tile would go out of bounds
+        const nextX = dir === 1 ? x + w : x - w;
+        if ((dir === 1 && x + w > maxW && i > 0) || (dir === -1 && x - w < 0 && i > 0)) {
+          // Move down and reverse direction
+          y += Math.max(TH, DH) + 4;
+          dir *= -1;
+          // After reversing, place at current x
+          if (dir === 1) x = 0;
+          else x = maxW - w;
+        }
+
+        positions.push({ x: dir === -1 ? x - w : x, y, w, h, tile: t, isD });
+
+        if (dir === 1) x += w + 1;
+        else x -= (w + 1);
+      }
+
+      // Center vertically
+      const totalH = positions.length > 0 ? Math.max(...positions.map(p => p.y + p.h)) : 0;
+      const containerH = Math.max(totalH + 10, 180);
+
+      const tiles = positions.map((p, i) => {
+        const t = p.tile;
+        const orient = p.isD ? 'v' : 'h';
         const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
-        return `<div class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', orient)}</div>`;
+        return `<div style="position:absolute;left:${p.x}px;top:${p.y}px" class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', orient)}</div>`;
       }).join('');
+
+      return `<div style="position:relative;width:100%;height:${containerH}px">${tiles}</div>`;
     }
 
     function renderHandStrength(hs, tileCount) {
@@ -1400,12 +1452,12 @@
           ${snap.allOptions && snap.allOptions.length > 1 ? `
           <div class="mt-2 pt-1.5 border-t border-slate-700">
             <div class="text-xs text-slate-500 mb-1">Other options (best to worst):</div>
-            ${snap.allOptions.slice(0, 5).map((o, i) => {
+            ${snap.allOptions.slice(0, 6).map((o, i) => {
               const q = scoreToQuality(o.score, allScores);
               return `<div class="text-xs ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'} mb-1">
                 <div class="flex items-center gap-1">
                   <span class="font-mono w-3">${i+1}.</span>
-                  <span>[${o.tile.left}|${o.tile.right}]</span>
+                  <span>[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
                   <span class="${q.cls}">${q.label}</span>
                 </div>
                 ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
@@ -1764,6 +1816,137 @@
       `;
     }
 
+    function renderGuidePanel() {
+      return `
+        <div class="space-y-2 flex-1 overflow-y-auto text-xs">
+          <!-- The Big 5 -->
+          <div class="bg-slate-900 rounded-lg p-3">
+            <div class="text-emerald-400 font-bold text-sm mb-2">&#9733; The Big 5 — Core Rules</div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">1</span>
+                <span class="text-slate-200 font-semibold">Play doubles early</span>
+              </div>
+              <div class="text-slate-400 ml-5">Doubles only play on one number. The longer you hold them, the more likely you get stuck. Play them as soon as you can.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">2</span>
+                <span class="text-slate-200 font-semibold">Track passes religiously</span>
+              </div>
+              <div class="text-slate-400 ml-5">When someone passes, they have ZERO tiles of both end numbers. That's 2 numbers eliminated from their hand. After 2 passes you know 4 numbers they lack.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">3</span>
+                <span class="text-slate-200 font-semibold">Feed your partner</span>
+              </div>
+              <div class="text-slate-400 ml-5">Leave end numbers your partner has played. If partner played [3|5], leave 3 or 5 open. You're a team — help them go out first.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">4</span>
+                <span class="text-slate-200 font-semibold">Block opponents who passed</span>
+              </div>
+              <div class="text-slate-400 ml-5">If an opponent passed on 4, try to keep 4 on the board. They'll be forced to pass again. Stack multiple blocked numbers to lock them out.</div>
+            </div>
+
+            <div class="mb-0.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">5</span>
+                <span class="text-slate-200 font-semibold">Control the suit</span>
+              </div>
+              <div class="text-slate-400 ml-5">If you have 3+ tiles of one number, play that number. You have more options while opponents have fewer. Suit dominance = board control.</div>
+            </div>
+          </div>
+
+          <!-- The Next 5 -->
+          <div class="bg-slate-900 rounded-lg p-3">
+            <div class="text-blue-400 font-bold text-sm mb-2">&#9650; The Next 5 — Advanced</div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">6</span>
+                <span class="text-slate-200 font-semibold">Dump heavy tiles when losing</span>
+              </div>
+              <div class="text-slate-400 ml-5">If opponents might go out, play your highest-pip tiles to minimize points they score. [6|6] in hand when blocked = disaster.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">7</span>
+                <span class="text-slate-200 font-semibold">Read partner's opening tile</span>
+              </div>
+              <div class="text-slate-400 ml-5">Partner's first play signals their strong suit. If they open [4|6], they likely have more 4s and 6s. Protect those numbers on the board.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">8</span>
+                <span class="text-slate-200 font-semibold">Keep options open</span>
+              </div>
+              <div class="text-slate-400 ml-5">Choose tiles that connect to numbers you still hold. Playing [2|5] when you have more 2s is better — you keep access to the board.</div>
+            </div>
+
+            <div class="mb-2.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">9</span>
+                <span class="text-slate-200 font-semibold">Count the tiles</span>
+              </div>
+              <div class="text-slate-400 ml-5">Each number appears on 7 tiles (0-6 paired with it). Track which have been played. If 6 of 7 "fives" are gone, don't leave 5 open for opponents.</div>
+            </div>
+
+            <div class="mb-0.5">
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class="bg-blue-900 text-blue-300 px-1.5 py-0.5 rounded font-bold" style="font-size:10px">10</span>
+                <span class="text-slate-200 font-semibold">Score the bonus points</span>
+              </div>
+              <div class="text-slate-400 ml-5">Normal win = 1pt. Carroca (last tile is a double) = 2pts. La-e-lo (opponents all passed) = 3pts. Cruzada (connects both ends) = 4pts. Play for these when close to 6.</div>
+            </div>
+          </div>
+
+          <!-- Quick Reference -->
+          <div class="bg-slate-900 rounded-lg p-3">
+            <div class="text-yellow-400 font-bold text-sm mb-2">&#9889; Quick Decision Checklist</div>
+            <div class="text-slate-300 space-y-1">
+              <div>&#10102; Can I play a double? <span class="text-slate-500">&#8594; Play it</span></div>
+              <div>&#10103; Did an opponent pass? <span class="text-slate-500">&#8594; Block that number</span></div>
+              <div>&#10104; Can I feed my partner? <span class="text-slate-500">&#8594; Leave their number open</span></div>
+              <div>&#10105; Which tile keeps MY options open? <span class="text-slate-500">&#8594; Pick that one</span></div>
+              <div>&#10106; Am I losing? <span class="text-slate-500">&#8594; Dump heaviest tile</span></div>
+            </div>
+          </div>
+
+          <!-- Scoring -->
+          <div class="bg-slate-900 rounded-lg p-3">
+            <div class="text-purple-400 font-bold text-sm mb-2">&#127942; Scoring Reference</div>
+            <div class="grid grid-cols-2 gap-1 text-slate-300">
+              <div class="flex items-center gap-1"><span class="text-slate-500 w-4">1</span> Normal win</div>
+              <div class="text-slate-500 text-xs">Last tile played normally</div>
+              <div class="flex items-center gap-1"><span class="text-yellow-400 w-4">2</span> Carroca</div>
+              <div class="text-slate-500 text-xs">Last tile is a double</div>
+              <div class="flex items-center gap-1"><span class="text-orange-400 w-4">3</span> La-e-lo</div>
+              <div class="text-slate-500 text-xs">All 3 opponents passed</div>
+              <div class="flex items-center gap-1"><span class="text-red-400 w-4">4</span> Cruzada</div>
+              <div class="text-slate-500 text-xs">Last tile connects both ends</div>
+              <div class="flex items-center gap-1"><span class="text-slate-400 w-4">&#215;</span> Block (tie)</div>
+              <div class="text-slate-500 text-xs">Lowest pip team wins (1pt)</div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-slate-700">
+              <div class="flex items-center gap-1 text-orange-400 font-semibold text-xs mb-0.5">DOBRADA (doubled game)</div>
+              <div class="text-slate-500 text-xs">When a block is tied (equal pips), nobody scores. The NEXT game's points are doubled. Multiple ties stack: x2, x4, x8...</div>
+            </div>
+          </div>
+
+          <div class="text-center text-slate-600 text-xs py-1">First to 6 points wins the match</div>
+        </div>
+      `;
+    }
+
     function renderStatsPanel() {
       const total = stats.totalMoves;
       const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
@@ -1912,6 +2095,27 @@
       stats.games++;
       saveStats();
       currentGame = generateGame();
+      // Apply dobrada multiplier to outcome points
+      const o = currentGame.outcome;
+      if (o && o.points) {
+        o.basePoints = o.points;
+        o.points = o.points * scoreMultiplier;
+        o.multiplier = scoreMultiplier;
+      }
+      if (o && o.type === 'tie') {
+        o.multiplier = scoreMultiplier;
+      }
+      // Sync multiplier to last snapshot's outcome (overlay reads from snap.outcome)
+      const lastSnap = currentGame.snapshots[currentGame.snapshots.length - 1];
+      if (lastSnap && lastSnap.outcome) {
+        lastSnap.outcome = o;
+      }
+      // Update multiplier for NEXT game
+      if (o && o.type === 'tie') {
+        scoreMultiplier *= 2; // stack dobradas
+      } else {
+        scoreMultiplier = 1;
+      }
       currentStep = 0;
       render();
     }
