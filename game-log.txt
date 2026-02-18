@@ -1,0 +1,948 @@
+╔══════════════════════════════════════════════════════╗
+║  DOMINO PERNAMBUCANO — STRATEGIC BRAIN SIMULATOR    ║
+╚══════════════════════════════════════════════════════╝
+
+
+============================================================
+  PART 1: VERBOSE GAME WITH MOVE-BY-MOVE REASONING
+============================================================
+
+──────────────────────────────────────────────────
+  MATCH 1 — Smart AI (all players)
+──────────────────────────────────────────────────
+
+===== ROUND 1 =====
+  Hands dealt:
+    P0 (T1): [1|4] [2|6] [0|0] [2|4] [5|6] [0|2]
+    P1 (T2): [0|5] [0|1] [3|6] [3|3] [4|4] [2|5]
+    P2 (T1): [0|6] [5|5] [2|2] [1|2] [2|3] [4|6]
+    P3 (T2): [1|5] [1|6] [4|5] [6|6] [0|4] [0|3]
+  P3 auto-plays [6|6] (highest double)
+  #1 P0(T1): plays [2|6] on left → ends [2|6] (5 left)
+         WHY: [2|6] (score=61): I have 3 more tiles for ends 2/6
+  #2 P1(T2): plays [3|6] on right → ends [2|3] (5 left)
+         WHY: [3|6] (score=68): I have 2 more tiles for ends 2/3; Dump heavy tile (9 pips); Sets up isolated double [3|3]
+  #3 P2(T1): plays [2|3] on right → ends [2|2] (5 left)
+         WHY: [2|3] (score=86): I have 4 more tiles for ends 2/2; Partner played 2 tiles with 2/2
+  #4 P3(T2): PASSES — can't have {2}
+  #5 P0(T1): plays [0|2] on left → ends [0|2] (4 left)
+         WHY: [0|2] (score=62): I have 2 more tiles for ends 0/2; Partner played 1 tiles with 0/2; Sets up isolated double [0|0]
+  #6 P1(T2): plays [2|5] on right → ends [0|5] (4 left)
+         WHY: [2|5] (score=59): I have 3 more tiles for ends 0/5
+  #7 P2(T1): plays [0|6] on left → ends [6|5] (4 left)
+         WHY: [0|6] (score=70): I have 2 more tiles for ends 6/5; Partner played 1 tiles with 6/5; Sets up isolated double [5|5]
+  #8 P3(T2): plays [1|6] on left → ends [1|5] (4 left)
+         WHY: [1|6] (score=67): I have 3 more tiles for ends 1/5; Partner played 1 tiles with 1/5
+  #9 P0(T1): plays [5|6] on right → ends [1|6] (3 left)
+         WHY: [5|6] (score=45): I have 1 more tiles for ends 1/6; Partner played 1 tiles with 1/6; Dump heavy tile (11 pips)
+  #10 P1(T2): plays [0|1] on left → ends [0|6] (3 left)
+         WHY: [0|1] (score=17): I have 1 more tiles for ends 0/6; Partner played 1 tiles with 0/6; Few tiles left with 6 (1)
+  #11 P2(T1): plays [4|6] on right → ends [0|4] (3 left)
+         WHY: [4|6] (score=28): Partner played 1 tiles with 0/4; Dump heavy tile (10 pips)
+  #12 P3(T2): plays [4|5] on right → ends [0|5] (3 left)
+         WHY: [4|5] (score=79): I have 3 more tiles for ends 0/5; Partner played 2 tiles with 0/5; Dump heavy tile (9 pips)
+  #13 P0(T1): plays [0|0] on left → ends [0|5] (2 left)
+         WHY: [0|0] (score=20): Partner played 1 tiles with 0/5; Play double early (inflexible)
+  #14 P1(T2): plays [0|5] on left → ends [5|5] (2 left)
+         WHY: [0|5] (score=26): Partner played 2 tiles with 5/5
+  #15 P2(T1): plays [5|5] on left → ends [5|5] (2 left)
+         WHY: [5|5] (score=63): Partner played 2 tiles with 5/5; Dump heavy tile (10 pips); Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #16 P3(T2): plays [1|5] on left → ends [1|5] (2 left)
+         WHY: [1|5] (score=51): Partner played 3 tiles with 1/5; Partner close to winning (est. 2 tiles)
+  #17 P0(T1): plays [1|4] on left → ends [4|5] (1 left)
+         WHY: [1|4] (score=48): I have 1 more tiles for ends 4/5; Partner played 2 tiles with 4/5; Few tiles left with 5 (1); Partner close to winning (est. 2 tiles)
+  #18 P1(T2): plays [4|4] on left → ends [4|5] (1 left)
+         WHY: [4|4] (score=44): Partner played 3 tiles with 4/5; Play double early (inflexible); Few tiles left with 5 (1)
+  #19 P2(T1): PASSES — can't have {4,5}
+  #20 P3(T2): plays [0|4] on left → ends [0|5] (1 left)
+         WHY: [0|4] (score=62): I have 1 more tiles for ends 0/5; Partner played 4 tiles with 0/5; Few tiles left with 5 (1); Partner close to winning (est. 1 tiles)
+  #21 P0(T1): PASSES — can't have {0,5}
+  #22 P1(T2): PASSES — can't have {0,5}
+  #23 P2(T1): PASSES — can't have {4,5,0}
+  #24 P3(T2): plays [0|3] on left → ends [3|5] (0 left)
+         WHY: [0|3] (score=27): Partner played 3 tiles with 3/5; Partner can't have 5; Few tiles left with 5 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P3 (T2) wins 1pts (normal) — Score: T1=0 T2=1
+
+===== ROUND 2 =====
+  Hands dealt:
+    P0 (T1): [2|3] [2|5] [3|6] [0|3] [0|5] [1|5]
+    P1 (T2): [0|4] [0|6] [4|6] [2|2] [5|6] [6|6]
+    P2 (T1): [3|5] [1|2] [4|4] [1|4] [1|6] [2|4]
+    P3 (T2): [3|4] [5|5] [0|1] [1|3] [2|6] [0|0]
+  P3 (T2) starts (winning team choice)
+  #1 P3(T2): plays [5|5] on first → ends [5|5] (5 left)
+         WHY: Open with [5|5]: dominant suit signal (suit 5=1, suit 5=1)
+  #2 P0(T1): plays [2|5] on left → ends [2|5] (5 left)
+         WHY: [2|5] (score=59): I have 3 more tiles for ends 2/5
+  #3 P1(T2): plays [5|6] on right → ends [2|6] (5 left)
+         WHY: [5|6] (score=102): I have 4 more tiles for ends 2/6; Dump heavy tile (11 pips); Sets up isolated double [2|2]
+  #4 P2(T1): plays [1|6] on right → ends [2|1] (5 left)
+         WHY: [1|6] (score=82): I have 4 more tiles for ends 2/1; Partner played 1 tiles with 2/1
+  #5 P3(T2): plays [2|6] on left → ends [6|1] (4 left)
+         WHY: [2|6] (score=54): I have 2 more tiles for ends 6/1; Partner played 1 tiles with 6/1
+  #6 P0(T1): plays [3|6] on left → ends [3|1] (4 left)
+         WHY: [3|6] (score=71): I have 3 more tiles for ends 3/1; Partner played 1 tiles with 3/1; Dump heavy tile (9 pips)
+  #7 P1(T2): PASSES (no 3 or 1) — now known: can't have {3,1}
+  #8 P2(T1): plays [1|4] on right → ends [3|4] (4 left)
+         WHY: [1|4] (score=63): I have 3 more tiles for ends 3/4; Partner played 1 tiles with 3/4
+  #9 P3(T2): plays [1|3] on left → ends [1|4] (3 left)
+         WHY: [1|3] (score=28): I have 2 more tiles for ends 1/4; Partner can't have 1
+  #10 P0(T1): plays [1|5] on left → ends [5|4] (3 left)
+         WHY: [1|5] (score=35): I have 1 more tiles for ends 5/4; Partner played 1 tiles with 5/4
+  #11 P1(T2): plays [4|6] on right → ends [5|6] (4 left)
+         WHY: [4|6] (score=66): I have 2 more tiles for ends 5/6; Partner played 2 tiles with 5/6; Dump heavy tile (10 pips)
+  #12 P2(T1): plays [3|5] on left → ends [3|6] (3 left)
+         WHY: [3|5] (score=32): Partner played 2 tiles with 3/6
+  #13 P3(T2): plays [3|4] on left → ends [4|6] (2 left)
+         WHY: [3|4] (score=38): Partner played 3 tiles with 4/6
+  #14 P0(T1): PASSES (no 4 or 6) — now known: can't have {4,6}
+  #15 P1(T2): plays [6|6] on right → ends [4|6] (3 left)
+         WHY: [6|6] (score=122): I have 2 more tiles for ends 4/6; Opp 0 blocked on 4/6; Partner played 2 tiles with 4/6; Dump heavy tile (12 pips); Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #16 P2(T1): plays [2|4] on left → ends [2|6] (2 left)
+         WHY: [2|4] (score=25): I have 1 more tiles for ends 2/6; Partner played 2 tiles with 2/6; Partner can't have 6; Few tiles left with 6 (1)
+  #17 P3(T2): PASSES (no 2 or 6) — now known: can't have {2,6}
+  #18 P0(T1): plays [2|3] on left → ends [3|6] (2 left)
+         WHY: [2|3] (score=48): I have 1 more tiles for ends 3/6; Partner played 2 tiles with 3/6; Few tiles left with 6 (1); Partner close to winning (est. 2 tiles)
+  #19 P1(T2): plays [0|6] on right → ends [3|0] (2 left)
+         WHY: [0|6] (score=58): I have 1 more tiles for ends 3/0; Partner played 2 tiles with 3/0; Partner close to winning (est. 2 tiles)
+  #20 P2(T1): PASSES (no 3 or 0) — now known: can't have {3,0}
+  #21 P3(T2): plays [0|0] on right → ends [3|0] (1 left)
+         WHY: [0|0] (score=65): I have 1 more tiles for ends 3/0; Opp 2 blocked on 3/0; Partner played 1 tiles with 3/0; Partner can't have 3; Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #22 P0(T1): plays [0|5] on right → ends [3|5] (1 left)
+         WHY: [0|5] (score=46): I have 1 more tiles for ends 3/5; Partner played 2 tiles with 3/5; Partner can't have 3; Partner close to winning (est. 2 tiles)
+  #23 P1(T2): PASSES (no 3 or 5) — now known: can't have {3,1,5}
+  #24 P2(T1): PASSES (no 3 or 5) — now known: can't have {3,0,5}
+  #25 P3(T2): PASSES (no 3 or 5) — now known: can't have {2,6,3,5}
+  #26 P0(T1): plays [0|3] on left → ends [0|5] (0 left)
+         WHY: [0|3] (score=0): Default play
+  ROUND RESULT: P0 (T1) wins 1pts (normal) — Score: T1=1 T2=1
+
+===== ROUND 3 =====
+  Hands dealt:
+    P0 (T1): [0|6] [0|1] [3|6] [1|3] [2|6] [1|1]
+    P1 (T2): [2|2] [2|5] [2|4] [5|6] [0|4] [2|3]
+    P2 (T1): [3|5] [1|4] [3|4] [0|0] [4|6] [5|5]
+    P3 (T2): [3|3] [1|5] [0|3] [4|4] [6|6] [0|2]
+  P2 (T1) starts (winning team choice)
+  #1 P2(T1): plays [5|5] on first → ends [5|5] (5 left)
+         WHY: Open with [5|5]: dominant suit signal (suit 5=2, suit 5=2)
+  #2 P3(T2): plays [1|5] on left → ends [1|5] (5 left)
+         WHY: [1|5] (score=12): Default play
+  #3 P0(T1): plays [1|1] on left → ends [1|5] (5 left)
+         WHY: [1|1] (score=54): I have 2 more tiles for ends 1/5; Partner played 1 tiles with 1/5; Play double early (inflexible)
+  #4 P1(T2): plays [2|5] on right → ends [1|2] (5 left)
+         WHY: [2|5] (score=67): I have 3 more tiles for ends 1/2; Partner played 1 tiles with 1/2
+  #5 P2(T1): plays [1|4] on left → ends [4|2] (4 left)
+         WHY: [1|4] (score=40): I have 2 more tiles for ends 4/2
+  #6 P3(T2): plays [0|2] on right → ends [4|0] (4 left)
+         WHY: [0|2] (score=54): I have 2 more tiles for ends 4/0; Sets up isolated double [4|4]
+  #7 P0(T1): plays [0|6] on right → ends [4|6] (4 left)
+         WHY: [0|6] (score=50): I have 2 more tiles for ends 4/6; Partner played 1 tiles with 4/6
+  #8 P1(T2): plays [2|4] on left → ends [2|6] (4 left)
+         WHY: [2|4] (score=65): I have 3 more tiles for ends 2/6; Partner played 1 tiles with 2/6
+  #9 P2(T1): plays [4|6] on right → ends [2|4] (3 left)
+         WHY: [4|6] (score=35): I have 1 more tiles for ends 2/4; Dump heavy tile (10 pips)
+  #10 P3(T2): plays [4|4] on right → ends [2|4] (3 left)
+         WHY: [4|4] (score=52): Partner played 3 tiles with 2/4; Play double early (inflexible)
+  #11 P0(T1): plays [2|6] on left → ends [6|4] (3 left)
+         WHY: [2|6] (score=55): I have 1 more tiles for ends 6/4; Partner played 3 tiles with 6/4
+  #12 P1(T2): plays [5|6] on left → ends [5|4] (3 left)
+         WHY: [5|6] (score=53): I have 1 more tiles for ends 5/4; Partner played 2 tiles with 5/4; Dump heavy tile (11 pips)
+  #13 P2(T1): plays [3|5] on left → ends [3|4] (2 left)
+         WHY: [3|5] (score=46): I have 2 more tiles for ends 3/4
+  #14 P3(T2): plays [3|3] on left → ends [3|4] (2 left)
+         WHY: [3|3] (score=47): I have 1 more tiles for ends 3/4; Partner played 1 tiles with 3/4; Play double early (inflexible)
+  #15 P0(T1): plays [1|3] on left → ends [1|4] (2 left)
+         WHY: [1|3] (score=62): I have 1 more tiles for ends 1/4; Partner played 3 tiles with 1/4; Partner close to winning (est. 2 tiles)
+  #16 P1(T2): plays [0|4] on right → ends [1|0] (2 left)
+         WHY: [0|4] (score=39): Partner played 2 tiles with 1/0; Partner close to winning (est. 2 tiles)
+  #17 P2(T1): plays [0|0] on right → ends [1|0] (1 left)
+         WHY: [0|0] (score=51): Partner played 3 tiles with 1/0; Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #18 P3(T2): plays [0|3] on right → ends [1|3] (1 left)
+         WHY: [0|3] (score=21): Partner close to winning (est. 2 tiles)
+  #19 P0(T1): plays [3|6] on right → ends [1|6] (1 left)
+         WHY: [3|6] (score=64): I have 1 more tiles for ends 1/6; Partner played 2 tiles with 1/6; Dump heavy tile (9 pips); Partner close to winning (est. 1 tiles)
+  #20 P1(T2): PASSES (no 1 or 6) — now known: can't have {1,6}
+  #21 P2(T1): PASSES (no 1 or 6) — now known: can't have {1,6}
+  #22 P3(T2): plays [6|6] on right → ends [1|6] (0 left)
+         WHY: [6|6] (score=49): Opp 2 blocked on 1/6; Partner played 1 tiles with 1/6; Partner can't have 1; Partner can't have 6; Dump heavy tile (12 pips); Play double early (inflexible)
+  ROUND RESULT: P3 (T2) wins 2pts (carroca) — Score: T1=1 T2=3
+
+===== ROUND 4 =====
+  Hands dealt:
+    P0 (T1): [2|2] [0|4] [0|5] [3|4] [0|2] [5|5]
+    P1 (T2): [2|5] [1|2] [2|4] [0|0] [1|6] [1|4]
+    P2 (T1): [0|3] [4|6] [6|6] [4|4] [3|5] [4|5]
+    P3 (T2): [3|6] [0|6] [5|6] [2|3] [0|1] [2|6]
+  P1 (T2) starts (winning team choice)
+  #1 P1(T2): plays [1|2] on first → ends [1|2] (5 left)
+         WHY: Open with [1|2]: dominant suit signal (suit 1=3, suit 2=3)
+  #2 P2(T1): PASSES (no 1 or 2) — now known: can't have {1,2}
+  #3 P3(T2): plays [2|6] on right → ends [1|6] (5 left)
+         WHY: [2|6] (score=84): I have 4 more tiles for ends 1/6; Partner played 1 tiles with 1/6
+  #4 P0(T1): PASSES (no 1 or 6) — now known: can't have {1,6}
+  #5 P1(T2): plays [1|6] on left → ends [6|6] (4 left)
+         WHY: [1|6] (score=94): I have 2 more tiles for ends 1/1; Opp 2 blocked on 1/1; Opp 0 blocked on 1/1
+  #6 P2(T1): plays [4|6] on left → ends [4|6] (5 left)
+         WHY: [4|6] (score=75): I have 3 more tiles for ends 4/6; Partner can't have 6; Dump heavy tile (10 pips); Sets up isolated double [6|6]
+  #7 P3(T2): plays [3|6] on right → ends [4|3] (4 left)
+         WHY: [3|6] (score=33): I have 1 more tiles for ends 4/3; Dump heavy tile (9 pips)
+  #8 P0(T1): plays [3|4] on right → ends [4|4] (5 left)
+         WHY: [3|4] (score=60): I have 2 more tiles for ends 4/4; Partner played 2 tiles with 4/4
+  #9 P1(T2): plays [2|4] on left → ends [2|4] (3 left)
+         WHY: [2|4] (score=50): I have 2 more tiles for ends 2/4; Partner played 1 tiles with 2/4
+  #10 P2(T1): plays [4|4] on right → ends [2|4] (4 left)
+         WHY: [4|4] (score=51): I have 1 more tiles for ends 2/4; Partner played 1 tiles with 2/4; Play double early (inflexible)
+  #11 P3(T2): plays [2|3] on left → ends [3|4] (3 left)
+         WHY: [2|3] (score=18): Partner played 1 tiles with 3/4
+  #12 P0(T1): plays [0|4] on right → ends [3|0] (4 left)
+         WHY: [0|4] (score=38): I have 2 more tiles for ends 3/0
+  #13 P1(T2): plays [0|0] on right → ends [3|0] (2 left)
+         WHY: [0|0] (score=28): Partner played 2 tiles with 3/0; Play double early (inflexible)
+  #14 P2(T1): plays [3|5] on left → ends [5|0] (3 left)
+         WHY: [3|5] (score=54): I have 2 more tiles for ends 5/0; Partner played 1 tiles with 5/0
+  #15 P3(T2): plays [5|6] on left → ends [6|0] (2 left)
+         WHY: [5|6] (score=98): I have 3 more tiles for ends 6/0; Partner played 2 tiles with 6/0; Dump heavy tile (11 pips); Partner close to winning (est. 2 tiles)
+  #16 P0(T1): plays [0|5] on right → ends [6|5] (3 left)
+         WHY: [0|5] (score=61): I have 1 more tiles for ends 6/5; Partner played 2 tiles with 6/5; Sets up isolated double [5|5]
+  #17 P1(T2): plays [2|5] on right → ends [6|2] (1 left)
+         WHY: [2|5] (score=69): Partner played 5 tiles with 6/2; Partner close to winning (est. 2 tiles)
+  #18 P2(T1): plays [6|6] on left → ends [6|2] (2 left)
+         WHY: [6|6] (score=26): Partner can't have 6; Dump heavy tile (12 pips); Play double early (inflexible)
+  #19 P3(T2): plays [0|6] on left → ends [0|2] (1 left)
+         WHY: [0|6] (score=74): I have 1 more tiles for ends 0/2; Partner played 4 tiles with 0/2; Partner close to winning (est. 1 tiles)
+  #20 P0(T1): plays [2|2] on right → ends [0|2] (2 left)
+         WHY: [2|2] (score=55): I have 2 more tiles for ends 0/2; Partner can't have 2; Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #21 P1(T2): PASSES (no 0 or 2) — now known: can't have {0,2}
+  #22 P2(T1): plays [0|3] on left → ends [3|2] (1 left)
+         WHY: [0|3] (score=29): Partner played 2 tiles with 3/2; Few tiles left with 2 (1); Partner close to winning (est. 2 tiles)
+  #23 P3(T2): PASSES (no 3 or 2) — now known: can't have {3,2}
+  #24 P0(T1): plays [0|2] on right → ends [3|0] (1 left)
+         WHY: [0|2] (score=43): Partner played 3 tiles with 3/0; Partner close to winning (est. 1 tiles)
+  #25 P1(T2): PASSES (no 3 or 0) — now known: can't have {0,2,3}
+  #26 P2(T1): PASSES (no 3 or 0) — now known: can't have {1,2,3,0}
+  #27 P3(T2): plays [0|1] on right → ends [3|1] (0 left)
+         WHY: [0|1] (score=48): Opp 2 blocked on 3/1; Partner played 2 tiles with 3/1; Partner can't have 3; Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P3 (T2) wins 1pts (normal) — Score: T1=1 T2=4
+
+===== ROUND 5 =====
+  Hands dealt:
+    P0 (T1): [1|4] [2|4] [0|3] [0|0] [3|5] [4|5]
+    P1 (T2): [0|4] [3|6] [1|3] [1|1] [0|5] [1|6]
+    P2 (T1): [3|4] [2|6] [4|6] [2|2] [3|3] [2|3]
+    P3 (T2): [2|5] [1|5] [5|5] [0|2] [6|6] [1|2]
+  P1 (T2) starts (winning team choice)
+  #1 P1(T2): plays [1|1] on first → ends [1|1] (5 left)
+         WHY: Open with [1|1]: dominant suit signal (suit 1=3, suit 1=3)
+  #2 P2(T1): PASSES (no 1 or 1) — now known: can't have {1}
+  #3 P3(T2): plays [1|5] on left → ends [5|1] (5 left)
+         WHY: [1|5] (score=65): I have 3 more tiles for ends 5/1; Partner played 1 tiles with 5/1
+  #4 P0(T1): plays [1|4] on right → ends [5|4] (5 left)
+         WHY: [1|4] (score=70): I have 4 more tiles for ends 5/4
+  #5 P1(T2): plays [0|4] on right → ends [5|0] (4 left)
+         WHY: [0|4] (score=46): I have 2 more tiles for ends 5/0; Partner played 1 tiles with 5/0
+  #6 P2(T1): PASSES (no 5 or 0) — now known: can't have {1,5,0}
+  #7 P3(T2): plays [5|5] on left → ends [5|0] (4 left)
+         WHY: [5|5] (score=95): I have 2 more tiles for ends 5/0; Opp 2 blocked on 5/0; Partner played 1 tiles with 5/0; Dump heavy tile (10 pips); Play double early (inflexible)
+  #8 P0(T1): plays [4|5] on left → ends [4|0] (4 left)
+         WHY: [4|5] (score=53): I have 3 more tiles for ends 4/0; Partner can't have 0; Dump heavy tile (9 pips)
+  #9 P1(T2): plays [0|5] on right → ends [4|5] (3 left)
+         WHY: [0|5] (score=26): Partner played 2 tiles with 4/5
+  #10 P2(T1): plays [3|4] on left → ends [3|5] (5 left)
+         WHY: [3|4] (score=52): I have 2 more tiles for ends 3/5; Partner played 1 tiles with 3/5
+  #11 P3(T2): plays [2|5] on right → ends [3|2] (3 left)
+         WHY: [2|5] (score=44): I have 2 more tiles for ends 3/2
+  #12 P0(T1): plays [2|4] on right → ends [3|4] (3 left)
+         WHY: [2|4] (score=58): I have 2 more tiles for ends 3/4; Partner played 2 tiles with 3/4
+  #13 P1(T2): plays [3|6] on left → ends [6|4] (2 left)
+         WHY: [3|6] (score=33): I have 1 more tiles for ends 6/4; Dump heavy tile (9 pips)
+  #14 P2(T1): plays [2|6] on left → ends [2|4] (4 left)
+         WHY: [2|6] (score=93): I have 3 more tiles for ends 2/4; Partner played 4 tiles with 2/4
+  #15 P3(T2): plays [0|2] on left → ends [0|4] (2 left)
+         WHY: [0|2] (score=43): Partner played 3 tiles with 0/4; Partner close to winning (est. 2 tiles)
+  #16 P0(T1): plays [0|3] on left → ends [3|4] (2 left)
+         WHY: [0|3] (score=37): I have 1 more tiles for ends 3/4; Partner played 2 tiles with 3/4
+  #17 P1(T2): plays [1|3] on left → ends [1|4] (1 left)
+         WHY: [1|3] (score=46): I have 1 more tiles for ends 1/4; Partner played 1 tiles with 1/4; Partner close to winning (est. 2 tiles)
+  #18 P2(T1): plays [4|6] on right → ends [1|6] (3 left)
+         WHY: [4|6] (score=43): Partner played 1 tiles with 1/6; Dump heavy tile (10 pips); Partner close to winning (est. 2 tiles)
+  #19 P3(T2): plays [6|6] on right → ends [1|6] (1 left)
+         WHY: [6|6] (score=90): I have 1 more tiles for ends 1/6; Partner played 3 tiles with 1/6; Dump heavy tile (12 pips); Play double early (inflexible); Partner close to winning (est. 1 tiles)
+  #20 P0(T1): PASSES (no 1 or 6) — now known: can't have {1,6}
+  #21 P1(T2): plays [1|6] on left → ends [6|6] (0 left)
+         WHY: [1|6] (score=95): Opp 2 blocked on 1/1; Opp 0 blocked on 1/1; Partner played 2 tiles with 1/1; Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P1 (T2) wins 3pts (la-e-lo) — Score: T1=1 T2=7
+
+  MATCH WINNER: Team 2 (1-7) in 5 rounds
+
+──────────────────────────────────────────────────
+  MATCH 2 — Smart AI (all players)
+──────────────────────────────────────────────────
+
+===== ROUND 1 =====
+  Hands dealt:
+    P0 (T1): [5|5] [4|4] [0|2] [0|4] [1|6] [2|6]
+    P1 (T2): [0|5] [2|5] [1|3] [6|6] [0|1] [0|0]
+    P2 (T1): [4|6] [2|2] [4|5] [2|3] [5|6] [3|6]
+    P3 (T2): [3|4] [1|1] [3|3] [1|5] [3|5] [1|2]
+  P1 auto-plays [6|6] (highest double)
+  #1 P2(T1): plays [5|6] on left → ends [5|6] (5 left)
+         WHY: [5|6] (score=67): I have 3 more tiles for ends 5/6; Dump heavy tile (11 pips)
+  #2 P3(T2): plays [3|5] on left → ends [3|6] (5 left)
+         WHY: [3|5] (score=46): I have 2 more tiles for ends 3/6
+  #3 P0(T1): plays [2|6] on right → ends [3|2] (5 left)
+         WHY: [2|6] (score=31): I have 1 more tiles for ends 3/2
+  #4 P1(T2): plays [2|5] on right → ends [3|5] (4 left)
+         WHY: [2|5] (score=60): I have 2 more tiles for ends 3/5; Partner played 2 tiles with 3/5
+  #5 P2(T1): plays [2|3] on left → ends [2|5] (4 left)
+         WHY: [2|3] (score=68): I have 2 more tiles for ends 2/5; Partner played 1 tiles with 2/5; Sets up isolated double [2|2]
+  #6 P3(T2): plays [1|5] on right → ends [2|1] (4 left)
+         WHY: [1|5] (score=65): I have 3 more tiles for ends 2/1; Partner played 1 tiles with 2/1
+  #7 P0(T1): plays [1|6] on right → ends [2|6] (4 left)
+         WHY: [1|6] (score=45): I have 1 more tiles for ends 2/6; Partner played 2 tiles with 2/6
+  #8 P1(T2): PASSES — can't have {2,6}
+  #9 P2(T1): plays [2|2] on left → ends [2|6] (3 left)
+         WHY: [2|2] (score=99): I have 2 more tiles for ends 2/6; Opp 1 blocked on 2/6; Partner played 3 tiles with 2/6; Play double early (inflexible)
+  #10 P3(T2): plays [1|2] on left → ends [1|6] (3 left)
+         WHY: [1|2] (score=31): I have 1 more tiles for ends 1/6; Partner can't have 6; Sets up isolated double [1|1]
+  #11 P0(T1): PASSES — can't have {1,6}
+  #12 P1(T2): plays [0|1] on left → ends [0|6] (3 left)
+         WHY: [0|1] (score=32): I have 2 more tiles for ends 0/6
+  #13 P2(T1): plays [4|6] on right → ends [0|4] (2 left)
+         WHY: [4|6] (score=35): I have 1 more tiles for ends 0/4; Dump heavy tile (10 pips)
+  #14 P3(T2): plays [3|4] on right → ends [0|3] (2 left)
+         WHY: [3|4] (score=57): I have 1 more tiles for ends 0/3; Partner played 1 tiles with 0/3; Sets up isolated double [3|3]
+  #15 P0(T1): plays [0|4] on left → ends [4|3] (3 left)
+         WHY: [0|4] (score=74): I have 1 more tiles for ends 4/3; Partner played 2 tiles with 4/3; Sets up isolated double [4|4]; Partner close to winning (est. 2 tiles)
+  #16 P1(T2): plays [1|3] on right → ends [4|1] (2 left)
+         WHY: [1|3] (score=47): Partner played 3 tiles with 4/1; Partner close to winning (est. 2 tiles)
+  #17 P2(T1): plays [4|5] on left → ends [5|1] (1 left)
+         WHY: [4|5] (score=16): Partner played 1 tiles with 5/1; Partner can't have 1; Dump heavy tile (9 pips)
+  #18 P3(T2): plays [1|1] on right → ends [5|1] (1 left)
+         WHY: [1|1] (score=40): Partner played 3 tiles with 5/1; Play double early (inflexible)
+  #19 P0(T1): plays [5|5] on left → ends [5|1] (2 left)
+         WHY: [5|5] (score=55): Partner played 2 tiles with 5/1; Dump heavy tile (10 pips); Play double early (inflexible); Few tiles left with 1 (1); Partner close to winning (est. 1 tiles)
+  #20 P1(T2): plays [0|5] on left → ends [0|1] (1 left)
+         WHY: [0|5] (score=76): I have 1 more tiles for ends 0/1; Partner played 3 tiles with 0/1; Sets up isolated double [0|0]; Few tiles left with 1 (1); Partner close to winning (est. 1 tiles)
+  #21 P2(T1): PASSES — can't have {0,1}
+  #22 P3(T2): PASSES — can't have {0,1}
+  #23 P0(T1): plays [0|2] on left → ends [2|1] (1 left)
+         WHY: [0|2] (score=17): Partner played 2 tiles with 2/1; Partner can't have 1; Few tiles left with 1 (1); Partner close to winning (est. 1 tiles)
+  #24 P1(T2): PASSES — can't have {2,6,1}
+  #25 P2(T1): PASSES — can't have {0,1,2}
+  #26 P3(T2): PASSES — can't have {0,1,2}
+  #27 P0(T1): PASSES — can't have {1,6,2}
+  ROUND RESULT: P1 (T2) wins 1pts (blocked) — Score: T1=0 T2=1
+
+===== ROUND 2 =====
+  Hands dealt:
+    P0 (T1): [5|5] [0|3] [0|5] [2|3] [1|1] [4|4]
+    P1 (T2): [2|4] [0|6] [3|4] [3|6] [0|0] [4|6]
+    P2 (T1): [5|6] [0|1] [0|4] [1|6] [1|3] [2|5]
+    P3 (T2): [3|5] [3|3] [1|4] [1|2] [6|6] [2|2]
+  P1 (T2) starts (winning team choice)
+  #1 P1(T2): plays [4|6] on first → ends [4|6] (5 left)
+         WHY: Open with [4|6]: dominant suit signal (suit 4=3, suit 6=3)
+  #2 P2(T1): plays [1|6] on right → ends [4|1] (5 left)
+         WHY: [1|6] (score=59): I have 3 more tiles for ends 4/1
+  #3 P3(T2): plays [1|2] on right → ends [4|2] (5 left)
+         WHY: [1|2] (score=64): I have 2 more tiles for ends 4/2; Partner played 1 tiles with 4/2; Sets up isolated double [2|2]
+  #4 P0(T1): plays [2|3] on right → ends [4|3] (5 left)
+         WHY: [2|3] (score=60): I have 2 more tiles for ends 4/3; Sets up isolated double [4|4]
+  #5 P1(T2): plays [3|6] on right → ends [4|6] (4 left)
+         WHY: [3|6] (score=63): I have 3 more tiles for ends 4/6; Dump heavy tile (9 pips)
+  #6 P2(T1): plays [5|6] on right → ends [4|5] (4 left)
+         WHY: [5|6] (score=52): I have 2 more tiles for ends 4/5; Dump heavy tile (11 pips)
+  #7 P3(T2): plays [3|5] on right → ends [4|3] (4 left)
+         WHY: [3|5] (score=82): I have 2 more tiles for ends 4/3; Partner played 2 tiles with 4/3; Sets up isolated double [3|3]
+  #8 P0(T1): plays [0|3] on right → ends [4|0] (4 left)
+         WHY: [0|3] (score=56): I have 2 more tiles for ends 4/0; Sets up isolated double [4|4]
+  #9 P1(T2): plays [0|0] on right → ends [4|0] (3 left)
+         WHY: [0|0] (score=57): I have 3 more tiles for ends 4/0; Play double early (inflexible)
+  #10 P2(T1): plays [0|4] on left → ends [0|0] (3 left)
+         WHY: [0|4] (score=54): I have 2 more tiles for ends 0/0; Partner played 2 tiles with 0/0
+  #11 P3(T2): PASSES (no 0 or 0) — now known: can't have {0}
+  #12 P0(T1): plays [0|5] on left → ends [5|0] (3 left)
+         WHY: [0|5] (score=61): I have 1 more tiles for ends 5/0; Partner played 2 tiles with 5/0; Sets up isolated double [5|5]
+  #13 P1(T2): plays [0|6] on right → ends [5|6] (2 left)
+         WHY: [0|6] (score=20): Partner played 1 tiles with 5/6
+  #14 P2(T1): plays [2|5] on left → ends [2|6] (2 left)
+         WHY: [2|5] (score=22): Partner played 1 tiles with 2/6
+  #15 P3(T2): plays [6|6] on right → ends [2|6] (3 left)
+         WHY: [6|6] (score=110): I have 1 more tiles for ends 2/6; Partner played 3 tiles with 2/6; Dump heavy tile (12 pips); Play double early (inflexible); Sets up isolated double [2|2]; Partner close to winning (est. 2 tiles)
+  #16 P0(T1): PASSES (no 2 or 6) — now known: can't have {2,6}
+  #17 P1(T2): plays [2|4] on left → ends [4|6] (1 left)
+         WHY: [2|4] (score=27): I have 1 more tiles for ends 4/6; Partner played 1 tiles with 4/6; Few tiles left with 6 (1)
+  #18 P2(T1): PASSES (no 4 or 6) — now known: can't have {4,6}
+  #19 P3(T2): plays [1|4] on left → ends [1|6] (2 left)
+         WHY: [1|4] (score=41): Partner played 3 tiles with 1/6; Few tiles left with 6 (1); Partner close to winning (est. 1 tiles)
+  #20 P0(T1): plays [1|1] on left → ends [1|6] (2 left)
+         WHY: [1|1] (score=37): Partner played 3 tiles with 1/6; Partner can't have 6; Play double early (inflexible); Few tiles left with 6 (1); Partner close to winning (est. 2 tiles)
+  #21 P1(T2): PASSES (no 1 or 6) — now known: can't have {1,6}
+  #22 P2(T1): plays [1|3] on left → ends [3|6] (1 left)
+         WHY: [1|3] (score=21): Partner played 2 tiles with 3/6; Partner can't have 6; Few tiles left with 6 (1); Partner close to winning (est. 2 tiles)
+  #23 P3(T2): plays [3|3] on left → ends [3|6] (1 left)
+         WHY: [3|3] (score=53): Partner played 4 tiles with 3/6; Partner can't have 6; Play double early (inflexible); Few tiles left with 6 (1); Partner close to winning (est. 1 tiles)
+  #24 P0(T1): PASSES (no 3 or 6) — now known: can't have {2,6,3}
+  #25 P1(T2): plays [3|4] on left → ends [4|6] (0 left)
+         WHY: [3|4] (score=62): Opp 2 blocked on 4/6; Partner played 2 tiles with 4/6; Few tiles left with 6 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P1 (T2) wins 1pts (normal) — Score: T1=0 T2=2
+
+===== ROUND 3 =====
+  Hands dealt:
+    P0 (T1): [3|6] [6|6] [1|6] [5|6] [5|5] [0|0]
+    P1 (T2): [1|4] [0|5] [1|3] [1|2] [2|6] [3|3]
+    P2 (T1): [0|4] [2|3] [2|4] [0|1] [2|2] [0|6]
+    P3 (T2): [4|4] [3|4] [3|5] [2|5] [4|6] [1|5]
+  P3 (T2) starts (winning team choice)
+  #1 P3(T2): plays [4|4] on first → ends [4|4] (5 left)
+         WHY: Open with [4|4]: dominant suit signal (suit 4=3, suit 4=3)
+  #2 P0(T1): PASSES (no 4 or 4) — now known: can't have {4}
+  #3 P1(T2): plays [1|4] on left → ends [1|4] (5 left)
+         WHY: [1|4] (score=48): I have 2 more tiles for ends 1/4; Partner played 1 tiles with 1/4
+  #4 P2(T1): plays [2|4] on right → ends [1|2] (5 left)
+         WHY: [2|4] (score=57): I have 3 more tiles for ends 1/2
+  #5 P3(T2): plays [2|5] on right → ends [1|5] (4 left)
+         WHY: [2|5] (score=67): I have 3 more tiles for ends 1/5; Partner played 1 tiles with 1/5
+  #6 P0(T1): plays [1|6] on left → ends [6|5] (5 left)
+         WHY: [1|6] (score=89): I have 5 more tiles for ends 6/5
+  #7 P1(T2): plays [2|6] on left → ends [2|5] (4 left)
+         WHY: [2|6] (score=62): I have 2 more tiles for ends 2/5; Partner played 2 tiles with 2/5
+  #8 P2(T1): plays [2|2] on left → ends [2|5] (4 left)
+         WHY: [2|2] (score=35): I have 1 more tiles for ends 2/5; Play double early (inflexible)
+  #9 P3(T2): plays [3|5] on right → ends [2|3] (3 left)
+         WHY: [3|5] (score=39): I have 1 more tiles for ends 2/3; Partner played 1 tiles with 2/3
+  #10 P0(T1): plays [3|6] on right → ends [2|6] (4 left)
+         WHY: [3|6] (score=64): I have 2 more tiles for ends 2/6; Partner played 2 tiles with 2/6; Dump heavy tile (9 pips)
+  #11 P1(T2): plays [1|2] on left → ends [1|6] (3 left)
+         WHY: [1|2] (score=21): I have 1 more tiles for ends 1/6
+  #12 P2(T1): plays [0|6] on right → ends [1|0] (3 left)
+         WHY: [0|6] (score=65): I have 3 more tiles for ends 1/0; Partner played 1 tiles with 1/0
+  #13 P3(T2): plays [1|5] on left → ends [5|0] (2 left)
+         WHY: [1|5] (score=12): Default play
+  #14 P0(T1): plays [5|6] on left → ends [6|0] (3 left)
+         WHY: [5|6] (score=108): I have 2 more tiles for ends 6/0; Partner played 2 tiles with 6/0; Dump heavy tile (11 pips); Sets up isolated double [6|6]; Sets up isolated double [0|0]
+  #15 P1(T2): plays [0|5] on right → ends [6|5] (2 left)
+         WHY: [0|5] (score=49): Partner played 3 tiles with 6/5; Partner close to winning (est. 2 tiles)
+  #16 P2(T1): PASSES (no 6 or 5) — now known: can't have {6,5}
+  #17 P3(T2): plays [4|6] on left → ends [4|5] (1 left)
+         WHY: [4|6] (score=66): I have 1 more tiles for ends 4/5; Partner played 2 tiles with 4/5; Dump heavy tile (10 pips); Partner close to winning (est. 2 tiles)
+  #18 P0(T1): plays [5|5] on right → ends [4|5] (2 left)
+         WHY: [5|5] (score=30): Partner played 1 tiles with 4/5; Partner can't have 5; Dump heavy tile (10 pips); Play double early (inflexible)
+  #19 P1(T2): PASSES (no 4 or 5) — now known: can't have {4,5}
+  #20 P2(T1): plays [0|4] on left → ends [0|5] (2 left)
+         WHY: [0|4] (score=46): I have 1 more tiles for ends 0/5; Partner played 2 tiles with 0/5; Few tiles left with 5 (1); Partner close to winning (est. 2 tiles)
+  #21 P3(T2): PASSES (no 0 or 5) — now known: can't have {0,5}
+  #22 P0(T1): plays [0|0] on left → ends [0|5] (1 left)
+         WHY: [0|0] (score=50): Opp 3 blocked on 0/5; Partner played 2 tiles with 0/5; Partner can't have 5; Play double early (inflexible); Few tiles left with 5 (1); Partner close to winning (est. 2 tiles)
+  #23 P1(T2): PASSES (no 0 or 5) — now known: can't have {4,5,0}
+  #24 P2(T1): plays [0|1] on left → ends [1|5] (1 left)
+         WHY: [0|1] (score=33): Partner played 3 tiles with 1/5; Few tiles left with 5 (1); Partner close to winning (est. 1 tiles)
+  #25 P3(T2): PASSES (no 1 or 5) — now known: can't have {0,5,1}
+  #26 P0(T1): PASSES (no 1 or 5) — now known: can't have {4,1,5}
+  #27 P1(T2): plays [1|3] on left → ends [3|5] (1 left)
+         WHY: [1|3] (score=72): I have 1 more tiles for ends 3/5; Partner played 4 tiles with 3/5; Partner can't have 5; Sets up isolated double [3|3]; Few tiles left with 5 (1); Partner close to winning (est. 1 tiles)
+  #28 P2(T1): plays [2|3] on left → ends [2|5] (0 left)
+         WHY: [2|3] (score=23): Partner played 2 tiles with 2/5; Partner can't have 5; Few tiles left with 5 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P2 (T1) wins 1pts (normal) — Score: T1=1 T2=2
+
+===== ROUND 4 =====
+  Hands dealt:
+    P0 (T1): [0|2] [4|4] [0|5] [4|6] [5|5] [3|5]
+    P1 (T2): [2|3] [5|6] [1|6] [0|3] [0|4] [0|0]
+    P2 (T1): [4|5] [2|5] [3|6] [1|5] [0|6] [1|4]
+    P3 (T2): [1|2] [2|4] [0|1] [3|4] [1|3] [2|6]
+  P2 (T1) starts (winning team choice)
+  #1 P2(T1): plays [4|5] on first → ends [4|5] (5 left)
+         WHY: Open with [4|5]: dominant suit signal (suit 4=2, suit 5=3)
+  #2 P3(T2): plays [2|4] on left → ends [2|5] (5 left)
+         WHY: [2|4] (score=42): I have 2 more tiles for ends 2/5
+  #3 P0(T1): plays [5|5] on right → ends [2|5] (5 left)
+         WHY: [5|5] (score=85): I have 3 more tiles for ends 2/5; Partner played 1 tiles with 2/5; Dump heavy tile (10 pips); Play double early (inflexible)
+  #4 P1(T2): plays [5|6] on right → ends [2|6] (5 left)
+         WHY: [5|6] (score=60): I have 2 more tiles for ends 2/6; Partner played 1 tiles with 2/6; Dump heavy tile (11 pips)
+  #5 P2(T1): plays [2|5] on left → ends [5|6] (4 left)
+         WHY: [2|5] (score=67): I have 3 more tiles for ends 5/6; Partner played 1 tiles with 5/6
+  #6 P3(T2): plays [2|6] on right → ends [5|2] (4 left)
+         WHY: [2|6] (score=39): I have 1 more tiles for ends 5/2; Partner played 1 tiles with 5/2
+  #7 P0(T1): plays [0|2] on right → ends [5|0] (4 left)
+         WHY: [0|2] (score=65): I have 3 more tiles for ends 5/0; Partner played 2 tiles with 5/0
+  #8 P1(T2): plays [0|0] on right → ends [5|0] (4 left)
+         WHY: [0|0] (score=42): I have 2 more tiles for ends 5/0; Play double early (inflexible)
+  #9 P2(T1): plays [1|5] on left → ends [1|0] (3 left)
+         WHY: [1|5] (score=50): I have 2 more tiles for ends 1/0; Partner played 1 tiles with 1/0
+  #10 P3(T2): plays [0|1] on right → ends [1|1] (3 left)
+         WHY: [0|1] (score=62): I have 4 more tiles for ends 1/1
+  #11 P0(T1): PASSES (no 1 or 1) — now known: can't have {1}
+  #12 P1(T2): plays [1|6] on left → ends [6|1] (3 left)
+         WHY: [1|6] (score=30): Partner played 2 tiles with 6/1
+  #13 P2(T1): plays [1|4] on right → ends [6|4] (2 left)
+         WHY: [1|4] (score=40): I have 2 more tiles for ends 6/4
+  #14 P3(T2): plays [3|4] on right → ends [6|3] (2 left)
+         WHY: [3|4] (score=45): I have 1 more tiles for ends 6/3; Partner played 2 tiles with 6/3
+  #15 P0(T1): plays [4|6] on left → ends [4|3] (3 left)
+         WHY: [4|6] (score=101): I have 2 more tiles for ends 4/3; Partner played 2 tiles with 4/3; Dump heavy tile (10 pips); Sets up isolated double [4|4]; Partner close to winning (est. 2 tiles)
+  #16 P1(T2): plays [0|4] on left → ends [0|3] (2 left)
+         WHY: [0|4] (score=84): I have 3 more tiles for ends 0/3; Partner played 2 tiles with 0/3; Partner close to winning (est. 2 tiles)
+  #17 P2(T1): plays [3|6] on right → ends [0|6] (1 left)
+         WHY: [3|6] (score=64): I have 2 more tiles for ends 0/6; Partner played 2 tiles with 0/6; Dump heavy tile (9 pips)
+  #18 P3(T2): PASSES (no 0 or 6) — now known: can't have {0,6}
+  #19 P0(T1): plays [0|5] on left → ends [5|6] (2 left)
+         WHY: [0|5] (score=72): I have 1 more tiles for ends 5/6; Partner played 4 tiles with 5/6; Partner close to winning (est. 1 tiles)
+  #20 P1(T2): PASSES (no 5 or 6) — now known: can't have {5,6}
+  #21 P2(T1): plays [0|6] on right → ends [5|0] (0 left)
+         WHY: [0|6] (score=51): Partner played 4 tiles with 5/0; Few tiles left with 5 (1); Partner close to winning (est. 2 tiles)
+  ROUND RESULT: P2 (T1) wins 1pts (normal) — Score: T1=2 T2=2
+
+===== ROUND 5 =====
+  Hands dealt:
+    P0 (T1): [2|3] [4|5] [3|6] [4|4] [6|6] [1|1]
+    P1 (T2): [0|0] [3|5] [2|6] [0|2] [1|6] [0|3]
+    P2 (T1): [1|4] [3|4] [3|3] [0|5] [1|2] [0|1]
+    P3 (T2): [0|6] [5|6] [0|4] [5|5] [2|5] [1|5]
+  P2 (T1) starts (winning team choice)
+  #1 P2(T1): plays [3|3] on first → ends [3|3] (5 left)
+         WHY: Open with [3|3]: dominant suit signal (suit 3=2, suit 3=2)
+  #2 P3(T2): PASSES (no 3 or 3) — now known: can't have {3}
+  #3 P0(T1): plays [3|6] on left → ends [6|3] (5 left)
+         WHY: [3|6] (score=76): I have 2 more tiles for ends 6/3; Partner played 1 tiles with 6/3; Dump heavy tile (9 pips); Sets up isolated double [6|6]
+  #4 P1(T2): plays [0|3] on right → ends [6|0] (5 left)
+         WHY: [0|3] (score=66): I have 4 more tiles for ends 6/0
+  #5 P2(T1): plays [0|1] on right → ends [6|1] (4 left)
+         WHY: [0|1] (score=40): I have 2 more tiles for ends 6/1; Partner played 1 tiles with 6/1
+  #6 P3(T2): plays [1|5] on right → ends [6|5] (5 left)
+         WHY: [1|5] (score=87): I have 5 more tiles for ends 6/5
+  #7 P0(T1): plays [4|5] on right → ends [6|4] (4 left)
+         WHY: [4|5] (score=88): I have 2 more tiles for ends 6/4; Dump heavy tile (9 pips); Sets up isolated double [4|4]; Sets up isolated double [6|6]
+  #8 P1(T2): plays [2|6] on left → ends [2|4] (4 left)
+         WHY: [2|6] (score=31): I have 1 more tiles for ends 2/4
+  #9 P2(T1): plays [1|2] on left → ends [1|4] (3 left)
+         WHY: [1|2] (score=59): I have 3 more tiles for ends 1/4; Partner played 1 tiles with 1/4
+  #10 P3(T2): plays [0|4] on right → ends [1|0] (4 left)
+         WHY: [0|4] (score=31): I have 1 more tiles for ends 1/0; Partner played 1 tiles with 1/0
+  #11 P0(T1): plays [1|1] on left → ends [1|0] (3 left)
+         WHY: [1|1] (score=40): Partner played 3 tiles with 1/0; Play double early (inflexible)
+  #12 P1(T2): plays [0|0] on right → ends [1|0] (3 left)
+         WHY: [0|0] (score=58): I have 2 more tiles for ends 1/0; Partner played 2 tiles with 1/0; Play double early (inflexible)
+  #13 P2(T1): plays [1|4] on left → ends [4|0] (2 left)
+         WHY: [1|4] (score=48): I have 2 more tiles for ends 4/0; Partner played 1 tiles with 4/0
+  #14 P3(T2): plays [0|6] on right → ends [4|6] (3 left)
+         WHY: [0|6] (score=35): I have 1 more tiles for ends 4/6; Partner played 1 tiles with 4/6
+  #15 P0(T1): plays [6|6] on right → ends [4|6] (2 left)
+         WHY: [6|6] (score=94): I have 1 more tiles for ends 4/6; Partner played 1 tiles with 4/6; Dump heavy tile (12 pips); Play double early (inflexible); Sets up isolated double [4|4]; Partner close to winning (est. 2 tiles)
+  #16 P1(T2): plays [1|6] on right → ends [4|1] (2 left)
+         WHY: [1|6] (score=30): Partner played 2 tiles with 4/1
+  #17 P2(T1): plays [3|4] on left → ends [3|1] (1 left)
+         WHY: [3|4] (score=37): Partner played 2 tiles with 3/1; Few tiles left with 1 (1); Partner close to winning (est. 2 tiles)
+  #18 P3(T2): PASSES (no 3 or 1) — now known: can't have {3,1}
+  #19 P0(T1): plays [2|3] on left → ends [2|1] (1 left)
+         WHY: [2|3] (score=49): Partner played 4 tiles with 2/1; Few tiles left with 1 (1); Partner close to winning (est. 1 tiles)
+  #20 P1(T2): plays [0|2] on left → ends [0|1] (1 left)
+         WHY: [0|2] (score=10): Partner played 3 tiles with 0/1; Partner can't have 1; Few tiles left with 1 (1)
+  #21 P2(T1): plays [0|5] on left → ends [5|1] (0 left)
+         WHY: [0|5] (score=33): Partner played 2 tiles with 5/1; Few tiles left with 1 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P2 (T1) wins 1pts (normal) — Score: T1=3 T2=2
+
+===== ROUND 6 =====
+  Hands dealt:
+    P0 (T1): [0|5] [2|6] [6|6] [1|1] [1|3] [0|6]
+    P1 (T2): [4|5] [1|4] [2|2] [3|4] [1|6] [2|3]
+    P2 (T1): [5|6] [0|1] [3|5] [2|4] [0|3] [4|6]
+    P3 (T2): [4|4] [3|6] [3|3] [0|4] [5|5] [1|2]
+  P2 (T1) starts (winning team choice)
+  #1 P2(T1): plays [5|6] on first → ends [5|6] (5 left)
+         WHY: Open with [5|6]: dominant suit signal (suit 5=2, suit 6=2)
+  #2 P3(T2): plays [3|6] on right → ends [5|3] (5 left)
+         WHY: [3|6] (score=88): I have 2 more tiles for ends 5/3; Dump heavy tile (9 pips); Sets up isolated double [3|3]; Sets up isolated double [5|5]
+  #3 P0(T1): plays [1|3] on right → ends [5|1] (5 left)
+         WHY: [1|3] (score=66): I have 2 more tiles for ends 5/1; Partner played 1 tiles with 5/1; Sets up isolated double [1|1]
+  #4 P1(T2): plays [4|5] on left → ends [4|1] (5 left)
+         WHY: [4|5] (score=78): I have 4 more tiles for ends 4/1; Dump heavy tile (9 pips)
+  #5 P2(T1): plays [0|1] on right → ends [4|0] (4 left)
+         WHY: [0|1] (score=47): I have 3 more tiles for ends 4/0
+  #6 P3(T2): plays [0|4] on right → ends [4|4] (4 left)
+         WHY: [0|4] (score=74): I have 2 more tiles for ends 4/4; Partner played 2 tiles with 4/4; Sets up isolated double [4|4]
+  #7 P0(T1): PASSES (no 4 or 4) — now known: can't have {4}
+  #8 P1(T2): plays [3|4] on left → ends [3|4] (4 left)
+         WHY: [3|4] (score=60): I have 2 more tiles for ends 3/4; Partner played 2 tiles with 3/4
+  #9 P2(T1): plays [4|6] on right → ends [3|6] (3 left)
+         WHY: [4|6] (score=58): I have 2 more tiles for ends 3/6; Partner played 1 tiles with 3/6; Dump heavy tile (10 pips)
+  #10 P3(T2): plays [3|3] on left → ends [3|6] (3 left)
+         WHY: [3|3] (score=32): Partner played 1 tiles with 3/6; Play double early (inflexible)
+  #11 P0(T1): plays [6|6] on right → ends [3|6] (4 left)
+         WHY: [6|6] (score=82): I have 2 more tiles for ends 3/6; Partner played 2 tiles with 3/6; Dump heavy tile (12 pips); Play double early (inflexible)
+  #12 P1(T2): plays [2|3] on left → ends [2|6] (3 left)
+         WHY: [2|3] (score=68): I have 2 more tiles for ends 2/6; Partner played 1 tiles with 2/6; Sets up isolated double [2|2]
+  #13 P2(T1): plays [2|4] on left → ends [4|6] (2 left)
+         WHY: [2|4] (score=10): Partner played 1 tiles with 4/6; Partner can't have 4
+  #14 P3(T2): plays [4|4] on left → ends [4|6] (2 left)
+         WHY: [4|4] (score=44): Partner played 2 tiles with 4/6; Play double early (inflexible)
+  #15 P0(T1): plays [0|6] on right → ends [4|0] (3 left)
+         WHY: [0|6] (score=58): I have 1 more tiles for ends 4/0; Partner played 3 tiles with 4/0; Few tiles left with 4 (1); Partner close to winning (est. 2 tiles)
+  #16 P1(T2): plays [1|4] on left → ends [1|0] (2 left)
+         WHY: [1|4] (score=48): I have 1 more tiles for ends 1/0; Partner played 1 tiles with 1/0; Partner close to winning (est. 2 tiles)
+  #17 P2(T1): plays [0|3] on right → ends [1|3] (1 left)
+         WHY: [0|3] (score=37): I have 1 more tiles for ends 1/3; Partner played 2 tiles with 1/3
+  #18 P3(T2): plays [1|2] on left → ends [2|3] (1 left)
+         WHY: [1|2] (score=37): Partner played 3 tiles with 2/3; Few tiles left with 3 (1); Partner close to winning (est. 2 tiles)
+  #19 P0(T1): plays [2|6] on left → ends [6|3] (2 left)
+         WHY: [2|6] (score=47): Partner played 3 tiles with 6/3; Few tiles left with 3 (1); Partner close to winning (est. 1 tiles)
+  #20 P1(T2): plays [1|6] on left → ends [1|3] (1 left)
+         WHY: [1|6] (score=45): Partner played 3 tiles with 1/3; Few tiles left with 3 (1); Partner close to winning (est. 1 tiles)
+  #21 P2(T1): plays [3|5] on right → ends [1|5] (0 left)
+         WHY: [3|5] (score=39): Partner played 1 tiles with 1/5; Partner close to winning (est. 2 tiles)
+  ROUND RESULT: P2 (T1) wins 1pts (normal) — Score: T1=4 T2=2
+
+===== ROUND 7 =====
+  Hands dealt:
+    P0 (T1): [0|2] [1|3] [2|4] [0|1] [0|0] [2|5]
+    P1 (T2): [4|6] [0|4] [1|2] [3|5] [1|5] [5|5]
+    P2 (T1): [1|6] [5|6] [3|3] [0|3] [4|5] [2|6]
+    P3 (T2): [2|3] [2|2] [4|4] [6|6] [3|6] [3|4]
+  P0 (T1) starts (winning team choice)
+  #1 P0(T1): plays [0|0] on first → ends [0|0] (5 left)
+         WHY: Open with [0|0]: dominant suit signal (suit 0=3, suit 0=3)
+  #2 P1(T2): plays [0|4] on left → ends [4|0] (5 left)
+         WHY: [0|4] (score=23): I have 1 more tiles for ends 4/0
+  #3 P2(T1): plays [0|3] on right → ends [4|3] (5 left)
+         WHY: [0|3] (score=56): I have 2 more tiles for ends 4/3; Sets up isolated double [3|3]
+  #4 P3(T2): plays [4|4] on left → ends [4|3] (5 left)
+         WHY: [4|4] (score=96): I have 4 more tiles for ends 4/3; Partner played 1 tiles with 4/3; Play double early (inflexible)
+  #5 P0(T1): plays [2|4] on left → ends [2|3] (4 left)
+         WHY: [2|4] (score=65): I have 3 more tiles for ends 2/3; Partner played 1 tiles with 2/3
+  #6 P1(T2): plays [3|5] on right → ends [2|5] (4 left)
+         WHY: [3|5] (score=61): I have 3 more tiles for ends 2/5
+  #7 P2(T1): plays [2|6] on left → ends [6|5] (4 left)
+         WHY: [2|6] (score=76): I have 4 more tiles for ends 6/5
+  #8 P3(T2): plays [3|6] on left → ends [3|5] (4 left)
+         WHY: [3|6] (score=64): I have 2 more tiles for ends 3/5; Partner played 2 tiles with 3/5; Dump heavy tile (9 pips)
+  #9 P0(T1): plays [2|5] on right → ends [3|2] (3 left)
+         WHY: [2|5] (score=60): I have 2 more tiles for ends 3/2; Partner played 2 tiles with 3/2
+  #10 P1(T2): plays [1|2] on right → ends [3|1] (3 left)
+         WHY: [1|2] (score=29): I have 1 more tiles for ends 3/1; Partner played 1 tiles with 3/1
+  #11 P2(T1): plays [1|6] on right → ends [3|6] (3 left)
+         WHY: [1|6] (score=64): I have 2 more tiles for ends 3/6; Sets up isolated double [3|3]
+  #12 P3(T2): plays [2|3] on left → ends [2|6] (3 left)
+         WHY: [2|3] (score=88): I have 2 more tiles for ends 2/6; Partner played 1 tiles with 2/6; Sets up isolated double [2|2]; Sets up isolated double [6|6]
+  #13 P0(T1): plays [0|2] on left → ends [0|6] (2 left)
+         WHY: [0|2] (score=43): I have 1 more tiles for ends 0/6; Partner played 3 tiles with 0/6
+  #14 P1(T2): plays [4|6] on right → ends [0|4] (2 left)
+         WHY: [4|6] (score=28): Partner played 1 tiles with 0/4; Dump heavy tile (10 pips)
+  #15 P2(T1): plays [4|5] on right → ends [0|5] (2 left)
+         WHY: [4|5] (score=72): I have 1 more tiles for ends 0/5; Partner played 3 tiles with 0/5; Dump heavy tile (9 pips); Partner close to winning (est. 2 tiles)
+  #16 P3(T2): PASSES (no 0 or 5) — now known: can't have {0,5}
+  #17 P0(T1): plays [0|1] on left → ends [1|5] (1 left)
+         WHY: [0|1] (score=48): I have 1 more tiles for ends 1/5; Partner played 2 tiles with 1/5; Partner close to winning (est. 2 tiles)
+  #18 P1(T2): plays [5|5] on right → ends [1|5] (1 left)
+         WHY: [5|5] (score=52): I have 2 more tiles for ends 1/5; Partner can't have 5; Dump heavy tile (10 pips); Play double early (inflexible)
+  #19 P2(T1): plays [5|6] on right → ends [1|6] (1 left)
+         WHY: [5|6] (score=45): Partner played 1 tiles with 1/6; Dump heavy tile (11 pips); Partner close to winning (est. 1 tiles)
+  #20 P3(T2): plays [6|6] on right → ends [1|6] (2 left)
+         WHY: [6|6] (score=67): Partner played 2 tiles with 1/6; Dump heavy tile (12 pips); Play double early (inflexible); Partner close to winning (est. 1 tiles)
+  #21 P0(T1): plays [1|3] on left → ends [3|6] (0 left)
+         WHY: [1|3] (score=47): Partner played 4 tiles with 3/6; Few tiles left with 6 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P0 (T1) wins 1pts (normal) — Score: T1=5 T2=2
+
+===== ROUND 8 =====
+  Hands dealt:
+    P0 (T1): [4|4] [1|6] [0|5] [1|5] [0|6] [1|3]
+    P1 (T2): [0|3] [4|5] [0|0] [4|6] [3|6] [1|4]
+    P2 (T1): [2|3] [3|5] [2|4] [1|2] [1|1] [5|5]
+    P3 (T2): [3|3] [2|2] [0|2] [0|1] [2|5] [6|6]
+  P0 (T1) starts (winning team choice)
+  #1 P0(T1): plays [1|6] on first → ends [1|6] (5 left)
+         WHY: Open with [1|6]: dominant suit signal (suit 1=3, suit 6=2)
+  #2 P1(T2): plays [1|4] on left → ends [4|6] (5 left)
+         WHY: [1|4] (score=70): I have 4 more tiles for ends 4/6
+  #3 P2(T1): plays [2|4] on left → ends [2|6] (5 left)
+         WHY: [2|4] (score=50): I have 2 more tiles for ends 2/6; Partner played 1 tiles with 2/6
+  #4 P3(T2): plays [2|2] on left → ends [2|6] (5 left)
+         WHY: [2|2] (score=85): I have 3 more tiles for ends 2/6; Play double early (inflexible); Sets up isolated double [6|6]
+  #5 P0(T1): plays [0|6] on right → ends [2|0] (4 left)
+         WHY: [0|6] (score=35): I have 1 more tiles for ends 2/0; Partner played 1 tiles with 2/0
+  #6 P1(T2): plays [0|0] on right → ends [2|0] (4 left)
+         WHY: [0|0] (score=35): I have 1 more tiles for ends 2/0; Partner played 1 tiles with 2/0; Play double early (inflexible)
+  #7 P2(T1): plays [1|2] on left → ends [1|0] (4 left)
+         WHY: [1|2] (score=57): I have 1 more tiles for ends 1/0; Partner played 2 tiles with 1/0; Sets up isolated double [1|1]
+  #8 P3(T2): plays [0|1] on left → ends [0|0] (4 left)
+         WHY: [0|1] (score=48): I have 2 more tiles for ends 0/0; Partner played 2 tiles with 0/0
+  #9 P0(T1): plays [0|5] on left → ends [5|0] (3 left)
+         WHY: [0|5] (score=25): I have 1 more tiles for ends 5/0
+  #10 P1(T2): plays [4|5] on left → ends [4|0] (3 left)
+         WHY: [4|5] (score=56): I have 2 more tiles for ends 4/0; Partner played 1 tiles with 4/0; Dump heavy tile (9 pips)
+  #11 P2(T1): PASSES (no 4 or 0) — now known: can't have {4,0}
+  #12 P3(T2): plays [0|2] on right → ends [4|2] (3 left)
+         WHY: [0|2] (score=35): I have 1 more tiles for ends 4/2; Partner played 2 tiles with 4/2
+  #13 P0(T1): plays [4|4] on left → ends [4|2] (2 left)
+         WHY: [4|4] (score=42): Partner played 3 tiles with 4/2; Partner can't have 4; Play double early (inflexible)
+  #14 P1(T2): plays [4|6] on left → ends [6|2] (2 left)
+         WHY: [4|6] (score=51): I have 1 more tiles for ends 6/2; Partner played 2 tiles with 6/2; Dump heavy tile (10 pips)
+  #15 P2(T1): plays [2|3] on right → ends [6|3] (3 left)
+         WHY: [2|3] (score=56): I have 1 more tiles for ends 6/3; Partner played 2 tiles with 6/3; Partner close to winning (est. 2 tiles)
+  #16 P3(T2): plays [6|6] on left → ends [6|3] (2 left)
+         WHY: [6|6] (score=94): I have 1 more tiles for ends 6/3; Partner played 1 tiles with 6/3; Dump heavy tile (12 pips); Play double early (inflexible); Sets up isolated double [3|3]; Partner close to winning (est. 2 tiles)
+  #17 P0(T1): plays [1|3] on right → ends [6|1] (1 left)
+         WHY: [1|3] (score=31): I have 1 more tiles for ends 6/1; Partner played 1 tiles with 6/1
+  #18 P1(T2): plays [3|6] on left → ends [3|1] (1 left)
+         WHY: [3|6] (score=56): I have 1 more tiles for ends 3/1; Partner played 1 tiles with 3/1; Dump heavy tile (9 pips); Partner close to winning (est. 2 tiles)
+  #19 P2(T1): plays [3|5] on left → ends [5|1] (2 left)
+         WHY: [3|5] (score=125): I have 2 more tiles for ends 5/1; Partner played 3 tiles with 5/1; Sets up isolated double [1|1]; Sets up isolated double [5|5]; Partner close to winning (est. 1 tiles)
+  #20 P3(T2): plays [2|5] on left → ends [2|1] (1 left)
+         WHY: [2|5] (score=37): Partner played 1 tiles with 2/1; Partner close to winning (est. 1 tiles)
+  #21 P0(T1): plays [1|5] on right → ends [2|5] (0 left)
+         WHY: [1|5] (score=51): Partner played 4 tiles with 2/5; Few tiles left with 2 (1); Partner close to winning (est. 2 tiles)
+  ROUND RESULT: P0 (T1) wins 1pts (normal) — Score: T1=6 T2=2
+
+  MATCH WINNER: Team 1 (6-2) in 8 rounds
+
+──────────────────────────────────────────────────
+  MATCH 3 — Smart AI (all players)
+──────────────────────────────────────────────────
+
+===== ROUND 1 =====
+  Hands dealt:
+    P0 (T1): [0|1] [5|6] [1|1] [1|2] [0|5] [0|6]
+    P1 (T2): [4|5] [1|6] [6|6] [0|2] [1|5] [2|6]
+    P2 (T1): [2|2] [0|4] [4|6] [0|0] [3|3] [3|5]
+    P3 (T2): [2|4] [3|4] [2|3] [3|6] [4|4] [5|5]
+  P1 auto-plays [6|6] (highest double)
+  #1 P2(T1): plays [4|6] on left → ends [4|6] (5 left)
+         WHY: [4|6] (score=35): I have 1 more tiles for ends 4/6; Dump heavy tile (10 pips)
+  #2 P3(T2): plays [3|6] on right → ends [4|3] (5 left)
+         WHY: [3|6] (score=93): I have 5 more tiles for ends 4/3; Dump heavy tile (9 pips)
+  #3 P0(T1): PASSES — can't have {4,3}
+  #4 P1(T2): plays [4|5] on left → ends [5|3] (4 left)
+         WHY: [4|5] (score=41): I have 1 more tiles for ends 5/3; Partner played 1 tiles with 5/3; Dump heavy tile (9 pips)
+  #5 P2(T1): plays [3|5] on left → ends [3|3] (4 left)
+         WHY: [3|5] (score=46): I have 2 more tiles for ends 3/3; Partner can't have 3; Partner can't have 3; Sets up isolated double [3|3]
+  #6 P3(T2): plays [3|4] on left → ends [4|3] (4 left)
+         WHY: [3|4] (score=92): I have 3 more tiles for ends 4/3; Opp 0 blocked on 4/3; Partner played 1 tiles with 4/3
+  #7 P0(T1): PASSES — can't have {4,3}
+  #8 P1(T2): PASSES — can't have {4,3}
+  #9 P2(T1): plays [0|4] on left → ends [0|3] (3 left)
+         WHY: [0|4] (score=68): I have 2 more tiles for ends 0/3; Partner can't have 3; Sets up isolated double [0|0]; Sets up isolated double [3|3]
+  #10 P3(T2): plays [2|3] on right → ends [0|2] (3 left)
+         WHY: [2|3] (score=25): I have 1 more tiles for ends 0/2
+  #11 P0(T1): plays [1|2] on right → ends [0|1] (5 left)
+         WHY: [1|2] (score=89): I have 5 more tiles for ends 0/1; Partner played 1 tiles with 0/1
+  #12 P1(T2): plays [0|2] on left → ends [2|1] (3 left)
+         WHY: [0|2] (score=57): I have 3 more tiles for ends 2/1; Partner played 1 tiles with 2/1
+  #13 P2(T1): plays [2|2] on left → ends [2|1] (2 left)
+         WHY: [2|2] (score=36): Partner played 2 tiles with 2/1; Play double early (inflexible)
+  #14 P3(T2): plays [2|4] on left → ends [4|1] (2 left)
+         WHY: [2|4] (score=45): I have 1 more tiles for ends 4/1; Partner played 1 tiles with 4/1; Partner can't have 4; Sets up isolated double [4|4]
+  #15 P0(T1): plays [0|1] on right → ends [4|0] (4 left)
+         WHY: [0|1] (score=71): I have 2 more tiles for ends 4/0; Partner played 3 tiles with 4/0; Partner close to winning (est. 2 tiles)
+  #16 P1(T2): PASSES — can't have {4,3,0}
+  #17 P2(T1): plays [0|0] on right → ends [4|0] (1 left)
+         WHY: [0|0] (score=35): Opp 1 blocked on 4/0; Partner played 1 tiles with 4/0; Partner can't have 4; Play double early (inflexible)
+  #18 P3(T2): plays [4|4] on left → ends [4|0] (1 left)
+         WHY: [4|4] (score=24): Partner played 2 tiles with 4/0; Partner can't have 4; Partner can't have 0; Play double early (inflexible)
+  #19 P0(T1): plays [0|6] on right → ends [4|6] (3 left)
+         WHY: [0|6] (score=58): I have 1 more tiles for ends 4/6; Partner played 3 tiles with 4/6; Few tiles left with 4 (1); Partner close to winning (est. 1 tiles)
+  #20 P1(T2): plays [2|6] on right → ends [4|2] (2 left)
+         WHY: [2|6] (score=63): Partner played 5 tiles with 4/2; Few tiles left with 4 (1); Partner close to winning (est. 1 tiles)
+  #21 P2(T1): PASSES — can't have {4,2}
+  #22 P3(T2): PASSES — can't have {4,2}
+  #23 P0(T1): PASSES — can't have {4,3,2}
+  #24 P1(T2): PASSES — can't have {4,3,0,2}
+  ROUND RESULT: P2 (T1) wins 1pts (blocked) — Score: T1=1 T2=0
+
+===== ROUND 2 =====
+  Hands dealt:
+    P0 (T1): [0|6] [2|3] [0|5] [5|6] [4|6] [2|6]
+    P1 (T2): [0|1] [1|5] [4|4] [3|6] [2|4] [4|5]
+    P2 (T1): [2|5] [5|5] [3|3] [1|6] [6|6] [0|2]
+    P3 (T2): [1|4] [0|0] [1|2] [1|1] [3|5] [3|4]
+  P0 (T1) starts (winning team choice)
+  #1 P0(T1): plays [5|6] on first → ends [5|6] (5 left)
+         WHY: Open with [5|6]: dominant suit signal (suit 5=2, suit 6=4)
+  #2 P1(T2): plays [4|5] on left → ends [4|6] (5 left)
+         WHY: [4|5] (score=63): I have 3 more tiles for ends 4/6; Dump heavy tile (9 pips)
+  #3 P2(T1): plays [6|6] on right → ends [4|6] (5 left)
+         WHY: [6|6] (score=59): I have 1 more tiles for ends 4/6; Partner played 1 tiles with 4/6; Dump heavy tile (12 pips); Play double early (inflexible)
+  #4 P3(T2): plays [1|4] on left → ends [1|6] (5 left)
+         WHY: [1|4] (score=40): I have 2 more tiles for ends 1/6
+  #5 P0(T1): plays [2|6] on right → ends [1|2] (4 left)
+         WHY: [2|6] (score=31): I have 1 more tiles for ends 1/2
+  #6 P1(T2): plays [2|4] on right → ends [1|4] (4 left)
+         WHY: [2|4] (score=93): I have 3 more tiles for ends 1/4; Partner played 2 tiles with 1/4; Sets up isolated double [4|4]
+  #7 P2(T1): plays [1|6] on left → ends [6|4] (4 left)
+         WHY: [1|6] (score=30): Partner played 2 tiles with 6/4
+  #8 P3(T2): plays [3|4] on right → ends [6|3] (4 left)
+         WHY: [3|4] (score=29): I have 1 more tiles for ends 6/3
+  #9 P0(T1): plays [2|3] on right → ends [6|2] (3 left)
+         WHY: [2|3] (score=56): I have 2 more tiles for ends 6/2; Partner played 2 tiles with 6/2
+  #10 P1(T2): plays [3|6] on left → ends [3|2] (3 left)
+         WHY: [3|6] (score=26): Partner played 1 tiles with 3/2; Dump heavy tile (9 pips)
+  #11 P2(T1): plays [2|5] on right → ends [3|5] (3 left)
+         WHY: [2|5] (score=100): I have 2 more tiles for ends 3/5; Partner played 2 tiles with 3/5; Sets up isolated double [5|5]; Sets up isolated double [3|3]
+  #12 P3(T2): plays [3|5] on left → ends [5|5] (3 left)
+         WHY: [3|5] (score=32): Partner played 2 tiles with 5/5
+  #13 P0(T1): plays [0|5] on left → ends [0|5] (2 left)
+         WHY: [0|5] (score=33): I have 1 more tiles for ends 0/5; Partner played 1 tiles with 0/5
+  #14 P1(T2): plays [1|5] on right → ends [0|1] (2 left)
+         WHY: [1|5] (score=50): I have 2 more tiles for ends 0/1; Partner played 1 tiles with 0/1
+  #15 P2(T1): plays [0|2] on left → ends [2|1] (2 left)
+         WHY: [0|2] (score=35): Partner played 2 tiles with 2/1; Partner close to winning (est. 2 tiles)
+  #16 P3(T2): plays [1|2] on left → ends [1|1] (2 left)
+         WHY: [1|2] (score=87): I have 2 more tiles for ends 1/1; Partner played 2 tiles with 1/1; Sets up isolated double [1|1]; Partner close to winning (est. 2 tiles)
+  #17 P0(T1): PASSES (no 1 or 1) — now known: can't have {1}
+  #18 P1(T2): plays [0|1] on left → ends [0|1] (1 left)
+         WHY: [0|1] (score=33): Partner played 2 tiles with 0/1; Partner close to winning (est. 2 tiles)
+  #19 P2(T1): PASSES (no 0 or 1) — now known: can't have {0,1}
+  #20 P3(T2): plays [1|1] on right → ends [0|1] (1 left)
+         WHY: [1|1] (score=115): I have 1 more tiles for ends 0/1; Opp 2 blocked on 0/1; Partner played 3 tiles with 0/1; Play double early (inflexible); Sets up isolated double [0|0]; Partner close to winning (est. 1 tiles)
+  #21 P0(T1): plays [0|6] on left → ends [6|1] (1 left)
+         WHY: [0|6] (score=48): I have 1 more tiles for ends 6/1; Partner played 3 tiles with 6/1; Partner can't have 1; Few tiles left with 1 (1); Partner close to winning (est. 2 tiles)
+  #22 P1(T2): PASSES (no 6 or 1) — now known: can't have {6,1}
+  #23 P2(T1): PASSES (no 6 or 1) — now known: can't have {0,1,6}
+  #24 P3(T2): PASSES (no 6 or 1) — now known: can't have {6,1}
+  #25 P0(T1): plays [4|6] on left → ends [4|1] (0 left)
+         WHY: [4|6] (score=25): Partner played 1 tiles with 4/1; Partner can't have 1; Dump heavy tile (10 pips); Few tiles left with 1 (1); Partner close to winning (est. 2 tiles)
+  ROUND RESULT: P0 (T1) wins 1pts (normal) — Score: T1=2 T2=0
+
+===== ROUND 3 =====
+  Hands dealt:
+    P0 (T1): [5|6] [6|6] [1|5] [4|5] [2|3] [3|4]
+    P1 (T2): [0|0] [1|4] [3|5] [2|5] [3|3] [1|1]
+    P2 (T1): [2|2] [0|2] [0|6] [1|6] [4|6] [2|4]
+    P3 (T2): [0|1] [4|4] [0|3] [5|5] [3|6] [0|4]
+  P0 (T1) starts (winning team choice)
+  #1 P0(T1): plays [6|6] on first → ends [6|6] (5 left)
+         WHY: Open with [6|6]: dominant suit signal (suit 6=2, suit 6=2)
+  #2 P1(T2): PASSES (no 6 or 6) — now known: can't have {6}
+  #3 P2(T1): plays [4|6] on left → ends [4|6] (5 left)
+         WHY: [4|6] (score=73): I have 3 more tiles for ends 4/6; Partner played 1 tiles with 4/6; Dump heavy tile (10 pips)
+  #4 P3(T2): plays [3|6] on right → ends [4|3] (5 left)
+         WHY: [3|6] (score=63): I have 3 more tiles for ends 4/3; Dump heavy tile (9 pips)
+  #5 P0(T1): plays [4|5] on left → ends [5|3] (4 left)
+         WHY: [4|5] (score=78): I have 4 more tiles for ends 5/3; Dump heavy tile (9 pips)
+  #6 P1(T2): plays [3|5] on left → ends [3|3] (5 left)
+         WHY: [3|5] (score=82): I have 2 more tiles for ends 3/3; Partner played 2 tiles with 3/3; Sets up isolated double [3|3]
+  #7 P2(T1): PASSES (no 3 or 3) — now known: can't have {3}
+  #8 P3(T2): plays [0|3] on left → ends [0|3] (4 left)
+         WHY: [0|3] (score=44): I have 2 more tiles for ends 0/3; Partner played 1 tiles with 0/3
+  #9 P0(T1): plays [3|4] on right → ends [0|4] (3 left)
+         WHY: [3|4] (score=22): Partner played 1 tiles with 0/4
+  #10 P1(T2): plays [1|4] on right → ends [0|1] (4 left)
+         WHY: [1|4] (score=88): I have 2 more tiles for ends 0/1; Partner played 1 tiles with 0/1; Sets up isolated double [0|0]; Sets up isolated double [1|1]
+  #11 P2(T1): plays [1|6] on right → ends [0|6] (4 left)
+         WHY: [1|6] (score=67): I have 3 more tiles for ends 0/6; Partner played 1 tiles with 0/6
+  #12 P3(T2): plays [0|4] on left → ends [4|6] (3 left)
+         WHY: [0|4] (score=41): I have 1 more tiles for ends 4/6; Partner played 1 tiles with 4/6; Partner can't have 6; Sets up isolated double [4|4]
+  #13 P0(T1): plays [5|6] on right → ends [4|5] (2 left)
+         WHY: [5|6] (score=45): I have 1 more tiles for ends 4/5; Partner played 1 tiles with 4/5; Dump heavy tile (11 pips)
+  #14 P1(T2): plays [2|5] on right → ends [4|2] (3 left)
+         WHY: [2|5] (score=22): Partner played 1 tiles with 4/2
+  #15 P2(T1): plays [2|2] on right → ends [4|2] (3 left)
+         WHY: [2|2] (score=96): I have 3 more tiles for ends 4/2; Partner played 2 tiles with 4/2; Play double early (inflexible); Partner close to winning (est. 2 tiles)
+  #16 P3(T2): plays [4|4] on left → ends [4|2] (2 left)
+         WHY: [4|4] (score=44): Partner played 2 tiles with 4/2; Play double early (inflexible)
+  #17 P0(T1): plays [2|3] on right → ends [4|3] (1 left)
+         WHY: [2|3] (score=0): Partner played 1 tiles with 4/3; Partner can't have 3; Few tiles left with 4 (1)
+  #18 P1(T2): plays [3|3] on right → ends [4|3] (2 left)
+         WHY: [3|3] (score=63): Partner played 4 tiles with 4/3; Play double early (inflexible); Few tiles left with 4 (1); Partner close to winning (est. 2 tiles)
+  #19 P2(T1): plays [2|4] on left → ends [2|3] (2 left)
+         WHY: [2|4] (score=58): I have 1 more tiles for ends 2/3; Partner played 3 tiles with 2/3; Few tiles left with 3 (1); Partner close to winning (est. 1 tiles)
+  #20 P3(T2): PASSES (no 2 or 3) — now known: can't have {2,3}
+  #21 P0(T1): PASSES (no 2 or 3) — now known: can't have {2,3}
+  #22 P1(T2): PASSES (no 2 or 3) — now known: can't have {6,2,3}
+  #23 P2(T1): plays [0|2] on left → ends [0|3] (1 left)
+         WHY: [0|2] (score=32): I have 1 more tiles for ends 0/3; Partner played 2 tiles with 0/3; Partner can't have 3; Few tiles left with 3 (1); Partner close to winning (est. 1 tiles)
+  #24 P3(T2): plays [0|1] on left → ends [1|3] (1 left)
+         WHY: [0|1] (score=23): Partner played 3 tiles with 1/3; Partner can't have 3; Few tiles left with 3 (1); Partner close to winning (est. 2 tiles)
+  #25 P0(T1): plays [1|5] on left → ends [5|3] (0 left)
+         WHY: [1|5] (score=9): Partner can't have 3; Few tiles left with 3 (1); Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P0 (T1) wins 1pts (normal) — Score: T1=3 T2=0
+
+===== ROUND 4 =====
+  Hands dealt:
+    P0 (T1): [0|5] [1|5] [2|3] [3|6] [0|1] [0|3]
+    P1 (T2): [3|4] [1|2] [5|6] [0|6] [1|6] [2|4]
+    P2 (T1): [3|5] [2|5] [1|4] [1|3] [4|6] [4|5]
+    P3 (T2): [4|4] [3|3] [0|0] [0|4] [6|6] [2|6]
+  P0 (T1) starts (winning team choice)
+  #1 P0(T1): plays [0|3] on first → ends [0|3] (5 left)
+         WHY: Open with [0|3]: dominant suit signal (suit 0=3, suit 3=3)
+  #2 P1(T2): plays [0|6] on left → ends [6|3] (5 left)
+         WHY: [0|6] (score=57): I have 3 more tiles for ends 6/3
+  #3 P2(T1): plays [4|6] on left → ends [4|3] (5 left)
+         WHY: [4|6] (score=88): I have 4 more tiles for ends 4/3; Partner played 1 tiles with 4/3; Dump heavy tile (10 pips)
+  #4 P3(T2): plays [0|4] on left → ends [0|3] (5 left)
+         WHY: [0|4] (score=86): I have 2 more tiles for ends 0/3; Partner played 1 tiles with 0/3; Sets up isolated double [3|3]; Sets up isolated double [0|0]
+  #5 P0(T1): plays [3|6] on right → ends [0|6] (4 left)
+         WHY: [3|6] (score=56): I have 2 more tiles for ends 0/6; Partner played 1 tiles with 0/6; Dump heavy tile (9 pips)
+  #6 P1(T2): plays [1|6] on right → ends [0|1] (4 left)
+         WHY: [1|6] (score=37): I have 1 more tiles for ends 0/1; Partner played 1 tiles with 0/1
+  #7 P2(T1): plays [1|3] on right → ends [0|3] (4 left)
+         WHY: [1|3] (score=47): I have 1 more tiles for ends 0/3; Partner played 3 tiles with 0/3
+  #8 P3(T2): plays [3|3] on right → ends [0|3] (4 left)
+         WHY: [3|3] (score=67): I have 1 more tiles for ends 0/3; Partner played 1 tiles with 0/3; Play double early (inflexible); Sets up isolated double [0|0]
+  #9 P0(T1): plays [0|5] on left → ends [5|3] (3 left)
+         WHY: [0|5] (score=48): I have 2 more tiles for ends 5/3; Partner played 1 tiles with 5/3
+  #10 P1(T2): plays [3|4] on right → ends [5|4] (3 left)
+         WHY: [3|4] (score=52): I have 2 more tiles for ends 5/4; Partner played 1 tiles with 5/4
+  #11 P2(T1): plays [4|5] on right → ends [5|5] (3 left)
+         WHY: [4|5] (score=94): I have 4 more tiles for ends 5/5; Partner played 2 tiles with 5/5; Dump heavy tile (9 pips)
+  #12 P3(T2): PASSES (no 5 or 5) — now known: can't have {5}
+  #13 P0(T1): plays [1|5] on left → ends [1|5] (2 left)
+         WHY: [1|5] (score=43): I have 1 more tiles for ends 1/5; Partner played 2 tiles with 1/5
+  #14 P1(T2): plays [5|6] on right → ends [1|6] (2 left)
+         WHY: [5|6] (score=37): I have 1 more tiles for ends 1/6; Dump heavy tile (11 pips)
+  #15 P2(T1): plays [1|4] on left → ends [4|6] (2 left)
+         WHY: [1|4] (score=33): Partner played 1 tiles with 4/6; Partner close to winning (est. 2 tiles)
+  #16 P3(T2): plays [6|6] on right → ends [4|6] (3 left)
+         WHY: [6|6] (score=133): I have 2 more tiles for ends 4/6; Partner played 4 tiles with 4/6; Dump heavy tile (12 pips); Play double early (inflexible); Sets up isolated double [4|4]; Partner close to winning (est. 2 tiles)
+  #17 P0(T1): PASSES (no 4 or 6) — now known: can't have {4,6}
+  #18 P1(T2): plays [2|4] on left → ends [2|6] (1 left)
+         WHY: [2|4] (score=27): I have 1 more tiles for ends 2/6; Partner played 1 tiles with 2/6; Few tiles left with 6 (1)
+  #19 P2(T1): plays [2|5] on left → ends [5|6] (1 left)
+         WHY: [2|5] (score=50): I have 1 more tiles for ends 5/6; Partner played 3 tiles with 5/6; Partner can't have 6; Few tiles left with 6 (1); Partner close to winning (est. 2 tiles)
+  #20 P3(T2): plays [2|6] on right → ends [5|2] (2 left)
+         WHY: [2|6] (score=47): Partner played 2 tiles with 5/2; Partner close to winning (est. 1 tiles)
+  #21 P0(T1): plays [2|3] on right → ends [5|3] (1 left)
+         WHY: [2|3] (score=49): Partner played 3 tiles with 5/3; Partner close to winning (est. 1 tiles)
+  #22 P1(T2): PASSES (no 5 or 3) — now known: can't have {5,3}
+  #23 P2(T1): plays [3|5] on left → ends [3|3] (0 left)
+         WHY: [3|5] (score=113): Opp 3 blocked on 5/5; Opp 1 blocked on 5/5; Partner played 4 tiles with 5/5; Partner close to winning (est. 1 tiles)
+  ROUND RESULT: P2 (T1) wins 3pts (la-e-lo) — Score: T1=6 T2=0
+
+  MATCH WINNER: Team 1 (6-0) in 4 rounds
+
+============================================================
+  PART 2: SKILL vs LUCK — 1 MATCHES
+============================================================
+
+  Dumb vs Dumb (baseline)
+    Team 1 wins: 1 (100.0%)
+    Team 2 wins: 0 (0.0%)
+    Avg rounds:  7.0
+    Avg score diff (T1-T2): +4.00
+
+  Smart vs Dumb
+    Team 1 wins: 1 (100.0%)
+    Team 2 wins: 0 (0.0%)
+    Avg rounds:  8.0
+    Avg score diff (T1-T2): +4.00
+
+  Dumb vs Smart
+    Team 1 wins: 0 (0.0%)
+    Team 2 wins: 1 (100.0%)
+    Avg rounds:  8.0
+    Avg score diff (T1-T2): -3.00
+
+  Smart vs Smart
+    Team 1 wins: 1 (100.0%)
+    Team 2 wins: 0 (0.0%)
+    Avg rounds:  7.0
+    Avg score diff (T1-T2): +2.00
+
+============================================================
+  CONCLUSIONS
+============================================================
+
+  Run with --verbose to see detailed move-by-move reasoning
+  Run with --matches=N to change sample size
+  Example: node domino-brain.js --verbose --matches=5000
+

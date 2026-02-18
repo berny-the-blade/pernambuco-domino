@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Domino Pernambucano — Strategy Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+    .tile { display: inline-flex; border: 2px solid #475569; border-radius: 6px; background: #fef3c7; cursor: default; }
+    .tile-v { flex-direction: column; width: 36px; height: 68px; }
+    .tile-h { flex-direction: row; width: 68px; height: 36px; }
+    .tile-half { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+    .tile-v .tile-half:first-child { border-bottom: 1.5px solid #94a3b8; }
+    .tile-h .tile-half:first-child { border-right: 1.5px solid #94a3b8; }
+    .tile-played { opacity: 0.4; border-color: #334155; }
+    .tile-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
+    .tile-playable { border-color: #eab308 !important; box-shadow: 0 0 8px rgba(234,179,8,0.4); }
+    .dot { width: 5px; height: 5px; background: #1e293b; border-radius: 50%; position: absolute; }
+    .dot-sm { width: 4px; height: 4px; }
+    .board-tile { display: inline-flex; border: 1.5px solid #64748b; border-radius: 4px; background: #fef3c7; }
+    .board-tile-v { flex-direction: column; width: 26px; height: 48px; }
+    .board-tile-h { flex-direction: row; width: 48px; height: 26px; }
+    .board-tile .tile-half:first-child { border-color: #94a3b8; }
+    .log-entry { transition: background 0.2s; }
+    .log-entry.active { background: rgba(34,197,94,0.15); border-left: 3px solid #22c55e; }
+    .log-entry.past { opacity: 0.5; }
+    #log-container { scroll-behavior: smooth; }
+    .player-area { transition: all 0.2s; }
+    .player-area.active-turn { background: rgba(34,197,94,0.1); border-color: #22c55e !important; }
+    .speed-btn.active { background: #22c55e; color: #0f172a; }
+    .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+    .btn:hover { transform: scale(1.05); }
+    .btn-green { background: #22c55e; color: #0f172a; }
+    .btn-blue { background: #3b82f6; color: white; }
+    .btn-gray { background: #334155; color: #e2e8f0; }
+    .btn-yellow { background: #eab308; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    // ========== DOMINO DOT PATTERNS ==========
+    const DOT_POS = {
+      0: [],
+      1: [[50,50]],
+      2: [[20,20],[80,80]],
+      3: [[20,20],[50,50],[80,80]],
+      4: [[20,20],[20,80],[80,20],[80,80]],
+      5: [[20,20],[20,80],[50,50],[80,20],[80,80]],
+      6: [[20,20],[20,80],[50,20],[50,80],[80,20],[80,80]]
+    };
+
+    function renderDots(value, small) {
+      const cls = small ? 'dot dot-sm' : 'dot';
+      return (DOT_POS[value] || []).map(([t,l]) =>
+        `<div class="${cls}" style="top:${t}%;left:${l}%;transform:translate(-50%,-50%)"></div>`
+      ).join('');
+    }
+
+    function tileHTML(tile, cls = '', orient = 'v', highlight = false, playable = false) {
+      const hCls = highlight ? ' tile-highlight' : playable ? ' tile-playable' : '';
+      const dir = orient === 'v' ? 'tile-v' : 'tile-h';
+      const sm = cls.includes('board') ? true : false;
+      const base = cls.includes('board') ? 'board-tile' : 'tile';
+      const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
+      return `<div class="${base} ${dirB}${hCls}" title="${tile.left}-${tile.right}">
+        <div class="tile-half">${renderDots(tile.left, sm)}</div>
+        <div class="tile-half">${renderDots(tile.right, sm)}</div>
+      </div>`;
+    }
+
+    // ========== GAME LOGIC (from domino-brain.js) ==========
+
+    function createDeck() {
+      const d = [];
+      for (let i = 0; i <= 6; i++)
+        for (let j = i; j <= 6; j++)
+          d.push({ left: i, right: j, id: `${i}-${j}` });
+      return d;
+    }
+
+    function shuffleDeck(deck) {
+      const s = [...deck];
+      for (let i = s.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [s[i], s[j]] = [s[j], s[i]];
+      }
+      return s;
+    }
+
+    function canPlay(t, lE, rE, bLen) {
+      if (bLen === 0) return true;
+      return t.left === lE || t.right === lE || t.left === rE || t.right === rE;
+    }
+
+    function couldPlayBothEnds(t, l, r) {
+      if (l === null || r === null || l === r) return false;
+      return (t.left === l || t.right === l) && (t.left === r || t.right === r);
+    }
+
+    // Knowledge tracker
+    class Knowledge {
+      constructor() {
+        this.cantHave = [new Set(), new Set(), new Set(), new Set()];
+        this.played = new Set();
+        this.allTiles = createDeck();
+        this.playsBy = [[], [], [], []];
+      }
+      recordPlay(p, t) {
+        this.played.add(t.id);
+        if (p >= 0 && p <= 3) this.playsBy[p].push(t);
+      }
+      recordPass(p, lE, rE) {
+        this.cantHave[p].add(lE);
+        this.cantHave[p].add(rE);
+      }
+      inferStrength(p) {
+        const s = [0,0,0,0,0,0,0];
+        for (const t of this.playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+        return s;
+      }
+      deadNumbers(p) { return [...this.cantHave[p]]; }
+      remainingWithNumber(n) {
+        let c = 0;
+        for (const t of this.allTiles) { if (!this.played.has(t.id) && (t.left === n || t.right === n)) c++; }
+        return c;
+      }
+    }
+
+    // Smart AI
+    function smartAI(hand, lE, rE, bLen, player, knowledge) {
+      const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
+      if (playable.length === 0) return null;
+
+      if (bLen === 0) {
+        const sc = [0,0,0,0,0,0,0];
+        for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+        let best = playable[0], bs = -1;
+        for (const t of playable) {
+          let s = sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2;
+          if (s > bs) { bs = s; best = t; }
+        }
+        return { tile: best, side: null, reasons: [`Open with dominant suit (${best.left}=${sc[best.left]}, ${best.right}=${sc[best.right]})`] };
+      }
+
+      const partner = (player + 2) % 4;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+
+      const scored = playable.map(tile => {
+        let score = 0;
+        const reasons = [];
+        // Try both sides
+        let bestSide = null, bestSideScore = -Infinity;
+
+        for (const side of ['left', 'right']) {
+          const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
+          if (!cS) continue;
+
+          let newEnd;
+          if (side === 'left') newEnd = tile.left === lE ? tile.right : tile.left;
+          else newEnd = tile.right === rE ? tile.left : tile.right;
+
+          const otherEnd = side === 'left' ? rE : lE;
+          let ss = 0;
+          const sr = [];
+
+          // Suit control
+          const myCount = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd || x.left === otherEnd || x.right === otherEnd)).length;
+          ss += myCount * 15;
+          if (myCount > 0) sr.push(`${myCount} more tiles match new ends ${newEnd}/${otherEnd}`);
+
+          // Blocking
+          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 25; sr.push(`Blocks opponent ${opp1}`); }
+          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 25; sr.push(`Blocks opponent ${opp2}`); }
+
+          // Partner support
+          const pStr = knowledge.inferStrength(partner);
+          const pAff = (pStr[newEnd]||0) + (pStr[otherEnd]||0);
+          if (pAff > 0) { ss += pAff * 8; sr.push(`Partner strong in ${newEnd}/${otherEnd}`); }
+          if (knowledge.cantHave[partner].has(newEnd)) { ss -= 10; sr.push(`Partner can't have ${newEnd}`); }
+
+          // Dump heavy
+          if (tile.left + tile.right >= 9) { ss += (tile.left+tile.right)*2; sr.push(`Dump heavy (${tile.left+tile.right} pips)`); }
+          else ss += (tile.left+tile.right)*2;
+
+          // Play doubles early
+          if (tile.left === tile.right) { ss += 12; sr.push('Clear inflexible double'); }
+
+          // Isolated double setup
+          for (const h of hand) {
+            if (h.id === tile.id || h.left !== h.right) continue;
+            const sup = hand.filter(x => x.id !== h.id && x.id !== tile.id && (x.left === h.left || x.right === h.left)).length;
+            if (sup === 0 && (newEnd === h.left || otherEnd === h.left)) { ss += 20; sr.push(`Sets up isolated [${h.left}|${h.left}]`); }
+          }
+
+          // Scarcity
+          if (knowledge.remainingWithNumber(newEnd) <= 1) { ss -= 8; sr.push(`Few tiles left with ${newEnd}`); }
+
+          // Partner close to winning
+          const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
+          if (estPHand <= 2 && estPHand > 0) { ss += 15; sr.push(`Partner close (est. ${estPHand} tiles)`); }
+
+          if (ss > bestSideScore) { bestSideScore = ss; bestSide = side; score = ss; reasons.length = 0; reasons.push(...sr); }
+        }
+
+        return { tile, score, reasons, side: bestSide };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      return scored[0];
+    }
+
+    // ========== SIMULATION ENGINE ==========
+
+    function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight) {
+      const hands = initHands.map(h => h.map(t => ({...t})));
+      let board = [...initBoard], lE = initLeft, rE = initRight;
+      let cur = startPlayer, passCount = 0, prevL = lE, prevR = rE;
+      const knowledge = new Knowledge();
+      for (const t of initBoard) knowledge.recordPlay(-1, t);
+
+      const snapshots = [];
+      // Initial snapshot
+      snapshots.push({
+        move: 0, player: -1, action: 'start', tile: null, side: null, reasons: ['Game begins'],
+        hands: hands.map(h => h.map(t => ({...t}))),
+        board: [...board], leftEnd: lE, rightEnd: rE, currentPlayer: cur,
+        knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => [...a]) }
+      });
+
+      let moveNum = 0;
+      while (moveNum < 200) {
+        moveNum++;
+        const decision = smartAI(hands[cur], lE, rE, board.length, cur, knowledge);
+
+        if (decision) {
+          passCount = 0;
+          const { tile, side: prefSide, reasons } = decision;
+          let side = prefSide;
+          if (board.length > 0 && !side) {
+            const cL = tile.left === lE || tile.right === lE;
+            const cR = tile.left === rE || tile.right === rE;
+            side = cL ? 'left' : 'right';
+          }
+
+          const playedTile = {...tile};
+          hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+          knowledge.recordPlay(cur, tile);
+
+          const pL = lE, pR = rE;
+
+          if (board.length === 0) {
+            board = [playedTile]; lE = tile.left; rE = tile.right;
+          } else {
+            let placed = {...tile};
+            if (side === 'left') {
+              if (tile.left === lE) placed = {left: tile.right, right: tile.left, id: tile.id};
+              board.unshift(placed); lE = placed.left;
+            } else {
+              if (tile.right === rE) placed = {left: tile.right, right: tile.left, id: tile.id};
+              board.push(placed); rE = placed.right;
+            }
+          }
+
+          let outcome = null;
+          if (hands[cur].length === 0) {
+            const isD = tile.left === tile.right;
+            const wasBoth = couldPlayBothEnds(tile, pL, pR);
+            let pts, type;
+            if (isD && wasBoth) { pts = 4; type = 'CRUZADA'; }
+            else if (isD) { pts = 2; type = 'CARROCA'; }
+            else if (wasBoth) { pts = 3; type = 'LA E LO'; }
+            else { pts = 1; type = 'NORMAL'; }
+            outcome = { type: 'win', winner: cur, team: cur % 2, points: pts, winType: type };
+          }
+
+          snapshots.push({
+            move: moveNum, player: cur, action: 'play', tile: playedTile, side: side || 'first',
+            reasons, score: decision.score,
+            hands: hands.map(h => h.map(t => ({...t}))),
+            board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
+            currentPlayer: outcome ? -1 : (cur + 1) % 4,
+            knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => a.map(t=>({...t}))) },
+            outcome
+          });
+
+          if (outcome) return { snapshots, outcome };
+          prevL = lE; prevR = rE;
+          cur = (cur + 1) % 4;
+
+        } else {
+          passCount++;
+          knowledge.recordPass(cur, lE, rE);
+
+          let outcome = null;
+          if (passCount >= 4) {
+            const hv = hands.map((h, i) => ({ player: i, team: i%2, points: h.reduce((s,t)=>s+t.left+t.right,0) }));
+            const min = Math.min(...hv.map(v => v.points));
+            const winners = hv.filter(v => v.points === min);
+            if (winners.length > 1 && winners.some(w => w.team===0) && winners.some(w => w.team===1)) {
+              outcome = { type: 'tie', points: 0 };
+            } else {
+              outcome = { type: 'blocked', winner: winners[0].player, team: winners[0].team, points: 1, handValues: hv };
+            }
+          }
+
+          snapshots.push({
+            move: moveNum, player: cur, action: 'pass', tile: null, side: null,
+            reasons: [`No tiles matching ${lE} or ${rE}`, `Known dead: {${knowledge.deadNumbers(cur).join(', ')}}`],
+            hands: hands.map(h => h.map(t => ({...t}))),
+            board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
+            currentPlayer: outcome ? -1 : (cur + 1) % 4,
+            knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => a.map(t=>({...t}))) },
+            outcome
+          });
+
+          if (outcome) return { snapshots, outcome };
+          cur = (cur + 1) % 4;
+        }
+      }
+      return { snapshots, outcome: { type: 'abort' } };
+    }
+
+    function generateGame() {
+      const deck = shuffleDeck(createDeck());
+      const hands = [[],[],[],[]];
+      for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
+
+      let hd = -1, hp = 0, ht = null;
+      for (let p = 0; p < 4; p++)
+        for (const t of hands[p])
+          if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+
+      const autoTile = {...ht};
+      hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+      const starter = (hp + 1) % 4;
+
+      return {
+        originalHands: hands.map(h => h.map(t => ({...t}))),
+        autoPlayedBy: hp,
+        autoTile,
+        ...simulateFullRound(hands, starter, [autoTile], autoTile.left, autoTile.right)
+      };
+    }
+
+    // ========== RENDERER ==========
+
+    let currentGame = null;
+    let currentStep = 0;
+    let autoPlayTimer = null;
+    let autoPlaySpeed = 1500;
+
+    function render() {
+      const app = document.getElementById('app');
+      if (!currentGame) {
+        app.innerHTML = renderStartScreen();
+        return;
+      }
+
+      const snap = currentGame.snapshots[currentStep];
+      const total = currentGame.snapshots.length;
+      const pNames = ['You (P0)', 'Opp Left (P1)', 'Partner (P2)', 'Opp Right (P3)'];
+      const pTeams = ['T1', 'T2', 'T1', 'T2'];
+      const teamColors = ['#3b82f6', '#ef4444'];
+
+      app.innerHTML = `
+        <div class="max-w-7xl mx-auto p-3">
+          <!-- Header -->
+          <div class="flex items-center justify-between mb-3">
+            <h1 class="text-xl font-bold text-emerald-400">Domino Pernambucano — Strategy Simulator</h1>
+            <div class="flex gap-2">
+              <button class="btn btn-yellow" onclick="newGame()">New Game</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-12 gap-3">
+            <!-- LEFT: Game Board -->
+            <div class="col-span-8">
+              <!-- Top player (P2 - Partner) -->
+              ${renderPlayerArea(2, snap, pNames, pTeams, teamColors)}
+
+              <!-- Middle: Left opp + Board + Right opp -->
+              <div class="flex gap-2 my-2">
+                <!-- Left opponent (P1) -->
+                <div class="w-24 flex-shrink-0">
+                  ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
+                </div>
+
+                <!-- Board -->
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] flex items-center justify-center">
+                  <div class="flex flex-wrap gap-1 items-center justify-center">
+                    ${renderBoard(snap)}
+                  </div>
+                </div>
+
+                <!-- Right opponent (P3) -->
+                <div class="w-24 flex-shrink-0">
+                  ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
+                </div>
+              </div>
+
+              <!-- Bottom player (P0 - You) -->
+              ${renderPlayerArea(0, snap, pNames, pTeams, teamColors, true)}
+
+              <!-- Controls -->
+              <div class="bg-slate-800 rounded-xl p-3 mt-2 flex items-center gap-3">
+                <button class="btn btn-gray" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo; Start</button>
+                <button class="btn btn-gray" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
+                <button class="btn btn-green" onclick="stepForward()" ${currentStep>=total-1?'disabled':''}>Next &rsaquo;</button>
+                <button class="btn btn-gray" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>End &raquo;</button>
+                <div class="mx-2 text-slate-400">|</div>
+                <button class="btn ${autoPlayTimer ? 'btn-yellow' : 'btn-blue'}" onclick="toggleAutoPlay()">
+                  ${autoPlayTimer ? 'Pause' : 'Auto Play'}
+                </button>
+                <div class="flex gap-1">
+                  ${[2000, 1000, 500].map(s => `<button class="btn btn-gray speed-btn text-xs ${autoPlaySpeed===s?'active':''}" onclick="setSpeed(${s})">${s===2000?'Slow':s===1000?'Med':'Fast'}</button>`).join('')}
+                </div>
+                <div class="ml-auto text-slate-400 text-sm">
+                  Move <span class="text-white font-bold">${snap.move}</span> / ${currentGame.snapshots[total-1].move}
+                  &nbsp;(Step ${currentStep+1}/${total})
+                </div>
+              </div>
+
+              <!-- Board ends indicator -->
+              <div class="flex justify-center gap-6 mt-2">
+                <div class="bg-slate-800 rounded-lg px-4 py-2 text-center">
+                  <div class="text-xs text-slate-400">Left End</div>
+                  <div class="text-2xl font-bold ${snap.leftEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.leftEnd !== null ? snap.leftEnd : '-'}</div>
+                </div>
+                <div class="bg-slate-800 rounded-lg px-4 py-2 text-center">
+                  <div class="text-xs text-slate-400">Right End</div>
+                  <div class="text-2xl font-bold ${snap.rightEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.rightEnd !== null ? snap.rightEnd : '-'}</div>
+                </div>
+                ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-4 py-2 text-center border border-emerald-500">
+                  <div class="text-xs text-emerald-300">Result</div>
+                  <div class="text-lg font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt)` : ''}</div>
+                  ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">P${snap.outcome.winner} (${pTeams[snap.outcome.winner]})</div>` : ''}
+                </div>` : ''}
+              </div>
+            </div>
+
+            <!-- RIGHT: Log Panel -->
+            <div class="col-span-4">
+              <div class="bg-slate-800 rounded-xl p-3 h-full flex flex-col">
+                <h2 class="text-sm font-bold text-slate-300 mb-2">Move-by-Move Reasoning</h2>
+
+                <!-- Current move detail -->
+                ${snap.move > 0 ? `
+                <div class="bg-slate-900 rounded-lg p-3 mb-3 border ${snap.action === 'pass' ? 'border-orange-500' : 'border-emerald-500'}">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${teamColors[snap.player%2]}">P${snap.player} ${pTeams[snap.player]}</span>
+                    <span class="text-sm font-bold ${snap.action === 'pass' ? 'text-orange-400' : 'text-emerald-400'}">
+                      ${snap.action === 'pass' ? 'PASSES' : `plays [${snap.tile.left}|${snap.tile.right}] on ${snap.side}`}
+                    </span>
+                    ${snap.score !== undefined ? `<span class="text-xs text-slate-400 ml-auto">score: ${snap.score}</span>` : ''}
+                  </div>
+                  <div class="space-y-1">
+                    ${(snap.reasons || []).map(r => `<div class="text-xs text-slate-300 flex items-start gap-1">
+                      <span class="text-emerald-400 mt-0.5">&#9654;</span> ${r}
+                    </div>`).join('')}
+                  </div>
+                </div>` : `
+                <div class="bg-slate-900 rounded-lg p-3 mb-3 border border-slate-600">
+                  <div class="text-sm text-slate-400">
+                    P${currentGame.autoPlayedBy} auto-plays [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (highest double).
+                    Click <b>Next</b> to step through moves.
+                  </div>
+                </div>`}
+
+                <!-- Knowledge panel -->
+                <div class="bg-slate-900 rounded-lg p-2 mb-3">
+                  <div class="text-xs font-bold text-slate-400 mb-1">Intelligence (what we know)</div>
+                  ${[0,1,2,3].map(p => {
+                    const dead = snap.knowledge?.cantHave?.[p] || [];
+                    if (dead.length === 0) return '';
+                    return `<div class="text-xs mb-0.5"><span style="color:${teamColors[p%2]}">P${p}:</span> can't have <span class="text-red-400 font-mono">{${dead.join(', ')}}</span></div>`;
+                  }).join('')}
+                  ${snap.knowledge?.cantHave?.every(s => s.length === 0) ? '<div class="text-xs text-slate-500">No intelligence yet</div>' : ''}
+                </div>
+
+                <!-- Move log -->
+                <div id="log-container" class="flex-1 overflow-y-auto space-y-1 max-h-[400px]">
+                  ${currentGame.snapshots.slice(1).map((s, i) => {
+                    const stepIdx = i + 1;
+                    const isCur = stepIdx === currentStep;
+                    const isPast = stepIdx < currentStep;
+                    return `<div class="log-entry rounded px-2 py-1 cursor-pointer text-xs ${isCur ? 'active' : isPast ? 'past' : ''}"
+                      onclick="goTo(${stepIdx})" id="log-${stepIdx}">
+                      <span class="font-mono text-slate-500">#${s.move}</span>
+                      <span class="font-bold" style="color:${teamColors[s.player%2]}">P${s.player}</span>
+                      ${s.action === 'pass'
+                        ? '<span class="text-orange-400">passes</span>'
+                        : `<span class="text-emerald-400">[${s.tile.left}|${s.tile.right}]</span> <span class="text-slate-400">${s.side}</span>`}
+                      ${s.outcome ? `<span class="text-yellow-400 ml-1">${s.outcome.winType || s.outcome.type}</span>` : ''}
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Scroll active log entry into view
+      const activeLog = document.getElementById(`log-${currentStep}`);
+      if (activeLog) activeLog.scrollIntoView({ block: 'nearest' });
+    }
+
+    function renderPlayerArea(playerIdx, snap, names, teams, colors, showFace = false) {
+      const hand = snap.hands[playerIdx] || [];
+      const isActive = snap.currentPlayer === playerIdx;
+      const playedTile = snap.player === playerIdx && snap.action === 'play' ? snap.tile : null;
+
+      return `
+        <div class="player-area bg-slate-800 rounded-xl p-3 border-2 ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
+            <span class="text-xs ${isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${isActive ? 'PLAYING' : `${hand.length} tiles`}</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
+            ${showFace
+              ? hand.map(t => {
+                  const hl = playedTile && t.id === playedTile.id;
+                  const pl = isActive && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length);
+                  return tileHTML(t, '', 'v', hl, pl);
+                }).join('')
+              : hand.map((_, i) => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    function renderSidePlayer(playerIdx, snap, names, teams, colors) {
+      const hand = snap.hands[playerIdx] || [];
+      const isActive = snap.currentPlayer === playerIdx;
+
+      return `
+        <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+          <div class="text-xs font-bold text-center mb-1" style="color:${colors[playerIdx%2]}">${names[playerIdx].split('(')[0].trim()}</div>
+          <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} · ${hand.length}</div>
+          <div class="flex flex-col gap-0.5 items-center flex-1 justify-center">
+            ${hand.map(() => `<div class="w-14 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
+          </div>
+          ${isActive ? '<div class="text-xs text-emerald-400 text-center mt-1 font-bold">Playing</div>' : ''}
+        </div>`;
+    }
+
+    function renderBoard(snap) {
+      if (!snap.board || snap.board.length === 0) return '<div class="text-green-700 text-sm">Empty board</div>';
+      return snap.board.map((t, i) => {
+        const isD = t.left === t.right;
+        const orient = isD ? 'v' : 'h';
+        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
+        return `<div class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', orient)}</div>`;
+      }).join('');
+    }
+
+    function renderStartScreen() {
+      return `
+        <div class="flex items-center justify-center min-h-screen">
+          <div class="text-center">
+            <h1 class="text-4xl font-bold text-emerald-400 mb-4">Domino Pernambucano</h1>
+            <p class="text-slate-400 mb-2">Strategy Simulator & Trainer</p>
+            <p class="text-sm text-slate-500 mb-8">Watch the Smart AI play with full reasoning for every move</p>
+            <button class="btn btn-green text-xl px-8 py-4" onclick="newGame()">Start Simulation</button>
+          </div>
+        </div>`;
+    }
+
+    // ========== CONTROLS ==========
+
+    function newGame() {
+      stopAutoPlay();
+      currentGame = generateGame();
+      currentStep = 0;
+      render();
+    }
+
+    function stepForward() {
+      if (!currentGame || currentStep >= currentGame.snapshots.length - 1) return;
+      currentStep++;
+      render();
+    }
+
+    function stepBack() {
+      if (!currentGame || currentStep <= 0) return;
+      currentStep--;
+      render();
+    }
+
+    function goTo(step) {
+      if (!currentGame) return;
+      currentStep = Math.max(0, Math.min(step, currentGame.snapshots.length - 1));
+      render();
+    }
+
+    function toggleAutoPlay() {
+      if (autoPlayTimer) { stopAutoPlay(); render(); }
+      else { startAutoPlay(); }
+    }
+
+    function startAutoPlay() {
+      stopAutoPlay();
+      autoPlayTimer = setInterval(() => {
+        if (currentStep >= currentGame.snapshots.length - 1) { stopAutoPlay(); render(); return; }
+        stepForward();
+      }, autoPlaySpeed);
+      render();
+    }
+
+    function stopAutoPlay() {
+      if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+    }
+
+    function setSpeed(ms) {
+      autoPlaySpeed = ms;
+      if (autoPlayTimer) { stopAutoPlay(); startAutoPlay(); }
+      else render();
+    }
+
+    // Keyboard controls
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); stepForward(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stepBack(); }
+      else if (e.key === 'n') newGame();
+      else if (e.key === 'p') toggleAutoPlay();
+    });
+
+    // Initial render
+    render();
+  </script>
+</body>
+</html>

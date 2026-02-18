@@ -245,30 +245,36 @@
           hands[i % 4].push(deck[i]);
         }
 
-        // Find highest double for first game
+        // Find highest double for first game and auto-play it
         let startPlayer = 0;
         let highestDouble = -1;
+        let highestDoubleTile = null;
         for (let p = 0; p < 4; p++) {
           for (let tile of hands[p]) {
             if (tile.left === tile.right && tile.left > highestDouble) {
               highestDouble = tile.left;
               startPlayer = p;
+              highestDoubleTile = tile;
             }
           }
         }
+
+        // Remove the highest double from the starter's hand and place it on the board
+        hands[startPlayer] = hands[startPlayer].filter(t => t.id !== highestDoubleTile.id);
+        const nextPlayer = (startPlayer + 1) % 4;
 
         const game = {
           ...gameState,
           gameStarted: true,
           hands: hands,
-          board: [],
-          leftEnd: null,
-          rightEnd: null,
-          currentPlayer: startPlayer,
+          board: [highestDoubleTile],
+          leftEnd: highestDoubleTile.left,
+          rightEnd: highestDoubleTile.right,
+          currentPlayer: nextPlayer,
           passCount: 0,
           teamScores: [0, 0],
           extraPoints: 0,
-          message: gameState.players[startPlayer].name + ' tem a carroca ' + highestDouble + '-' + highestDouble + ' e comeca!',
+          message: gameState.players[startPlayer].name + ' jogou a carroca ' + highestDouble + '-' + highestDouble + '! Vez de ' + gameState.players[nextPlayer].name + '!',
           matchTarget: 6
         };
 
