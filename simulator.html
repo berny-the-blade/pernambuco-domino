@@ -1790,7 +1790,7 @@
       for (let ri = 0; ri < rows.length; ri++) {
         const ltr = ri % 2 === 0;
         const dir = ltr ? 'row' : 'row-reverse';
-        const tiles = `<div style="display:flex;align-items:center">${rows[ri].map(makeTile).join('')}</div>`;
+        const tiles = `<div style="display:flex;align-items:center;flex-direction:${dir}">${rows[ri].map(makeTile).join('')}</div>`;
 
         // End badges: LB at start of chain (row 0), RB at end of chain (last row)
         const parts = [];
