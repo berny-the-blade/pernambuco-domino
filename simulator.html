@@ -472,68 +472,151 @@
 
     // ========== MONTE CARLO LOOKAHEAD ==========
 
-    // Generate a random deal of remaining tiles consistent with knowledge constraints
+    // Check if player p can hold tile t given knowledge constraints
+    function canPlayerHold(p, t, knowledge) {
+      if (t.left === t.right) return !knowledge.cantHave[p].has(t.left);
+      return !(knowledge.cantHave[p].has(t.left) && knowledge.cantHave[p].has(t.right));
+    }
+
+    // Generate a random deal using rejection sampling (unbiased) with backtracking fallback
     function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
-      // Pool: all unplayed tiles NOT in my hand — no need to copy, tiles are read-only
       const myIds = new Set(myHand.map(t => t.id));
       const pool = [];
       for (const t of ALL_TILES) {
-        if (knowledge.played.has(t.id)) continue;
-        if (myIds.has(t.id)) continue;
+        if (knowledge.played.has(t.id) || myIds.has(t.id)) continue;
         pool.push(t);
       }
 
-      // Shuffle pool (Fisher-Yates on refs only)
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]];
+      // Pre-compute eligible tiles per player (hard constraint filter)
+      const players = [0, 1, 2, 3].filter(p => p !== myIdx);
+      const eligible = {};
+      for (const p of players) {
+        eligible[p] = pool.filter(t => canPlayerHold(p, t, knowledge));
       }
 
-      // Assign tiles to players, respecting cantHave constraints
+      // Try rejection sampling first (unbiased, fast when constraints are loose)
+      for (let attempt = 0; attempt < 200; attempt++) {
+        // Shuffle pool
+        const shuffled = [...pool];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        // Cut into hands
+        const hands = [[], [], [], []];
+        hands[myIdx] = [...myHand];
+        let idx = 0, valid = true;
+        for (const p of players) {
+          for (let i = 0; i < handSizes[p]; i++) {
+            if (idx >= shuffled.length) { valid = false; break; }
+            hands[p].push(shuffled[idx++]);
+          }
+          if (!valid) break;
+          // Validate constraints
+          for (const t of hands[p]) {
+            if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
+          }
+          if (!valid) break;
+        }
+        if (valid) return hands;
+      }
+
+      // Fallback: randomized backtracking (handles tight constraints)
       const hands = [[], [], [], []];
       hands[myIdx] = [...myHand];
       const assigned = new Set();
 
-      // First pass: greedily assign
-      for (let p = 0; p < 4; p++) {
-        if (p === myIdx) continue;
-        for (const t of pool) {
-          if (assigned.has(t.id)) continue;
-          if (hands[p].length >= handSizes[p]) break;
-          const cantL = knowledge.cantHave[p].has(t.left);
-          const cantR = knowledge.cantHave[p].has(t.right);
-          if (t.left === t.right && cantL) continue;
-          if (cantL && cantR) continue;
+      // Shuffle player order each call to avoid systematic bias
+      const shuffledPlayers = [...players];
+      for (let i = shuffledPlayers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffledPlayers[i], shuffledPlayers[j]] = [shuffledPlayers[j], shuffledPlayers[i]];
+      }
+
+      function backtrack(pIdx) {
+        if (pIdx >= shuffledPlayers.length) return true;
+        const p = shuffledPlayers[pIdx];
+        const available = eligible[p].filter(t => !assigned.has(t.id));
+        // Shuffle available for randomness
+        for (let i = available.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [available[i], available[j]] = [available[j], available[i]];
+        }
+        if (available.length < handSizes[p]) return false;
+        // Pick first handSizes[p] tiles
+        const chosen = available.slice(0, handSizes[p]);
+        for (const t of chosen) { hands[p].push(t); assigned.add(t.id); }
+        if (backtrack(pIdx + 1)) return true;
+        // Backtrack
+        for (const t of chosen) { hands[p].pop(); assigned.delete(t.id); }
+        // Try different random subset (up to 3 retries)
+        for (let retry = 0; retry < 3; retry++) {
+          for (let i = available.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [available[i], available[j]] = [available[j], available[i]];
+          }
+          const chosen2 = available.slice(0, handSizes[p]);
+          for (const t of chosen2) { hands[p].push(t); assigned.add(t.id); }
+          if (backtrack(pIdx + 1)) return true;
+          for (const t of chosen2) { hands[p].pop(); assigned.delete(t.id); }
+        }
+        return false;
+      }
+
+      if (backtrack(0)) return hands;
+
+      // Last resort: greedy (old method) — at least returns something
+      for (const p of players) {
+        for (const t of eligible[p]) {
+          if (assigned.has(t.id) || hands[p].length >= handSizes[p]) continue;
           hands[p].push(t);
           assigned.add(t.id);
         }
-      }
-
-      // Check all hands are full (may fail with tight constraints)
-      for (let p = 0; p < 4; p++) {
-        if (p === myIdx) continue;
+        // Fill remaining with anything
         if (hands[p].length < handSizes[p]) {
           for (const t of pool) {
-            if (assigned.has(t.id)) continue;
-            if (hands[p].length >= handSizes[p]) break;
+            if (assigned.has(t.id) || hands[p].length >= handSizes[p]) continue;
             hands[p].push(t);
             assigned.add(t.id);
           }
         }
       }
-
       return hands;
     }
 
+    // Compute tile probabilities for a player using MC sampling
+    function computeTileProbs(playerIdx, knowledge, handSizes, myHand, myIdx, numSamples = 500) {
+      const probs = {};
+      const counts = {};
+      for (const t of ALL_TILES) {
+        if (knowledge.played.has(t.id) || myHand.some(m => m.id === t.id)) continue;
+        counts[t.id] = 0;
+      }
+      let validSamples = 0;
+      for (let i = 0; i < numSamples; i++) {
+        const deal = generateConsistentDeal(myHand, handSizes, knowledge, myIdx);
+        validSamples++;
+        for (const t of deal[playerIdx]) {
+          if (counts[t.id] !== undefined) counts[t.id]++;
+        }
+      }
+      if (validSamples === 0) return probs;
+      for (const id of Object.keys(counts)) {
+        probs[id] = counts[id] / validSamples;
+      }
+      return probs;
+    }
+
     // Simulate a game from a given position using smartAI for all players
+    // Returns { winnerTeam, points, type } with full scoring
     function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge, initBLen) {
-      // Shallow-copy hand arrays (filter creates new arrays, tile objects are read-only)
       const simHands = hands.map(h => [...h]);
-      let bLen = initBLen != null ? initBLen : board.length;
+      let bLen = initBLen != null ? initBLen : (board ? board.length : 0);
       let simLE = lE, simRE = rE;
       let cur = nextPlayer;
       let passCount = 0;
       const simKnowledge = knowledge.clone();
+      let prevLE, prevRE; // track ends before last move for scoring
 
       for (let move = 0; move < 100; move++) {
         const decision = smartAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge, false);
@@ -547,6 +630,7 @@
           simHands[cur] = simHands[cur].filter(t => t.id !== tile.id);
           simKnowledge.recordPlay(cur, tile);
 
+          prevLE = simLE; prevRE = simRE;
           if (bLen === 0) {
             simLE = tile.left; simRE = tile.right;
           } else if (side === 'left') {
@@ -557,29 +641,34 @@
           bLen++;
 
           if (simHands[cur].length === 0) {
-            return { winnerTeam: cur % 2 };
+            // Score the win
+            const isD = tile.left === tile.right;
+            const wasBoth = bLen > 1 && couldPlayBothEnds(tile, prevLE, prevRE);
+            let pts = 1, type = 'normal';
+            if (isD && wasBoth) { pts = 4; type = 'cruzada'; }
+            else if (isD) { pts = 2; type = 'carroca'; }
+            else if (wasBoth) { pts = 3; type = 'laelo'; }
+            return { winnerTeam: cur % 2, points: pts, type };
           }
           cur = (cur + 1) % 4;
         } else {
           passCount++;
           simKnowledge.recordPass(cur, simLE, simRE);
           if (passCount >= 4) {
-            const hv = simHands.map((h, i) => ({
-              team: i % 2, points: h.reduce((s, t) => s + t.left + t.right, 0)
-            }));
-            const t0 = hv.filter(v => v.team === 0).reduce((s, v) => s + v.points, 0);
-            const t1 = hv.filter(v => v.team === 1).reduce((s, v) => s + v.points, 0);
-            if (t0 < t1) return { winnerTeam: 0 };
-            if (t1 < t0) return { winnerTeam: 1 };
-            return { winnerTeam: -1 }; // tie
+            const t0 = simHands.filter((h, i) => i % 2 === 0).reduce((s, h) => s + h.reduce((a, t) => a + t.left + t.right, 0), 0);
+            const t1 = simHands.filter((h, i) => i % 2 === 1).reduce((s, h) => s + h.reduce((a, t) => a + t.left + t.right, 0), 0);
+            if (t0 < t1) return { winnerTeam: 0, points: 1, type: 'blocked' };
+            if (t1 < t0) return { winnerTeam: 1, points: 1, type: 'blocked' };
+            return { winnerTeam: -1, points: 0, type: 'tie' };
           }
           cur = (cur + 1) % 4;
         }
       }
-      return { winnerTeam: -1 };
+      return { winnerTeam: -1, points: 0, type: 'tie' };
     }
 
     // Run Monte Carlo evaluation for all playable tiles from current position
+    // Returns rich results: E[pts], win%, block%, outcome distribution
     function monteCarloEval(snap, player, numSims = 80) {
       const hand = snap.hands[player];
       const lE = snap.leftEnd, rE = snap.rightEnd;
@@ -588,15 +677,16 @@
 
       const playable = hand.filter(t => canPlay(t, lE, rE, board.length));
       if (playable.length === 0) return [];
-      if (playable.length === 1) return [{ tile: playable[0], winRate: 0.5, sims: 0, side: null }];
+      if (playable.length === 1) {
+        return [{ tile: playable[0], winRate: 0.5, expectedPoints: 0, sims: 0, side: null,
+                  blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 } }];
+      }
 
       const handSizes = snap.hands.map(h => h.length);
       const myTeam = player % 2;
-
       const results = [];
 
       for (const tile of playable) {
-        // Determine best side(s) to test
         const sides = [];
         if (board.length === 0) {
           sides.push(null);
@@ -606,15 +696,15 @@
           if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
         }
 
-        let bestWinRate = 0, bestSide = sides[0];
+        let bestEP = -99, bestWR = 0, bestSide = sides[0];
+        let bestOutcomes = null, bestBlockRate = 0;
 
         for (const side of sides) {
-          let wins = 0, validSims = 0;
+          let wins = 0, totalPts = 0, blocks = 0;
+          const outcomes = { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 };
 
-          // Compute new ends after playing this tile (no board array needed)
           let newLE = lE, newRE = rE;
           const newBLen = board.length + 1;
-
           if (board.length === 0) {
             newLE = tile.left; newRE = tile.right;
           } else if (side === 'left') {
@@ -628,8 +718,16 @@
 
           // Check instant win
           if (newHandSizes[player] === 0) {
-            bestWinRate = 1.0;
-            bestSide = side;
+            const isD = tile.left === tile.right;
+            const wasBoth = board.length > 0 && couldPlayBothEnds(tile, lE, rE);
+            let pts = 1, type = 'normal';
+            if (isD && wasBoth) { pts = 4; type = 'cruzada'; }
+            else if (isD) { pts = 2; type = 'carroca'; }
+            else if (wasBoth) { pts = 3; type = 'laelo'; }
+            bestEP = pts; bestWR = 1.0; bestSide = side;
+            bestOutcomes = { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 };
+            bestOutcomes[type] = numSims;
+            bestBlockRate = 0;
             break;
           }
 
@@ -640,18 +738,40 @@
           for (let sim = 0; sim < numSims; sim++) {
             const simHands = generateConsistentDeal(myNewHand, newHandSizes, newKnowledge, player);
             const result = simulateFromPosition(simHands, null, newLE, newRE, (player + 1) % 4, newKnowledge, newBLen);
-            if (result.winnerTeam === myTeam) wins++;
-            validSims++;
+            if (result.winnerTeam === myTeam) {
+              wins++;
+              totalPts += result.points;
+            } else if (result.winnerTeam >= 0) {
+              totalPts -= result.points;
+            }
+            if (result.type === 'blocked' || result.type === 'tie') blocks++;
+            if (outcomes[result.type] !== undefined) {
+              // Attribute outcome to winning/losing team
+              outcomes[result.type]++;
+            }
           }
 
-          const wr = validSims > 0 ? wins / validSims : 0.5;
-          if (wr > bestWinRate) { bestWinRate = wr; bestSide = side; }
+          const ep = numSims > 0 ? totalPts / numSims : 0;
+          const wr = numSims > 0 ? wins / numSims : 0.5;
+          if (ep > bestEP) {
+            bestEP = ep; bestWR = wr; bestSide = side;
+            bestOutcomes = { ...outcomes };
+            bestBlockRate = blocks / numSims;
+          }
         }
 
-        results.push({ tile, winRate: bestWinRate, sims: numSims, side: bestSide });
+        results.push({
+          tile, side: bestSide,
+          winRate: bestWR,
+          expectedPoints: bestEP,
+          blockRate: bestBlockRate,
+          outcomes: bestOutcomes || { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+          sims: numSims
+        });
       }
 
-      return results.sort((a, b) => b.winRate - a.winRate);
+      // Sort by expected points (primary), then winRate (tiebreaker)
+      return results.sort((a, b) => b.expectedPoints - a.expectedPoints || b.winRate - a.winRate);
     }
 
     // ========== STATE ==========
@@ -662,6 +782,69 @@
     let autoPlaySpeed = 1500;
     let gameMode = 'watch'; // 'watch' | 'quiz'
     let scoreMultiplier = 1; // dobrada: doubles after tied block
+    let matchScore = [0, 0];  // team0 vs team1 score, first to 6 wins match
+
+    // ========== MATCH EQUITY TABLE ==========
+    // ME[s1][s2] = P(team1 wins match | score s1 vs s2), match to 6 pts
+    // Point distribution when winning a round: 70% 1pt, 16% 2pt, 10% 3pt, 4% 4pt
+    const MATCH_TARGET = 6;
+    const POINT_DIST = [
+      { pts: 1, prob: 0.70 },  // normal + blocked
+      { pts: 2, prob: 0.16 },  // carroca
+      { pts: 3, prob: 0.10 },  // la-e-lo
+      { pts: 4, prob: 0.04 }   // cruzada
+    ];
+
+    // Pre-compute match equity table using DP
+    const ME = (() => {
+      const tbl = Array.from({length: MATCH_TARGET + 5}, () =>
+        new Float64Array(MATCH_TARGET + 5)
+      );
+      // Base cases
+      for (let s2 = 0; s2 <= MATCH_TARGET + 4; s2++) {
+        for (let s1 = MATCH_TARGET; s1 <= MATCH_TARGET + 4; s1++) {
+          tbl[s1][s2] = s2 >= MATCH_TARGET ? 0.5 : 1.0; // both >= target: 50/50
+        }
+      }
+      for (let s1 = 0; s1 < MATCH_TARGET; s1++) {
+        for (let s2 = MATCH_TARGET; s2 <= MATCH_TARGET + 4; s2++) {
+          tbl[s1][s2] = 0.0;
+        }
+      }
+      // Fill bottom-up
+      for (let s1 = MATCH_TARGET - 1; s1 >= 0; s1--) {
+        for (let s2 = MATCH_TARGET - 1; s2 >= 0; s2--) {
+          let val = 0;
+          for (const { pts, prob } of POINT_DIST) {
+            const s1w = Math.min(s1 + pts, MATCH_TARGET + 4);
+            const s2w = Math.min(s2 + pts, MATCH_TARGET + 4);
+            // 50% we win with these pts, 50% they win with these pts
+            val += 0.5 * prob * tbl[s1w][s2] + 0.5 * prob * tbl[s1][s2w];
+          }
+          tbl[s1][s2] = val;
+        }
+      }
+      return tbl;
+    })();
+
+    // Get match equity given current scores
+    function getMatchEquity(s1, s2) {
+      const c1 = Math.min(s1, MATCH_TARGET + 4);
+      const c2 = Math.min(s2, MATCH_TARGET + 4);
+      return ME[c1][c2];
+    }
+
+    // Convert round E[pts] to match equity change
+    // epts = signed expected points for our team this round (+ours, -theirs)
+    function roundToMatchEquity(epts, myTeamScore, oppTeamScore) {
+      const currentME = getMatchEquity(myTeamScore, oppTeamScore);
+      // Approximate: weight outcomes by point distribution
+      // epts already accounts for scoring type, so we need to map to match equity shift
+      // Simple linear approximation: each point changes ME by (ME(s+1,o) - ME(s,o)) on average
+      const mePerPt = getMatchEquity(Math.min(myTeamScore + 1, MATCH_TARGET), oppTeamScore) - currentME;
+      return epts * mePerPt;
+    }
+
     let rightPanelTab = 'reasoning'; // 'reasoning' | 'probability' | 'stats' | 'guide'
     let deepAnalysis = false;        // Monte Carlo toggle
     let mcResults = null;            // cached MC results for current step
@@ -677,10 +860,11 @@
     let stats = {
       totalMoves: 0,
       optimalMoves: 0,
-      goodMoves: 0,    // score diff <= 5
-      okMoves: 0,      // score diff <= 15
-      badMoves: 0,     // score diff > 15
+      goodMoves: 0,    // inaccuracy (small equity loss)
+      okMoves: 0,      // mistake (medium equity loss)
+      badMoves: 0,     // blunder (large equity loss)
       games: 0,
+      totalEquityLoss: 0,  // cumulative E[pts] equity loss
       history: []  // last 30 decisions
     };
 
@@ -771,17 +955,52 @@
       const userOpt = allOpts.find(o => o.tile.id === userTile.id && (o.side === userSide || !userSide));
       const aiOpt = allOpts.find(o => o.tile.id === aiTile.id && o.side === aiSide);
       const userScore = userOpt ? userOpt.score : -50;
-
       const scoreDiff = aiScore - userScore;
-      let grade;
-      if (userTile.id === aiTile.id && userSide === aiSide) grade = 'perfect';
-      else if (userTile.id === aiTile.id) grade = 'good'; // right tile, suboptimal side
-      else if (scoreDiff <= 5) grade = 'good';  // different tile but very close
-      else if (scoreDiff <= 15) grade = 'ok';
-      else grade = 'bad';
 
+      // Run Monte Carlo for equity loss computation
+      let quizMC = null;
+      if (deepAnalysis) {
+        quizMC = monteCarloEval(snap, 0, MC_SIMS_QUIZ);
+      }
+
+      // Compute equity loss from MC (primary) or heuristic (fallback)
+      let equityLoss = 0;
+      let equityLossSource = 'heuristic';
       const canP = canPlay(userTile, snap.leftEnd, snap.rightEnd, snap.board.length);
-      if (!canP) grade = 'bad';
+
+      if (!canP) {
+        equityLoss = 99; // invalid play sentinel
+      } else if (quizMC && quizMC.length > 0) {
+        // MC-based equity loss: difference in E[pts] between best and user's choice
+        const mcBest = quizMC[0]; // sorted by expectedPoints
+        const mcUser = quizMC.find(m => m.tile.id === userTile.id);
+        if (mcBest && mcUser) {
+          equityLoss = mcBest.expectedPoints - mcUser.expectedPoints;
+          equityLossSource = 'mc';
+        } else if (mcBest) {
+          equityLoss = Math.max(0, mcBest.expectedPoints); // can't find user tile in MC → big miss
+          equityLossSource = 'mc';
+        }
+      } else {
+        // Heuristic fallback: normalize score diff to E[pts] scale (~0-2 range)
+        equityLoss = Math.max(0, scoreDiff) / 25; // rough mapping: 25 heuristic pts ≈ 1 E[pts]
+      }
+
+      // Grade based on equity loss (in expected points)
+      let grade;
+      if (!canP) {
+        grade = 'bad';
+      } else if (userTile.id === aiTile.id && userSide === aiSide) {
+        grade = 'perfect';
+      } else if (equityLoss < 0.05) {
+        grade = 'perfect'; // negligible difference
+      } else if (equityLoss < 0.15) {
+        grade = 'good';    // inaccuracy
+      } else if (equityLoss < 0.40) {
+        grade = 'ok';      // mistake
+      } else {
+        grade = 'bad';     // blunder
+      }
 
       // Build detailed explanation context
       const knowledge = snap.knowledge;
@@ -800,18 +1019,20 @@
         hand, knowledge, lE, rE, grade, scoreDiff, allOptions: allOpts
       });
 
-      // Run Monte Carlo if deep analysis is on
-      let quizMC = null;
-      if (deepAnalysis) {
-        quizMC = monteCarloEval(snap, 0, 80);
-      }
+      // Match equity context
+      const meNow = getMatchEquity(matchScore[0], matchScore[1]);
+      const meShift = equityLossSource === 'mc' ? roundToMatchEquity(equityLoss, matchScore[0], matchScore[1]) : null;
 
       quizResult = {
         userTile, userSide, aiTile, aiSide, grade, scoreDiff, userScore, aiScore,
         allOptions: allOpts, detail, aiNewEnds, userNewEnds,
         userReasons: userOpt ? userOpt.reasons : [],
         aiReasons: aiOpt ? aiOpt.reasons : nextSnap.reasons || [],
-        mcResults: quizMC
+        mcResults: quizMC,
+        equityLoss: Math.round(equityLoss * 1000) / 1000,
+        equityLossSource,
+        matchEquity: meNow,
+        matchEquityShift: meShift
       };
       quizWaiting = false;
       quizShowingResult = true;
@@ -822,7 +1043,13 @@
       else if (grade === 'good') stats.goodMoves++;
       else if (grade === 'ok') stats.okMoves++;
       else stats.badMoves++;
-      stats.history.push({ grade, scoreDiff, userTile: `${userTile.left}-${userTile.right}`, aiTile: `${aiTile.left}-${aiTile.right}` });
+      if (typeof stats.totalEquityLoss !== 'number') stats.totalEquityLoss = 0;
+      stats.totalEquityLoss += equityLoss < 90 ? equityLoss : 0; // skip invalid-play sentinel
+      stats.history.push({
+        grade, scoreDiff, equityLoss: Math.round(equityLoss * 1000) / 1000,
+        userTile: `${userTile.left}-${userTile.right}`,
+        aiTile: `${aiTile.left}-${aiTile.right}`
+      });
       if (stats.history.length > 30) stats.history.shift();
       saveStats();
 
@@ -1037,7 +1264,10 @@
         <div class="max-w-7xl mx-auto p-3">
           <!-- Header -->
           <div class="flex items-center justify-between mb-3">
-            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano — Strategy Trainer${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">DOBRADA x${currentGame.outcome.multiplier}</span>` : ''}</h1>
+            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano
+              <span class="text-sm text-slate-400 font-normal ml-2">Match: <span class="text-blue-400 font-bold">${matchScore[0]}</span>-<span class="text-red-400 font-bold">${matchScore[1]}</span>/6</span>
+              ${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">DOBRADA x${currentGame.outcome.multiplier}</span>` : ''}
+            </h1>
             <div class="flex gap-2 items-center">
               <div class="flex gap-1 mr-2">
                 <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch Mode</button>
@@ -1123,12 +1353,14 @@
                 <div class="flex gap-1 mb-2">
                   <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">Reasoning</div>
                   <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
+                  <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
                 </div>
 
                 ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
+                  rightPanelTab === 'analysis' ? renderAnalysisPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
               </div>
@@ -1278,7 +1510,7 @@
     function renderQuizResultBadge() {
       if (!quizResult) return '';
       const r = quizResult;
-      const gradeText = { perfect: 'PERFECT', good: 'GOOD', ok: 'OK', bad: 'MISS' }[r.grade];
+      const gradeText = { perfect: 'PERFECT', good: 'INACCURACY', ok: 'MISTAKE', bad: 'BLUNDER' }[r.grade];
       const gradeCls = { perfect: 'grade-perfect', good: 'grade-good', ok: 'grade-ok', bad: 'grade-bad' }[r.grade];
 
       // Use detail lines from buildDetailedExplanation
@@ -1314,26 +1546,34 @@
         'info': 'text-slate-300'
       };
 
-      return `<div class="mt-2 bg-slate-900 rounded-lg p-3 border ${r.grade === 'perfect' ? 'border-emerald-500' : r.grade === 'bad' ? 'border-red-500' : 'border-yellow-500'}" style="max-height: 280px; overflow-y: auto;">
+      // Equity loss display
+      const eqLoss = r.equityLoss || 0;
+      const eqSrc = r.equityLossSource || 'heuristic';
+      const eqColor = eqLoss < 0.05 ? '#22c55e' : eqLoss < 0.15 ? '#86efac' : eqLoss < 0.4 ? '#eab308' : '#ef4444';
+
+      // MC data for header
+      const mcBest = r.mcResults && r.mcResults.length > 0 ? r.mcResults[0] : null;
+      const mcUser = r.mcResults ? r.mcResults.find(m => m.tile.id === r.userTile.id) : null;
+
+      return `<div class="mt-2 bg-slate-900 rounded-lg p-3 border ${r.grade === 'perfect' ? 'border-emerald-500' : r.grade === 'bad' ? 'border-red-500' : 'border-yellow-500'}" style="max-height: 320px; overflow-y: auto;">
         <div class="flex items-center gap-2 mb-2 flex-wrap">
           <span class="grade-badge ${gradeCls}">${gradeText}</span>
           ${r.grade !== 'perfect' ? (() => {
-            const userPct = scorePct(r.userScore, allScores);
-            const aiPct = scorePct(r.aiScore, allScores);
-            const gap = aiPct - userPct;
-            const mcUser = r.mcResults ? r.mcResults.find(m => m.tile.id === r.userTile.id) : null;
-            const mcAi = r.mcResults ? r.mcResults.find(m => m.tile.id === r.aiTile.id) : null;
-            const mcGap = mcUser && mcAi ? Math.round((mcAi.winRate - mcUser.winRate) * 100) : null;
-            return `<span class="text-xs text-slate-400">Your pick: [${r.userTile.left}|${r.userTile.right}]</span>
-              <span class="text-xs font-mono font-bold" style="color:${scoreColor(userPct)}">H:${userPct}</span>
-              ${mcUser ? `<span class="text-xs font-mono" style="color:${scoreColor(Math.round(mcUser.winRate*100))}">MC:${Math.round(mcUser.winRate*100)}%</span>` : ''}
-              <span class="text-xs text-slate-500">&rarr;</span>
-              <span class="text-xs text-slate-400">Best: [${r.aiTile.left}|${r.aiTile.right}]</span>
-              <span class="text-xs font-mono font-bold text-emerald-400">H:${aiPct}</span>
-              ${mcAi ? `<span class="text-xs font-mono text-emerald-400">MC:${Math.round(mcAi.winRate*100)}%</span>` : ''}
-              ${gap > 0 ? `<span class="text-xs font-mono text-red-400">(−${gap}${mcGap !== null && mcGap > 0 ? ` / MC:−${mcGap}%` : mcGap !== null && mcGap < 0 ? ` / MC:+${-mcGap}%` : ''})</span>` : ''}`;
-          })() : `<span class="text-xs font-mono text-emerald-400">H:100</span>${r.mcResults && r.mcResults[0] ? `<span class="text-xs font-mono text-emerald-400">MC:${Math.round(r.mcResults[0].winRate*100)}%</span>` : ''}`}
-          <span class="text-xs text-slate-600 ml-auto">ends: L=${currentGame.snapshots[currentStep].leftEnd} R=${currentGame.snapshots[currentStep].rightEnd}</span>
+            return `<span class="text-xs font-mono font-bold" style="color:${eqColor}">EL: ${eqLoss.toFixed(2)} pts</span>
+              <span class="text-xs text-slate-600">(${eqSrc})</span>
+              ${mcUser && mcBest ? `<span class="text-xs text-slate-500">|</span>
+                <span class="text-xs text-slate-400">[${r.userTile.left}|${r.userTile.right}]</span>
+                <span class="text-xs font-mono" style="color:${epColor(mcUser.expectedPoints)}">${fmtEP(mcUser.expectedPoints)}</span>
+                <span class="text-xs text-slate-500">&rarr;</span>
+                <span class="text-xs text-slate-400">[${r.aiTile.left}|${r.aiTile.right}]</span>
+                <span class="text-xs font-mono text-emerald-400">${fmtEP(mcBest.expectedPoints)}</span>` :
+              `<span class="text-xs text-slate-500">|</span>
+                <span class="text-xs text-slate-400">[${r.userTile.left}|${r.userTile.right}]</span>
+                <span class="text-xs text-slate-500">&rarr;</span>
+                <span class="text-xs text-slate-400">[${r.aiTile.left}|${r.aiTile.right}]</span>`}`;
+          })() : `<span class="text-xs font-mono text-emerald-400">EL: 0.00</span>
+            ${mcBest ? `<span class="text-xs font-mono text-emerald-400">E[pts]: ${fmtEP(mcBest.expectedPoints)}</span>` : ''}`}
+          <span class="text-xs text-slate-600 ml-auto">Match: ${matchScore[0]}-${matchScore[1]} | ME: ${(getMatchEquity(matchScore[0], matchScore[1]) * 100).toFixed(0)}%</span>
         </div>
 
         <!-- Detailed explanation -->
@@ -1350,36 +1590,50 @@
         <div class="border-t border-slate-700 pt-1.5 mt-1.5">
           <div class="text-xs text-slate-500 mb-1 flex items-center gap-3">
             <span>Tile ranking:</span>
-            <span class="text-slate-600 font-mono">H = heuristic${r.mcResults ? '  MC = simulation win%' : ''}</span>
+            <span class="text-slate-600 font-mono">H = heuristic${r.mcResults ? '  E[pts] = MC expected points' : ''}</span>
           </div>
-          ${r.allOptions.slice(0, 6).map((o, i) => {
-            const hPct = scorePct(o.score, allScores);
-            const hCol = scoreColor(hPct);
-            const isAi = o.tile.id === r.aiTile.id && o.side === r.aiSide;
-            const isUser = o.tile.id === r.userTile.id && o.side === r.userSide;
-            const tag = isAi ? 'AI' : isUser ? 'YOU' : '';
-            const mc = r.mcResults ? r.mcResults.find(m => m.tile.id === o.tile.id) : null;
-            const mcPct = mc ? Math.round(mc.winRate * 100) : null;
-            const mcCol = mc ? scoreColor(mcPct) : '';
-            return `<div class="text-xs mb-1.5">
-              <div class="flex items-center gap-1">
-                <span class="font-mono w-3 text-slate-500">${i+1}.</span>
-                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'} w-16">[${o.tile.left}|${o.tile.right}] ${o.side}</span>
-                <span class="font-mono font-bold w-8 text-right" style="color:${hCol}">H:${hPct}</span>
-                <div class="flex-1 bg-slate-700 rounded-full h-1.5 mx-1" style="max-width:60px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>
-                ${mcPct !== null ? `<span class="font-mono font-bold w-11 text-right" style="color:${mcCol}">MC:${mcPct}%</span>
-                <div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:40px"><div class="h-1.5 rounded-full" style="width:${mcPct}%;background:${mcCol}"></div></div>` : ''}
-                ${tag ? `<span class="font-mono text-xs px-1 rounded ${isAi ? 'bg-emerald-900 text-emerald-300' : 'bg-yellow-900 text-yellow-300'}">${tag}</span>` : ''}
-              </div>
-              ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
-            </div>`;
-          }).join('')}
+          ${(() => {
+            // Merge heuristic and MC data, sort by MC E[pts] if available
+            const merged = r.allOptions.slice(0, 6).map(o => {
+              const mc = r.mcResults ? r.mcResults.find(m => m.tile.id === o.tile.id) : null;
+              return { ...o, mc };
+            });
+            if (r.mcResults) merged.sort((a, b) => (b.mc ? b.mc.expectedPoints : -99) - (a.mc ? a.mc.expectedPoints : -99));
+            const bestEP = merged[0]?.mc?.expectedPoints;
+            return merged.map((o, i) => {
+              const hPct = scorePct(o.score, allScores);
+              const hCol = scoreColor(hPct);
+              const isAi = o.tile.id === r.aiTile.id && o.side === r.aiSide;
+              const isUser = o.tile.id === r.userTile.id && o.side === r.userSide;
+              const tag = isAi ? 'AI' : isUser ? 'YOU' : '';
+              const mc = o.mc;
+              const ep = mc ? mc.expectedPoints : null;
+              const epCol = mc ? epColor(ep) : '';
+              const tileLoss = mc && bestEP !== undefined ? bestEP - ep : null;
+              return `<div class="text-xs mb-1.5">
+                <div class="flex items-center gap-1">
+                  <span class="font-mono w-3 text-slate-500">${i+1}.</span>
+                  <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'} w-14">[${o.tile.left}|${o.tile.right}] ${o.side}</span>
+                  <span class="font-mono font-bold w-8 text-right" style="color:${hCol}">H:${hPct}</span>
+                  ${ep !== null ? `<span class="font-mono font-bold w-12 text-right" style="color:${epCol}">${fmtEP(ep)}</span>
+                  <div class="flex-1 bg-slate-700 rounded-full h-1.5 mx-1 relative" style="max-width:50px">
+                    <div class="absolute top-0 left-1/2 w-px h-1.5 bg-slate-500"></div>
+                    <div class="h-1.5 rounded-full absolute" style="left:${Math.min(50, 50 + ep * 12.5)}%;width:${Math.abs(ep * 12.5)}%;background:${epCol}"></div>
+                  </div>` :
+                  `<div class="flex-1 bg-slate-700 rounded-full h-1.5 mx-1" style="max-width:50px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>`}
+                  ${tileLoss !== null && tileLoss > 0.01 ? `<span class="font-mono text-red-400 w-10 text-right">-${tileLoss.toFixed(2)}</span>` : tileLoss !== null ? `<span class="font-mono text-emerald-400 w-10 text-right">BEST</span>` : ''}
+                  ${tag ? `<span class="font-mono text-xs px-1 rounded ${isAi ? 'bg-emerald-900 text-emerald-300' : 'bg-yellow-900 text-yellow-300'}">${tag}</span>` : ''}
+                </div>
+                ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
+              </div>`;
+            }).join('');
+          })()}
         </div>` : ''}
 
         ${r.mcResults && r.mcResults.length > 0 ? `
         <div class="border-t border-blue-800 pt-1.5 mt-1.5">
           <div class="text-xs text-blue-400 font-bold mb-1">Monte Carlo verdict:</div>
-          <div class="text-xs text-blue-300">Best by simulation: [${r.mcResults[0].tile.left}|${r.mcResults[0].tile.right}] with ${(r.mcResults[0].winRate*100).toFixed(0)}% win rate</div>
+          <div class="text-xs text-blue-300">Best: [${r.mcResults[0].tile.left}|${r.mcResults[0].tile.right}] E[pts]: ${fmtEP(r.mcResults[0].expectedPoints)} | Win: ${(r.mcResults[0].winRate*100).toFixed(0)}%</div>
           ${r.mcResults[0].tile.id !== r.aiTile.id ? '<div class="text-xs text-yellow-400">MC disagrees with heuristic — simulation sees deeper!</div>' : '<div class="text-xs text-emerald-400">MC confirms the heuristic choice</div>'}
         </div>` : ''}
 
@@ -1516,23 +1770,34 @@
           ${snap.allOptions && snap.allOptions.length > 1 ? `
           <div class="mt-2 pt-1.5 border-t border-slate-700">
             <div class="text-xs text-slate-500 mb-1">All options (best to worst):</div>
-            ${snap.allOptions.slice(0, 6).map((o, i) => {
-              const hPct = scorePct(o.score, allScores);
-              const hCol = scoreColor(hPct);
-              const mc = mcResults ? mcResults.find(m => m.tile.id === o.tile.id) : null;
-              const mcPct = mc ? Math.round(mc.winRate * 100) : null;
-              const mcCol = mc ? scoreColor(mcPct) : '';
-              return `<div class="text-xs ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'} mb-1">
-                <div class="flex items-center gap-1">
-                  <span class="font-mono w-3">${i+1}.</span>
-                  <span class="w-14">[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
-                  <span class="font-mono font-bold w-7 text-right" style="color:${hCol}">${hPct}</span>
-                  <div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:50px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>
-                  ${mcPct !== null ? `<span class="font-mono font-bold text-right" style="color:${mcCol}">${mcPct}%</span>` : ''}
-                </div>
-                ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
-              </div>`;
-            }).join('')}
+            ${(() => {
+              const opts = snap.allOptions.slice(0, 6).map(o => {
+                const mc = mcResults ? mcResults.find(m => m.tile.id === o.tile.id) : null;
+                return { ...o, mc };
+              });
+              // Sort by MC E[pts] if available
+              if (mcResults) opts.sort((a, b) => (b.mc ? b.mc.expectedPoints : -99) - (a.mc ? a.mc.expectedPoints : -99));
+              const bestEP = opts[0]?.mc?.expectedPoints;
+              return opts.map((o, i) => {
+                const hPct = scorePct(o.score, allScores);
+                const hCol = scoreColor(hPct);
+                const mc = o.mc;
+                const ep = mc ? mc.expectedPoints : null;
+                const epCol = mc ? epColor(ep) : '';
+                const tileLoss = mc && bestEP !== undefined ? bestEP - ep : null;
+                return `<div class="text-xs ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'} mb-1">
+                  <div class="flex items-center gap-1">
+                    <span class="font-mono w-3">${i+1}.</span>
+                    <span class="w-14">[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
+                    <span class="font-mono font-bold w-7 text-right" style="color:${hCol}">${hPct}</span>
+                    ${ep !== null ? `<span class="font-mono font-bold w-12 text-right" style="color:${epCol}">${fmtEP(ep)}</span>
+                    ${tileLoss !== null && tileLoss > 0.01 ? `<span class="font-mono text-red-400 w-10 text-right">-${tileLoss.toFixed(2)}</span>` : `<span class="font-mono text-emerald-400 w-10">BEST</span>`}` :
+                    `<div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:50px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>`}
+                  </div>
+                  ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
+                </div>`;
+              }).join('');
+            })()}
           </div>` : ''}
         </div>` : `
         <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-slate-600">
@@ -1764,6 +2029,19 @@
       `).join('');
     }
 
+    // Format E[pts] with sign and color
+    function fmtEP(ep) {
+      const sign = ep >= 0 ? '+' : '';
+      return `${sign}${ep.toFixed(2)}`;
+    }
+    function epColor(ep) {
+      if (ep >= 0.5) return '#22c55e';
+      if (ep >= 0.1) return '#86efac';
+      if (ep >= -0.1) return '#eab308';
+      if (ep >= -0.5) return '#f97316';
+      return '#ef4444';
+    }
+
     function renderMCPanel() {
       if (!deepAnalysis) return '';
       if (mcRunning) {
@@ -1781,29 +2059,53 @@
       const heuristicBest = snap.allOptions && snap.allOptions.length > 0 ? snap.allOptions[0] : null;
       const disagree = heuristicBest && best.tile.id !== heuristicBest.tile.id;
 
+      // Normalize E[pts] bars: map range [-4, +4] to [0%, 100%] with 50% = 0
+      const epToPct = ep => Math.max(0, Math.min(100, 50 + ep * 12.5));
+
       return `<div class="bg-blue-950 rounded-lg p-2.5 mb-2 border ${disagree ? 'border-yellow-500' : 'border-blue-700'}">
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-xs font-bold text-blue-300">Monte Carlo Analysis</span>
           ${disagree ? '<span class="text-xs text-yellow-400 font-bold">DISAGREES with heuristic</span>' : '<span class="text-xs text-emerald-400">Confirms heuristic</span>'}
         </div>
-        <div class="space-y-1">
+        <div class="text-xs text-slate-500 mb-1 flex gap-3">
+          <span class="font-mono">E[pts] = expected points per round</span>
+          <span class="text-slate-600">Match: ${matchScore[0]}-${matchScore[1]}</span>
+        </div>
+        <div class="space-y-1.5">
           ${mcResults.map((r, i) => {
-            const pct = (r.winRate * 100).toFixed(0);
-            const color = r.winRate >= 0.55 ? '#22c55e' : r.winRate >= 0.45 ? '#eab308' : '#ef4444';
+            const winPct = (r.winRate * 100).toFixed(0);
+            const ep = r.expectedPoints;
+            const epBarPct = epToPct(ep);
+            const col = epColor(ep);
             const isBest = i === 0;
             const isHeuristicPick = heuristicBest && r.tile.id === heuristicBest.tile.id;
-            return `<div class="flex items-center gap-2 text-xs">
-              <span class="${isBest ? 'text-emerald-400 font-bold' : 'text-slate-400'}">[${r.tile.left}|${r.tile.right}]</span>
-              <div class="flex-1 bg-slate-700 rounded-full h-2">
-                <div class="h-2 rounded-full" style="width:${pct}%;background:${color}"></div>
+            const eqLoss = best.expectedPoints - ep;
+            // Outcome icons
+            const oc = r.outcomes || {};
+            const sims = r.sims || 80;
+            const outcomeStr = [
+              oc.carroca > 0 ? `C:${(oc.carroca/sims*100).toFixed(0)}%` : '',
+              oc.laelo > 0 ? `L:${(oc.laelo/sims*100).toFixed(0)}%` : '',
+              oc.cruzada > 0 ? `X:${(oc.cruzada/sims*100).toFixed(0)}%` : '',
+              oc.blocked > 0 ? `B:${(oc.blocked/sims*100).toFixed(0)}%` : ''
+            ].filter(Boolean).join(' ');
+            return `<div class="text-xs">
+              <div class="flex items-center gap-1.5">
+                <span class="${isBest ? 'text-emerald-400 font-bold' : 'text-slate-400'} w-14">[${r.tile.left}|${r.tile.right}]</span>
+                <span class="font-mono font-bold w-12 text-right" style="color:${col}">${fmtEP(ep)}</span>
+                <div class="flex-1 bg-slate-700 rounded-full h-2 relative">
+                  <div class="absolute top-0 left-1/2 w-px h-2 bg-slate-500"></div>
+                  <div class="h-2 rounded-full absolute" style="left:${Math.min(50, epBarPct)}%;width:${Math.abs(epBarPct - 50)}%;background:${col}"></div>
+                </div>
+                <span class="w-9 text-right font-mono text-slate-500">${winPct}%</span>
+                ${isBest ? '<span class="text-emerald-500 font-bold">BEST</span>' : eqLoss > 0.01 ? `<span class="font-mono text-red-400">-${eqLoss.toFixed(2)}</span>` : ''}
+                ${isHeuristicPick && !isBest ? '<span class="text-yellow-600">H</span>' : ''}
               </div>
-              <span class="w-10 text-right font-mono" style="color:${color}">${pct}%</span>
-              ${isBest ? '<span class="text-emerald-500 text-xs">MC best</span>' : ''}
-              ${isHeuristicPick && !isBest ? '<span class="text-yellow-500 text-xs">heuristic pick</span>' : ''}
+              ${outcomeStr ? `<div class="ml-16 text-slate-600 font-mono">${outcomeStr}</div>` : ''}
             </div>`;
           }).join('')}
         </div>
-        <div class="text-xs text-slate-600 mt-1">Win% from ${mcResults[0]?.sims || 80} simulated games per tile</div>
+        <div class="text-xs text-slate-600 mt-1">E[pts] from ${mcResults[0]?.sims || 80} sims/tile | Block: ${(best.blockRate*100).toFixed(0)}%</div>
       </div>`;
     }
 
@@ -1811,24 +2113,40 @@
       const knowledge = snap.knowledge;
       if (!knowledge) return '<div class="text-xs text-slate-500">No data yet</div>';
 
+      // Compute tile probabilities via MC sampling for gradient display
+      const handSizes = snap.hands.map(h => h.length);
+      const tileProbs = {};
+      for (const p of [1, 2, 3]) {
+        tileProbs[p] = computeTileProbs(p, knowledge, handSizes, snap.hands[0], 0, 200);
+      }
+
+      // Helper: probability to gradient color
+      const probToColor = (prob) => {
+        if (prob <= 0) return { bg: '#450a0a', txt: '#fca5a5' };  // eliminated
+        if (prob >= 0.8) return { bg: '#14532d', txt: '#86efac' }; // very likely
+        if (prob >= 0.5) return { bg: '#365314', txt: '#a3e635' }; // likely
+        if (prob >= 0.25) return { bg: '#422006', txt: '#fbbf24' }; // medium
+        return { bg: '#451a03', txt: '#fb923c' };                   // unlikely but possible
+      };
+
       // Build probability grid for each opponent
       return `
         <div class="space-y-3 overflow-y-auto flex-1">
           ${[1, 2, 3].map(p => {
             const possible = knowledge.possibleTilesFor(p);
-            const possibleIds = new Set(possible.map(t => t.id));
             const handSize = snap.hands[p].length;
             const dead = knowledge.deadNumbers(p);
+            const probs = tileProbs[p];
 
             return `
               <div class="bg-slate-900 rounded-lg p-2">
                 <div class="flex items-center justify-between mb-1.5">
                   <span class="text-xs font-bold" style="color:${teamColors[p%2]}">${pNames[p]}</span>
-                  <span class="text-xs text-slate-400 tooltip">holds ${handSize}, could be ${possible.length} different tiles
-                    <span class="tip-text">They have ${handSize} tiles in hand. Based on passes and plays, ${possible.length} of the 28 tiles could be in their hand.</span>
+                  <span class="text-xs text-slate-400 tooltip">holds ${handSize}, could be ${possible.length} tiles
+                    <span class="tip-text">They have ${handSize} tiles. Probabilities estimated from ${200} MC samples.</span>
                   </span>
                 </div>
-                ${dead.length > 0 ? `<div class="text-xs text-red-400 mb-1">Passed on: {${dead.join(', ')}} — has none of these numbers</div>` : ''}
+                ${dead.length > 0 ? `<div class="text-xs text-red-400 mb-1">Dead: {${dead.join(', ')}}</div>` : ''}
                 <div class="grid gap-px" style="grid-template-columns: repeat(8, 1fr)">
                   <!-- Header row -->
                   <div class="prob-cell text-slate-600"></div>
@@ -1840,22 +2158,28 @@
                       if (col < row) return '<div class="prob-cell"></div>';
                       const tid = `${row}-${col}`;
                       const isPlayed = knowledge.played.has(tid);
-                      const isPossible = possibleIds.has(tid);
                       const isInMyHand = snap.hands[0].some(t => t.id === tid);
-                      let bg, txt;
-                      if (isPlayed) { bg = '#1e293b'; txt = '#475569'; }
-                      else if (isInMyHand) { bg = '#1e3a5f'; txt = '#60a5fa'; }
-                      else if (isPossible) { bg = '#365314'; txt = '#a3e635'; }
-                      else { bg = '#450a0a'; txt = '#fca5a5'; }
-                      return `<div class="prob-cell" style="background:${bg};color:${txt}" title="${row}-${col}: ${isPlayed ? 'played' : isInMyHand ? 'in your hand' : isPossible ? 'possible' : 'impossible'}">${row}${col}</div>`;
+                      const prob = probs[tid] || 0;
+                      let bg, txt, label;
+                      if (isPlayed) { bg = '#1e293b'; txt = '#475569'; label = 'played'; }
+                      else if (isInMyHand) { bg = '#1e3a5f'; txt = '#60a5fa'; label = 'your hand'; }
+                      else {
+                        const c = probToColor(prob);
+                        bg = c.bg; txt = c.txt;
+                        label = `${(prob * 100).toFixed(0)}% chance`;
+                      }
+                      const pctDisplay = !isPlayed && !isInMyHand && prob > 0 ? `${(prob * 100).toFixed(0)}` : `${row}${col}`;
+                      return `<div class="prob-cell" style="background:${bg};color:${txt};opacity:${isPlayed ? 0.4 : isInMyHand ? 1 : 0.4 + prob * 0.6}" title="${row}-${col}: ${label}">${pctDisplay}</div>`;
                     }).join('')}
                   `).join('')}
                 </div>
-                <div class="flex gap-2 mt-1.5 text-xs">
-                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#365314"></span> Possible</span>
-                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#450a0a"></span> Eliminated</span>
-                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#1e3a5f"></span> Your hand</span>
-                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#1e293b"></span> Played</span>
+                <div class="flex gap-2 mt-1.5 text-xs flex-wrap">
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#14532d"></span> &gt;80%</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#365314"></span> 50-80%</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#422006"></span> 25-50%</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#451a03"></span> &lt;25%</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#450a0a"></span> 0%</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#1e3a5f"></span> Yours</span>
                 </div>
               </div>`;
           }).join('')}
@@ -2015,10 +2339,167 @@
       `;
     }
 
+    // ========== ANALYSIS TAB — Game Report + Leak Finder ==========
+
+    let analysisRunning = false;
+
+    function runAnalysisAsync() {
+      if (!currentGame || currentGame._analysisCache || analysisRunning) return;
+      analysisRunning = true;
+      currentGame._analysisPartial = [];
+      const snapshots = currentGame.snapshots;
+      const p0Steps = [];
+      for (let i = 1; i < snapshots.length; i++) {
+        if (snapshots[i].player === 0 && snapshots[i].action === 'play') p0Steps.push(i);
+      }
+      currentGame._analysisTotalMoves = p0Steps.length;
+      let idx = 0;
+      const game = currentGame; // capture reference
+
+      function processNext() {
+        if (game !== currentGame) { analysisRunning = false; return; } // game changed
+        if (idx >= p0Steps.length) {
+          game._analysisCache = game._analysisPartial;
+          delete game._analysisPartial;
+          delete game._analysisTotalMoves;
+          analysisRunning = false;
+          render();
+          return;
+        }
+        const i = p0Steps[idx];
+        const s = snapshots[i];
+        const prevSnap = snapshots[i - 1];
+        const mc = monteCarloEval(prevSnap, 0, MC_SIMS_ANALYSIS);
+        const best = mc.length > 0 ? mc[0] : null;
+        const played = mc.find(m => m.tile.id === s.tile.id);
+        const eqLoss = best && played ? best.expectedPoints - played.expectedPoints : 0;
+        let grade;
+        if (best && s.tile.id === best.tile.id) grade = 'perfect';
+        else if (eqLoss < 0.05) grade = 'perfect';
+        else if (eqLoss < 0.15) grade = 'good';
+        else if (eqLoss < 0.40) grade = 'ok';
+        else grade = 'bad';
+        game._analysisPartial.push({
+          move: s.move, tile: s.tile, side: s.side,
+          bestTile: best ? best.tile : null, bestSide: best ? best.side : null,
+          bestEP: best ? best.expectedPoints : 0,
+          playedEP: played ? played.expectedPoints : 0,
+          eqLoss, grade, stepIdx: i
+        });
+        idx++;
+        render(); // show progress
+        setTimeout(processNext, 10); // yield to UI between each move's MC
+      }
+      setTimeout(processNext, 10);
+    }
+
+    function renderAnalysisPanel(snap, pNames, pTeams, teamColors) {
+      if (!currentGame) return '<div class="text-xs text-slate-500">No game loaded</div>';
+
+      // Trigger async analysis if not started
+      if (!currentGame._analysisCache && !analysisRunning) {
+        setTimeout(() => runAnalysisAsync(), 10);
+      }
+
+      // Show progress if still computing
+      if (!currentGame._analysisCache) {
+        const done = currentGame._analysisPartial ? currentGame._analysisPartial.length : 0;
+        const total = currentGame._analysisTotalMoves || '?';
+        return `<div class="text-center py-8">
+          <div class="inline-block w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mb-2"></div>
+          <div class="text-xs text-blue-300">Analyzing game...</div>
+          <div class="text-xs text-slate-500">${done} / ${total} moves</div>
+        </div>`;
+      }
+      const analysis = currentGame._analysisCache;
+      const totalEL = analysis.reduce((sum, a) => sum + a.eqLoss, 0);
+      const avgEL = analysis.length > 0 ? totalEL / analysis.length : 0;
+      const blunders = analysis.filter(a => a.grade === 'bad').length;
+      const mistakes = analysis.filter(a => a.grade === 'ok').length;
+      const perfects = analysis.filter(a => a.grade === 'perfect').length;
+
+      // Leak finder: identify patterns
+      const leaks = [];
+      // Check for systematic issues
+      const earlyMoves = analysis.slice(0, 3);
+      const lateMoves = analysis.slice(-3);
+      const earlyEL = earlyMoves.reduce((s, a) => s + a.eqLoss, 0) / (earlyMoves.length || 1);
+      const lateEL = lateMoves.reduce((s, a) => s + a.eqLoss, 0) / (lateMoves.length || 1);
+      if (earlyEL > 0.2 && analysis.length >= 4) leaks.push({ type: 'Opening', desc: 'High equity loss in early moves — review opening tile selection' });
+      if (lateEL > 0.2 && analysis.length >= 4) leaks.push({ type: 'Endgame', desc: 'High equity loss in late moves — work on endgame precision' });
+      if (blunders >= 2) leaks.push({ type: 'Blunders', desc: `${blunders} blunders this game — focus on eliminating big mistakes first` });
+
+      // Check for double-related errors
+      const doubleErrors = analysis.filter(a => a.grade !== 'perfect' && a.tile.left === a.tile.right);
+      if (doubleErrors.length >= 2) leaks.push({ type: 'Doubles', desc: 'Multiple errors with doubles — review double management strategy' });
+
+      // Grade color for the game
+      const gameColor = avgEL < 0.05 ? '#22c55e' : avgEL < 0.10 ? '#86efac' : avgEL < 0.20 ? '#eab308' : '#ef4444';
+      const gameRating = avgEL < 0.05 ? 'Excellent' : avgEL < 0.10 ? 'Good' : avgEL < 0.20 ? 'Fair' : 'Needs Work';
+
+      return `
+        <div class="space-y-3 flex-1 overflow-y-auto">
+          <!-- Game Report Header -->
+          <div class="bg-slate-900 rounded-lg p-3 text-center">
+            <div class="text-xs text-slate-500 mb-1">Game Report</div>
+            <div class="text-2xl font-bold font-mono" style="color:${gameColor}">${avgEL.toFixed(3)}</div>
+            <div class="text-xs text-slate-400">Avg Equity Loss / Move</div>
+            <div class="text-sm font-bold mt-1" style="color:${gameColor}">${gameRating}</div>
+            <div class="flex justify-center gap-4 mt-2 text-xs">
+              <span class="text-emerald-400">${perfects} perfect</span>
+              <span class="text-yellow-400">${mistakes} mistakes</span>
+              <span class="text-red-400">${blunders} blunders</span>
+            </div>
+            <div class="text-xs text-slate-500 mt-1">Total EL: ${totalEL.toFixed(2)} pts over ${analysis.length} decisions</div>
+          </div>
+
+          <!-- Move-by-move analysis -->
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Move-by-Move (Your decisions)</div>
+            ${analysis.length === 0 ? '<div class="text-xs text-slate-500">Run a full game to see analysis</div>' : ''}
+            <div class="space-y-1 max-h-[180px] overflow-y-auto">
+              ${analysis.map(a => {
+                const gradeLabel = { perfect: 'OK', good: 'INACC', ok: 'MSTK', bad: 'BLNDR' }[a.grade];
+                const gradeColor = { perfect: 'text-emerald-400', good: 'text-green-300', ok: 'text-yellow-400', bad: 'text-red-400' }[a.grade];
+                return `<div class="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-800 rounded px-1" onclick="goTo(${a.stepIdx})">
+                  <span class="font-mono text-slate-500 w-4">#${a.move}</span>
+                  <span class="${gradeColor} font-bold w-10">${gradeLabel}</span>
+                  <span class="text-slate-400">[${a.tile.left}|${a.tile.right}]</span>
+                  ${a.grade !== 'perfect' && a.bestTile ? `<span class="text-slate-600">&rarr; [${a.bestTile.left}|${a.bestTile.right}]</span>` : ''}
+                  <span class="font-mono ml-auto ${a.eqLoss > 0.01 ? 'text-red-400' : 'text-emerald-400'}">${a.eqLoss > 0.01 ? `-${a.eqLoss.toFixed(2)}` : '0.00'}</span>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+
+          ${leaks.length > 0 ? `
+          <!-- Leak Finder -->
+          <div class="bg-slate-900 rounded-lg p-2 border border-orange-800">
+            <div class="text-xs font-bold text-orange-400 mb-1">Leak Finder</div>
+            <div class="space-y-1.5">
+              ${leaks.map(l => `
+                <div class="text-xs">
+                  <span class="text-orange-300 font-bold">${l.type}:</span>
+                  <span class="text-slate-300">${l.desc}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>` : `
+          <div class="bg-slate-900 rounded-lg p-2 border border-emerald-800">
+            <div class="text-xs text-emerald-400">No major leaks detected this game</div>
+          </div>`}
+
+          <div class="text-xs text-slate-600 text-center">Click any move to navigate to it</div>
+        </div>
+      `;
+    }
+
     function renderStatsPanel() {
       const total = stats.totalMoves;
       const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
       const goodPct = total > 0 ? (((stats.optimalMoves + stats.goodMoves) / total) * 100).toFixed(1) : '0.0';
+      const avgEL = total > 0 && stats.totalEquityLoss ? (stats.totalEquityLoss / total).toFixed(3) : '0.000';
+      const elColor = parseFloat(avgEL) < 0.05 ? 'text-emerald-400' : parseFloat(avgEL) < 0.15 ? 'text-yellow-400' : 'text-red-400';
 
       return `
         <div class="space-y-3 flex-1 overflow-y-auto">
@@ -2026,21 +2507,33 @@
             <div class="text-3xl font-bold ${parseFloat(accuracy) >= 50 ? 'text-emerald-400' : parseFloat(accuracy) >= 30 ? 'text-yellow-400' : 'text-red-400'}">${accuracy}%</div>
             <div class="text-xs text-slate-400">Perfect Play Rate</div>
             <div class="text-lg font-bold text-blue-400 mt-1">${goodPct}%</div>
-            <div class="text-xs text-slate-400">Good or Better</div>
+            <div class="text-xs text-slate-400">Perfect or Inaccuracy</div>
+          </div>
+
+          <!-- Equity Loss summary -->
+          <div class="bg-slate-900 rounded-lg p-3 text-center">
+            <div class="text-2xl font-bold font-mono ${elColor}">${avgEL}</div>
+            <div class="text-xs text-slate-400">Avg Equity Loss (pts/move)</div>
+            <div class="text-xs text-slate-500 mt-1">
+              ${parseFloat(avgEL) < 0.05 ? 'Expert level' :
+                parseFloat(avgEL) < 0.10 ? 'Advanced' :
+                parseFloat(avgEL) < 0.20 ? 'Intermediate' : 'Beginner — focus on big blunders'}
+            </div>
+            <div class="text-xs text-slate-600 mt-1">Match: ${matchScore[0]}-${matchScore[1]} | ME: ${(getMatchEquity(matchScore[0], matchScore[1]) * 100).toFixed(0)}%</div>
           </div>
 
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-2">Breakdown (${total} moves)</div>
+            <div class="text-xs font-bold text-slate-400 mb-2">Breakdown (${total} moves, ${stats.games} games)</div>
             <div class="space-y-1.5">
               ${[
                 { label: 'Perfect', count: stats.optimalMoves, color: '#22c55e', cls: 'grade-perfect' },
-                { label: 'Good', count: stats.goodMoves, color: '#f59e0b', cls: 'grade-good' },
-                { label: 'OK', count: stats.okMoves, color: '#f97316', cls: 'grade-ok' },
-                { label: 'Miss', count: stats.badMoves, color: '#ef4444', cls: 'grade-bad' }
+                { label: 'Inaccuracy', count: stats.goodMoves, color: '#86efac', cls: 'grade-good' },
+                { label: 'Mistake', count: stats.okMoves, color: '#eab308', cls: 'grade-ok' },
+                { label: 'Blunder', count: stats.badMoves, color: '#ef4444', cls: 'grade-bad' }
               ].map(g => {
                 const pct = total > 0 ? (g.count / total * 100).toFixed(0) : 0;
                 return `<div class="flex items-center gap-2">
-                  <span class="grade-badge ${g.cls} w-14 text-center">${g.label}</span>
+                  <span class="grade-badge ${g.cls} w-16 text-center" style="font-size:10px">${g.label}</span>
                   <div class="flex-1 bg-slate-700 rounded-full h-2">
                     <div class="h-2 rounded-full" style="width:${pct}%;background:${g.color}"></div>
                   </div>
@@ -2055,14 +2548,16 @@
             <div class="text-xs font-bold text-slate-400 mb-1">Recent Decisions</div>
             <div class="space-y-0.5 max-h-[200px] overflow-y-auto">
               ${stats.history.length === 0 ? '<div class="text-xs text-slate-500">Play quiz mode to track decisions</div>' : ''}
-              ${[...stats.history].reverse().map((h, i) => `
-                <div class="flex items-center gap-2 text-xs">
-                  <span class="grade-badge grade-${h.grade}" style="font-size:9px">${h.grade.toUpperCase()}</span>
-                  <span class="text-slate-400">You: [${h.userTile}]</span>
-                  ${h.grade !== 'perfect' ? `<span class="text-slate-500">AI: [${h.aiTile}]</span>` : ''}
-                  ${h.scoreDiff > 0 ? `<span class="text-red-400">-${h.scoreDiff}</span>` : ''}
-                </div>
-              `).join('')}
+              ${[...stats.history].reverse().map((h, i) => {
+                const gradeLabel = { perfect: 'PERFECT', good: 'INACC', ok: 'MSTK', bad: 'BLNDR' }[h.grade] || h.grade.toUpperCase();
+                const el = h.equityLoss;
+                return `<div class="flex items-center gap-2 text-xs">
+                  <span class="grade-badge grade-${h.grade}" style="font-size:9px">${gradeLabel}</span>
+                  <span class="text-slate-400">[${h.userTile}]</span>
+                  ${h.grade !== 'perfect' ? `<span class="text-slate-500">[${h.aiTile}]</span>` : ''}
+                  ${el > 0 ? `<span class="font-mono text-red-400">EL:${el.toFixed(2)}</span>` : ''}
+                </div>`;
+              }).join('')}
             </div>
           </div>
 
@@ -2137,6 +2632,10 @@
       }
     }
 
+    const MC_SIMS_WATCH = 120;  // sims per tile in watch mode
+    const MC_SIMS_QUIZ = 100;   // sims per tile in quiz mode
+    const MC_SIMS_ANALYSIS = 60; // sims per tile in analysis tab (per-move, many moves)
+
     function runMCForCurrentStep() {
       if (!currentGame || !deepAnalysis) return;
       const snap = currentGame.snapshots[currentStep];
@@ -2147,7 +2646,7 @@
       setTimeout(() => {
         // Run MC from the state BEFORE this move was made
         const prevSnap = currentGame.snapshots[currentStep - 1];
-        mcResults = monteCarloEval(prevSnap, snap.player, 80);
+        mcResults = monteCarloEval(prevSnap, snap.player, MC_SIMS_WATCH);
         mcRunning = false;
         render();
       }, 20);
@@ -2160,6 +2659,7 @@
       quizShowingResult = false;
       quizSidePick = null;
       mcResults = null;
+      analysisRunning = false; // cancel any in-progress analysis
       stats.games++;
       saveStats();
       currentGame = generateGame();
@@ -2178,10 +2678,21 @@
       if (lastSnap && lastSnap.outcome) {
         lastSnap.outcome = o;
       }
+      // Update match score
+      if (o && o.winner !== undefined && o.points) {
+        const winTeam = o.winner % 2; // 0 or 1
+        matchScore[winTeam] += o.points;
+        // Check for match win — reset if match over
+        if (matchScore[0] >= MATCH_TARGET || matchScore[1] >= MATCH_TARGET) {
+          // match over — will be shown in UI, reset next game
+          matchScore = [0, 0];
+          scoreMultiplier = 1;
+        }
+      }
       // Update multiplier for NEXT game
       if (o && o.type === 'tie') {
         scoreMultiplier *= 2; // stack dobradas
-      } else {
+      } else if (!o || o.type !== 'tie') {
         scoreMultiplier = 1;
       }
       currentStep = 0;
