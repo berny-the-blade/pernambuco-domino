@@ -27,6 +27,7 @@
     .board-tile-v { flex-direction: column; width: 26px; height: 48px; }
     .board-tile-h { flex-direction: row; width: 48px; height: 26px; }
     .board-tile .tile-half:first-child { border-color: #94a3b8; }
+    .board-snake { min-height: 100%; display: flex; flex-direction: column; justify-content: center; }
     .log-entry { transition: background 0.2s; }
     .log-entry.active { background: rgba(34,197,94,0.15); border-left: 3px solid #22c55e; }
     .log-entry.past { opacity: 0.5; }
@@ -108,6 +109,8 @@
       return d;
     }
 
+    const ALL_TILES = createDeck(); // shared immutable deck — never mutate
+
     function shuffleDeck(deck) {
       const s = [...deck];
       for (let i = s.length - 1; i > 0; i--) {
@@ -141,21 +144,27 @@
       constructor() {
         this.cantHave = [new Set(), new Set(), new Set(), new Set()];
         this.played = new Set();
-        this.allTiles = createDeck();
+        this.allTiles = ALL_TILES;
         this.playsBy = [[], [], [], []];
         this.passedOn = [[], [], [], []];
+        this._strengthCache = [null, null, null, null];
       }
       clone() {
-        const k = new Knowledge();
+        const k = Object.create(Knowledge.prototype);
         k.cantHave = this.cantHave.map(s => new Set(s));
         k.played = new Set(this.played);
-        k.playsBy = this.playsBy.map(a => a.map(t => ({...t})));
+        k.allTiles = ALL_TILES;
+        k.playsBy = this.playsBy.map(a => [...a]); // tile refs are immutable
         k.passedOn = this.passedOn.map(a => [...a]);
+        k._strengthCache = [null, null, null, null];
         return k;
       }
       recordPlay(p, t) {
         this.played.add(t.id);
-        if (p >= 0 && p <= 3) this.playsBy[p].push(t);
+        if (p >= 0 && p <= 3) {
+          this.playsBy[p].push(t);
+          this._strengthCache[p] = null; // invalidate
+        }
       }
       recordPass(p, lE, rE) {
         this.cantHave[p].add(lE);
@@ -163,20 +172,21 @@
         this.passedOn[p].push({ lE, rE });
       }
       inferStrength(p) {
+        if (this._strengthCache[p]) return this._strengthCache[p];
         const s = [0,0,0,0,0,0,0];
         for (const t of this.playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+        this._strengthCache[p] = s;
         return s;
       }
       deadNumbers(p) { return [...this.cantHave[p]]; }
       remainingWithNumber(n) {
         let c = 0;
-        for (const t of this.allTiles) { if (!this.played.has(t.id) && (t.left === n || t.right === n)) c++; }
+        for (const t of ALL_TILES) { if (!this.played.has(t.id) && (t.left === n || t.right === n)) c++; }
         return c;
       }
-      // For probability tracker: which tiles could player possibly hold?
       possibleTilesFor(p) {
         const possible = [];
-        for (const t of this.allTiles) {
+        for (const t of ALL_TILES) {
           if (this.played.has(t.id)) continue;
           if (this.cantHave[p].has(t.left) && this.cantHave[p].has(t.right)) continue;
           if (t.left === t.right && this.cantHave[p].has(t.left)) continue;
@@ -233,7 +243,8 @@
           const pStr = knowledge.inferStrength(partner);
           let pAff = 0;
           const partnerDetails = [];
-          for (const endNum of [newEnd, otherEnd]) {
+          const endNums = newEnd === otherEnd ? [newEnd] : [newEnd, otherEnd];
+          for (const endNum of endNums) {
             const played = pStr[endNum] || 0;
             if (played > 0) {
               // How many tiles with this number are left in play (not played, not in our hand)?
@@ -254,7 +265,6 @@
           ss += tilePips * 2;
           if (tilePips >= 9) sr.push(`Dump heavy tile (${tilePips} pips)`);
           else if (tilePips >= 6) sr.push(`Sheds ${tilePips} pips`);
-
 
           // Play doubles early
           if (tile.left === tile.right) { ss += 12; sr.push('Clear inflexible double'); }
@@ -328,12 +338,13 @@
 
     // ========== SIMULATION ENGINE ==========
 
-    function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight) {
+    function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight, autoPlayer) {
       const hands = initHands.map(h => h.map(t => ({...t})));
       let board = [...initBoard], lE = initLeft, rE = initRight;
       let cur = startPlayer, passCount = 0;
       const knowledge = new Knowledge();
-      for (const t of initBoard) knowledge.recordPlay(-1, t);
+      // Record auto-played opening tile with actual player for hand-size estimation
+      for (const t of initBoard) knowledge.recordPlay(autoPlayer != null ? autoPlayer : -1, t);
 
       const snapshots = [];
       snapshots.push({
@@ -438,7 +449,7 @@
     }
 
     function generateGame() {
-      const deck = shuffleDeck(createDeck());
+      const deck = shuffleDeck(ALL_TILES);
       const hands = [[],[],[],[]];
       for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
 
@@ -455,26 +466,24 @@
         originalHands: hands.map(h => h.map(t => ({...t}))),
         autoPlayedBy: hp,
         autoTile,
-        ...simulateFullRound(hands, starter, [autoTile], autoTile.left, autoTile.right)
+        ...simulateFullRound(hands, starter, [autoTile], autoTile.left, autoTile.right, hp)
       };
     }
 
     // ========== MONTE CARLO LOOKAHEAD ==========
 
-    const ALL_TILES = createDeck();
-
     // Generate a random deal of remaining tiles consistent with knowledge constraints
     function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
-      // Pool: all unplayed tiles NOT in my hand
+      // Pool: all unplayed tiles NOT in my hand — no need to copy, tiles are read-only
       const myIds = new Set(myHand.map(t => t.id));
       const pool = [];
       for (const t of ALL_TILES) {
         if (knowledge.played.has(t.id)) continue;
         if (myIds.has(t.id)) continue;
-        pool.push({ ...t });
+        pool.push(t);
       }
 
-      // Shuffle pool
+      // Shuffle pool (Fisher-Yates on refs only)
       for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -482,7 +491,7 @@
 
       // Assign tiles to players, respecting cantHave constraints
       const hands = [[], [], [], []];
-      hands[myIdx] = myHand.map(t => ({ ...t }));
+      hands[myIdx] = [...myHand];
       const assigned = new Set();
 
       // First pass: greedily assign
@@ -491,12 +500,11 @@
         for (const t of pool) {
           if (assigned.has(t.id)) continue;
           if (hands[p].length >= handSizes[p]) break;
-          // Check if player CAN have this tile
           const cantL = knowledge.cantHave[p].has(t.left);
           const cantR = knowledge.cantHave[p].has(t.right);
-          if (t.left === t.right && cantL) continue; // double: needs the number
-          if (cantL && cantR) continue; // both numbers blocked
-          hands[p].push({ ...t });
+          if (t.left === t.right && cantL) continue;
+          if (cantL && cantR) continue;
+          hands[p].push(t);
           assigned.add(t.id);
         }
       }
@@ -505,11 +513,10 @@
       for (let p = 0; p < 4; p++) {
         if (p === myIdx) continue;
         if (hands[p].length < handSizes[p]) {
-          // Fill remaining from unassigned pool (relaxing constraints)
           for (const t of pool) {
             if (assigned.has(t.id)) continue;
             if (hands[p].length >= handSizes[p]) break;
-            hands[p].push({ ...t });
+            hands[p].push(t);
             assigned.add(t.id);
           }
         }
@@ -519,16 +526,17 @@
     }
 
     // Simulate a game from a given position using smartAI for all players
-    function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge) {
-      const simHands = hands.map(h => h.map(t => ({ ...t })));
-      let simBoard = board.map(t => ({ ...t }));
+    function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge, initBLen) {
+      // Shallow-copy hand arrays (filter creates new arrays, tile objects are read-only)
+      const simHands = hands.map(h => [...h]);
+      let bLen = initBLen != null ? initBLen : board.length;
       let simLE = lE, simRE = rE;
       let cur = nextPlayer;
       let passCount = 0;
       const simKnowledge = knowledge.clone();
 
       for (let move = 0; move < 100; move++) {
-        const decision = smartAI(simHands[cur], simLE, simRE, simBoard.length, cur, simKnowledge, false);
+        const decision = smartAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge, false);
 
         if (decision) {
           passCount = 0;
@@ -539,20 +547,14 @@
           simHands[cur] = simHands[cur].filter(t => t.id !== tile.id);
           simKnowledge.recordPlay(cur, tile);
 
-          const pL = simLE, pR = simRE;
-
-          if (simBoard.length === 0) {
-            simBoard = [tile]; simLE = tile.left; simRE = tile.right;
+          if (bLen === 0) {
+            simLE = tile.left; simRE = tile.right;
+          } else if (side === 'left') {
+            simLE = tile.left === simLE ? tile.right : tile.left;
           } else {
-            let placed = { ...tile };
-            if (side === 'left') {
-              if (tile.left === simLE) placed = { left: tile.right, right: tile.left, id: tile.id };
-              simBoard.unshift(placed); simLE = placed.left;
-            } else {
-              if (tile.right === simRE) placed = { left: tile.right, right: tile.left, id: tile.id };
-              simBoard.push(placed); simRE = placed.right;
-            }
+            simRE = tile.right === simRE ? tile.left : tile.right;
           }
+          bLen++;
 
           if (simHands[cur].length === 0) {
             return { winnerTeam: cur % 2 };
@@ -609,19 +611,16 @@
         for (const side of sides) {
           let wins = 0, validSims = 0;
 
-          // Compute board state after playing this tile
+          // Compute new ends after playing this tile (no board array needed)
           let newLE = lE, newRE = rE;
-          const newBoard = board.map(t => ({ ...t }));
-          let placed = { ...tile };
+          const newBLen = board.length + 1;
 
           if (board.length === 0) {
-            newBoard.push(placed); newLE = tile.left; newRE = tile.right;
+            newLE = tile.left; newRE = tile.right;
           } else if (side === 'left') {
-            if (tile.left === lE) placed = { left: tile.right, right: tile.left, id: tile.id };
-            newBoard.unshift(placed); newLE = placed.left;
+            newLE = tile.left === lE ? tile.right : tile.left;
           } else {
-            if (tile.right === rE) placed = { left: tile.right, right: tile.left, id: tile.id };
-            newBoard.push(placed); newRE = placed.right;
+            newRE = tile.right === rE ? tile.left : tile.right;
           }
 
           const newHandSizes = [...handSizes];
@@ -640,7 +639,7 @@
 
           for (let sim = 0; sim < numSims; sim++) {
             const simHands = generateConsistentDeal(myNewHand, newHandSizes, newKnowledge, player);
-            const result = simulateFromPosition(simHands, newBoard, newLE, newRE, (player + 1) % 4, newKnowledge);
+            const result = simulateFromPosition(simHands, null, newLE, newRE, (player + 1) % 4, newKnowledge, newBLen);
             if (result.winnerTeam === myTeam) wins++;
             validSims++;
           }
@@ -678,12 +677,11 @@
     let stats = {
       totalMoves: 0,
       optimalMoves: 0,
-      goodMoves: 0,    // within 10 pts
-      okMoves: 0,      // within 25 pts
-      badMoves: 0,     // worse
-      passedCorrectly: 0,
+      goodMoves: 0,    // score diff <= 5
+      okMoves: 0,      // score diff <= 15
+      badMoves: 0,     // score diff > 15
       games: 0,
-      history: []  // last 20 decisions
+      history: []  // last 30 decisions
     };
 
     // Load stats from localStorage
@@ -749,8 +747,16 @@
 
     function quizPickSide(side) {
       if (!quizSidePick) return;
-      finishQuizPick(quizSidePick.tile, side);
-      quizSidePick = null;
+      const tile = quizSidePick.tile;
+      quizSidePick = null; // clear BEFORE render triggered by finishQuizPick
+      finishQuizPick(tile, side);
+    }
+
+    function quizPass() {
+      if (!quizWaiting) return;
+      // Passing is always correct when you have no playable tiles — just advance
+      quizWaiting = false;
+      stepForward();
     }
 
     function finishQuizPick(userTile, userSide) {
@@ -1050,16 +1056,16 @@
 
               <!-- Middle: Left opp + Board + Right opp -->
               <div class="flex gap-2 my-2">
-                <div class="w-24 flex-shrink-0">
+                <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
-                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] relative overflow-hidden" id="board-area">
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[140px] relative overflow-hidden" id="board-area">
                   <div class="board-snake" id="board-snake">
                     ${renderBoard(snap)}
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                 </div>
-                <div class="w-24 flex-shrink-0">
+                <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
                 </div>
               </div>
@@ -1217,7 +1223,12 @@
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
             ${hand.map(t => tileHTML(t, '', 'v', getTileCls(t), getTileClick(t))).join('')}
           </div>
-          ${quizWaiting && !quizSidePick ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">Click a tile to play it</span></div>` : ''}
+          ${quizWaiting && !quizSidePick ? (() => {
+            const hasPlayable = hand.some(t => canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length));
+            return hasPlayable
+              ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">Click a tile to play it</span></div>`
+              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
+          })() : ''}
           ${quizSidePick ? renderSidePickOverlay() : ''}
           ${quizShowingResult ? renderQuizResultBadge() : ''}
         </div>`;
@@ -1291,6 +1302,7 @@
         <div class="flex items-center gap-2 mb-2">
           <span class="grade-badge ${gradeCls}">${gradeText}</span>
           ${r.grade !== 'perfect' ? `<span class="text-xs text-slate-400">Your pick: [${r.userTile.left}|${r.userTile.right}] &rarr; Better: [${r.aiTile.left}|${r.aiTile.right}] on ${r.aiSide}</span>` : ''}
+          <span class="text-xs text-slate-600 ml-auto">ends: L=${currentGame.snapshots[currentStep].leftEnd} R=${currentGame.snapshots[currentStep].rightEnd}</span>
         </div>
 
         <!-- Detailed explanation -->
@@ -1342,68 +1354,82 @@
     function renderSidePlayer(playerIdx, snap, names, teams, colors) {
       const hand = snap.hands[playerIdx] || [];
       const isActive = snap.currentPlayer === playerIdx;
+      const justPassed = snap.action === 'pass' && snap.player === playerIdx;
+      const justPlayed = snap.action === 'play' && snap.player === playerIdx;
+      const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
+      const highlight = autoPlayed || justPlayed;
+
+      const borderCls = justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700';
+      const statusText = autoPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">OPENED</div>`
+        : justPassed ? `<div class="text-xs text-red-400 text-center mt-1 font-bold animate-pulse">PASSED!</div>`
+        : justPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">PLAYED</div>`
+        : isActive ? '<div class="text-xs text-emerald-400 text-center mt-1 font-bold">Playing</div>' : '';
 
       return `
-        <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+        <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${borderCls}">
           <div class="text-xs font-bold text-center mb-1" style="color:${colors[playerIdx%2]}">${names[playerIdx].split('(')[0].trim()}</div>
           <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} - ${hand.length}</div>
           <div class="flex flex-col gap-0.5 items-center flex-1 justify-center">
-            ${hand.map(() => `<div class="w-14 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
+            ${hand.map(() => `<div class="w-12 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
           </div>
-          ${isActive ? '<div class="text-xs text-emerald-400 text-center mt-1 font-bold">Playing</div>' : ''}
+          ${statusText}
         </div>`;
     }
 
     function renderBoard(snap) {
       if (!snap.board || snap.board.length === 0) return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
 
-      const TW = 49; // horizontal tile width + gap
-      const TH = 27; // horizontal tile height + gap
-      const DW = 27; // double (vertical) width + gap
-      const DH = 49; // double (vertical) height
+      const TW = 50, DW = 28; // tile widths: horizontal / double(vertical)
 
-      // Calculate positions in a snake pattern
-      const boardEl = document.getElementById('board-area');
-      const maxW = boardEl ? boardEl.clientWidth - 30 : 520; // available width minus padding
-
-      const positions = [];
-      let x = 0, y = 0, dir = 1; // dir: 1=right, -1=left
-
-      for (let i = 0; i < snap.board.length; i++) {
-        const t = snap.board[i];
+      const makeTile = t => {
         const isD = t.left === t.right;
-        const w = isD ? DW : TW;
-        const h = isD ? DH : TH;
+        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
+        return `<div style="flex-shrink:0" class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', isD ? 'v' : 'h')}</div>`;
+      };
 
-        // Check if tile would go out of bounds
-        const nextX = dir === 1 ? x + w : x - w;
-        if ((dir === 1 && x + w > maxW && i > 0) || (dir === -1 && x - w < 0 && i > 0)) {
-          // Move down and reverse direction
-          y += Math.max(TH, DH) + 4;
-          dir *= -1;
-          // After reversing, place at current x
-          if (dir === 1) x = 0;
-          else x = maxW - w;
+      // Get available width from board container (minus padding)
+      const boardEl = document.getElementById('board-area');
+      const maxW = boardEl ? boardEl.clientWidth - 20 : 480;
+
+      // Split tiles into rows
+      const rows = [[]];
+      let rowW = 0;
+      for (const t of snap.board) {
+        const w = t.left === t.right ? DW : TW;
+        if (rowW + w > maxW && rows[rows.length - 1].length > 0) {
+          rows.push([]);
+          rowW = 0;
         }
-
-        positions.push({ x: dir === -1 ? x - w : x, y, w, h, tile: t, isD });
-
-        if (dir === 1) x += w + 1;
-        else x -= (w + 1);
+        rows[rows.length - 1].push(t);
+        rowW += w;
       }
 
-      // Center vertically
-      const totalH = positions.length > 0 ? Math.max(...positions.map(p => p.y + p.h)) : 0;
-      const containerH = Math.max(totalH + 10, 180);
+      // Single row — just center it
+      if (rows.length === 1) {
+        return `<div style="display:flex;gap:1px;align-items:center;justify-content:center">${rows[0].map(makeTile).join('')}</div>`;
+      }
 
-      const tiles = positions.map((p, i) => {
-        const t = p.tile;
-        const orient = p.isD ? 'v' : 'h';
-        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
-        return `<div style="position:absolute;left:${p.x}px;top:${p.y}px" class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', orient)}</div>`;
-      }).join('');
+      // Multi-row zigzag snake (like real domino apps)
+      // Even rows: left-to-right. Odd rows: right-to-left.
+      // Connected by a vertical bar on the turn side.
+      let html = '';
+      for (let ri = 0; ri < rows.length; ri++) {
+        const ltr = ri % 2 === 0;
 
-      return `<div style="position:relative;width:100%;height:${containerH}px">${tiles}</div>`;
+        // Row direction: row-reverse puts first DOM child (chain-order) on the RIGHT
+        const dir = ltr ? 'row' : 'row-reverse';
+        const tiles = rows[ri].map(makeTile).join('');
+        html += `<div style="display:flex;gap:1px;align-items:center;flex-direction:${dir}">${tiles}</div>`;
+
+        // Vertical connector between rows (on the side where the chain turns)
+        if (ri < rows.length - 1) {
+          // After LTR row → connector on right side. After RTL row → connector on left side.
+          const side = ltr ? 'flex-end' : 'flex-start';
+          html += `<div style="display:flex;justify-content:${side}">` +
+                  `<div style="width:4px;height:16px;background:#86efac;border-radius:2px;margin:0 12px"></div></div>`;
+        }
+      }
+      return html;
     }
 
     function renderHandStrength(hs, tileCount) {
@@ -1740,8 +1766,6 @@
     function renderProbabilityPanel(snap, pNames, teamColors) {
       const knowledge = snap.knowledge;
       if (!knowledge) return '<div class="text-xs text-slate-500">No data yet</div>';
-
-      const allTiles = createDeck();
 
       // Build probability grid for each opponent
       return `
@@ -2189,7 +2213,7 @@
     }
 
     function resetStats() {
-      stats = { totalMoves: 0, optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0, passedCorrectly: 0, games: 0, history: [] };
+      stats = { totalMoves: 0, optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0, games: 0, history: [] };
       saveStats();
       render();
     }
@@ -2200,6 +2224,13 @@
       else if (e.key === 'ArrowLeft') { e.preventDefault(); stepBack(); }
       else if (e.key === 'n') newGame();
       else if (e.key === 'p') { if (gameMode === 'watch') toggleAutoPlay(); }
+    });
+
+    // Re-render on window resize so board snake adapts to container width
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(render, 150);
     });
 
     // Initial render
