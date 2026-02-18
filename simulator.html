@@ -23,10 +23,11 @@
     .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
     .dot { width: 5px; height: 5px; background: #1e293b; border-radius: 50%; position: absolute; }
     .dot-sm { width: 4px; height: 4px; }
-    .board-tile { display: inline-flex; border: 1.5px solid #64748b; border-radius: 4px; background: #fef3c7; }
-    .board-tile-v { flex-direction: column; width: 26px; height: 48px; }
-    .board-tile-h { flex-direction: row; width: 48px; height: 26px; }
+    .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; }
+    .board-tile-v { flex-direction: column; width: 28px; height: 52px; }
+    .board-tile-h { flex-direction: row; width: 52px; height: 28px; }
     .board-tile .tile-half:first-child { border-color: #94a3b8; }
+    .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 10px rgba(34,197,94,0.6); position: relative; z-index: 2; }
     .board-snake { min-height: 100%; display: flex; flex-direction: column; justify-content: center; }
     .log-entry { transition: background 0.2s; }
     .log-entry.active { background: rgba(34,197,94,0.15); border-left: 3px solid #22c55e; }
@@ -1359,7 +1360,7 @@
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
-                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[140px] relative overflow-hidden" id="board-area">
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[160px] relative overflow-hidden" id="board-area">
                   <div class="board-snake" id="board-snake">
                     ${renderBoard(snap)}
                   </div>
@@ -1741,25 +1742,29 @@
     }
 
     function renderBoard(snap) {
-      if (!snap.board || snap.board.length === 0) return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
+      if (!snap.board || snap.board.length === 0)
+        return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
 
-      const TW = 50, DW = 28; // tile widths: horizontal / double(vertical)
+      const TW = 52, DW = 28; // must match CSS board-tile-h width / board-tile-v width
 
       const makeTile = t => {
         const isD = t.left === t.right;
         const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
-        return `<div style="flex-shrink:0" class="${isNew ? 'ring-2 ring-emerald-400 rounded' : ''}">${tileHTML(t, 'board', isD ? 'v' : 'h')}</div>`;
+        return `<div style="flex-shrink:0;margin-left:-1.5px">${tileHTML(t, 'board', isD ? 'v' : 'h', isNew ? 'board-tile-new' : '')}</div>`;
       };
 
-      // Get available width from board container (minus padding)
-      const boardEl = document.getElementById('board-area');
-      const maxW = boardEl ? boardEl.clientWidth - 20 : 480;
+      const endBadge = num =>
+        `<div style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;
+          border-radius:10px;background:#14532d;border:2px solid #4ade80;color:#86efac;font-weight:700;font-size:11px;flex-shrink:0">${num}</div>`;
 
-      // Split tiles into rows
+      const boardEl = document.getElementById('board-area');
+      const maxW = boardEl ? boardEl.clientWidth - 56 : 430;
+
+      // Split tiles into rows based on available width
       const rows = [[]];
       let rowW = 0;
       for (const t of snap.board) {
-        const w = t.left === t.right ? DW : TW;
+        const w = (t.left === t.right ? DW : TW) - 1; // -1 for border overlap
         if (rowW + w > maxW && rows[rows.length - 1].length > 0) {
           rows.push([]);
           rowW = 0;
@@ -1768,29 +1773,39 @@
         rowW += w;
       }
 
-      // Single row — just center it
+      const LB = endBadge(snap.leftEnd);
+      const RB = endBadge(snap.rightEnd);
+
+      // Single row — centered with end badges
       if (rows.length === 1) {
-        return `<div style="display:flex;gap:1px;align-items:center;justify-content:center">${rows[0].map(makeTile).join('')}</div>`;
+        return `<div style="display:flex;align-items:center;justify-content:center;gap:6px">
+          ${LB}<div style="display:flex;align-items:center">${rows[0].map(makeTile).join('')}</div>${RB}
+        </div>`;
       }
 
-      // Multi-row zigzag snake (like real domino apps)
-      // Even rows: left-to-right. Odd rows: right-to-left.
-      // Connected by a vertical bar on the turn side.
+      // Multi-row snake layout
+      // Even rows (0,2,...): left-to-right.  Odd rows (1,3,...): right-to-left.
+      // Turn connectors link the end of one row to the start of the next.
       let html = '';
       for (let ri = 0; ri < rows.length; ri++) {
         const ltr = ri % 2 === 0;
-
-        // Row direction: row-reverse puts first DOM child (chain-order) on the RIGHT
         const dir = ltr ? 'row' : 'row-reverse';
-        const tiles = rows[ri].map(makeTile).join('');
-        html += `<div style="display:flex;gap:1px;align-items:center;flex-direction:${dir}">${tiles}</div>`;
+        const tiles = `<div style="display:flex;align-items:center">${rows[ri].map(makeTile).join('')}</div>`;
 
-        // Vertical connector between rows (on the side where the chain turns)
+        // End badges: LB at start of chain (row 0), RB at end of chain (last row)
+        const parts = [];
+        if (ri === 0) parts.push(LB);
+        parts.push(tiles);
+        if (ri === rows.length - 1) parts.push(RB);
+
+        html += `<div style="display:flex;align-items:center;flex-direction:${dir};gap:6px">${parts.join('')}</div>`;
+
+        // Turn connector between rows
         if (ri < rows.length - 1) {
-          // After LTR row → connector on right side. After RTL row → connector on left side.
           const side = ltr ? 'flex-end' : 'flex-start';
-          html += `<div style="display:flex;justify-content:${side}">` +
-                  `<div style="width:4px;height:16px;background:#86efac;border-radius:2px;margin:0 12px"></div></div>`;
+          html += `<div style="display:flex;justify-content:${side};padding:0 8px">
+            <svg width="10" height="14" style="display:block"><line x1="5" y1="0" x2="5" y2="14" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round"/></svg>
+          </div>`;
         }
       }
       return html;
