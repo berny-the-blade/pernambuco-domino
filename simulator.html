@@ -515,23 +515,36 @@
       return { snapshots, outcome: { type: 'abort' } };
     }
 
-    function generateGame(forcedStarter = null) {
+    // Pick best opening tile when player has free choice (no highest-double rule)
+    function pickOpeningTile(hand) {
+      // Count suit depth for each number
+      const suitCount = {};
+      for (let n = 0; n <= 6; n++) suitCount[n] = hand.filter(t => t.left === n || t.right === n).length;
+
+      // Score each tile: prefer doubles, deep suits, high pips
+      return hand.slice().sort((a, b) => {
+        const aIsD = a.left === a.right ? 1 : 0;
+        const bIsD = b.left === b.right ? 1 : 0;
+        if (bIsD !== aIsD) return bIsD - aIsD; // doubles first
+        const aDepth = Math.max(suitCount[a.left], suitCount[a.right]);
+        const bDepth = Math.max(suitCount[b.left], suitCount[b.right]);
+        if (bDepth !== aDepth) return bDepth - aDepth; // deepest suit
+        return (b.left + b.right) - (a.left + a.right); // highest pips
+      })[0];
+    }
+
+    function generateGame(forcedStarter = null, freeChoice = false) {
       const deck = shuffleDeck(ALL_TILES);
       const hands = [[],[],[],[]];
       for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
 
       let hp, ht;
-      if (forcedStarter !== null) {
-        // Winning team chose this player to start — they play their highest double, or highest tile
+      if (forcedStarter !== null && freeChoice) {
+        // Winning team chose this player — free choice of opening tile
         hp = forcedStarter;
-        const doubles = hands[hp].filter(t => t.left === t.right).sort((a,b) => b.left - a.left);
-        if (doubles.length > 0) {
-          ht = doubles[0];
-        } else {
-          ht = hands[hp].sort((a,b) => (b.left + b.right) - (a.left + a.right))[0];
-        }
+        ht = pickOpeningTile(hands[hp]);
       } else {
-        // First game of match: highest double across all players
+        // First game of match OR dobrada: highest double across all players
         let hd = -1;
         hp = 0; ht = null;
         for (let p = 0; p < 4; p++)
@@ -2783,7 +2796,13 @@
       mcResults = null;
       analysisRunning = false;
 
-      // Check if winning team chooses starter (not first game, not a tie)
+      // Dobrada (after tied/locked game): highest double rule, like first game
+      if (scoreMultiplier > 1) {
+        launchGame(null, false);
+        return;
+      }
+
+      // Winning team chooses starter with free tile choice
       if (lastWinTeam !== null) {
         if (lastWinTeam === 0) {
           // User's team won — show starter choice UI
@@ -2793,22 +2812,22 @@
         } else {
           // AI team won — auto-pick random from team 1
           const aiStarter = Math.random() < 0.5 ? 1 : 3;
-          launchGame(aiStarter);
+          launchGame(aiStarter, true);
           return;
         }
       }
-      launchGame(null); // first game — highest double rule
+      launchGame(null, false); // first game of match — highest double rule
     }
 
     function chooseStarter(player) {
       starterChoicePending = false;
-      launchGame(player);
+      launchGame(player, true); // free choice of opening tile
     }
 
-    function launchGame(forcedStarter) {
+    function launchGame(forcedStarter, freeChoice = false) {
       stats.games++;
       saveStats();
-      currentGame = generateGame(forcedStarter);
+      currentGame = generateGame(forcedStarter, freeChoice);
       // Apply dobrada multiplier to outcome points
       const o = currentGame.outcome;
       if (o && o.points) {
