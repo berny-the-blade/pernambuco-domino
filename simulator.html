@@ -1259,6 +1259,22 @@
       return { label: 'Weak', cls: 'text-red-400' };
     }
 
+    // Normalize raw heuristic score to 0-100 scale relative to options
+    function scorePct(score, allScores) {
+      if (allScores.length <= 1) return 100;
+      const best = allScores[0], worst = allScores[allScores.length - 1];
+      const range = best - worst;
+      return range > 0 ? Math.round((score - worst) / range * 100) : 100;
+    }
+
+    // Color for a 0-100 score
+    function scoreColor(pct) {
+      if (pct >= 80) return '#22c55e';
+      if (pct >= 50) return '#eab308';
+      if (pct >= 25) return '#f97316';
+      return '#ef4444';
+    }
+
     function renderQuizResultBadge() {
       if (!quizResult) return '';
       const r = quizResult;
@@ -1299,9 +1315,24 @@
       };
 
       return `<div class="mt-2 bg-slate-900 rounded-lg p-3 border ${r.grade === 'perfect' ? 'border-emerald-500' : r.grade === 'bad' ? 'border-red-500' : 'border-yellow-500'}" style="max-height: 280px; overflow-y: auto;">
-        <div class="flex items-center gap-2 mb-2">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
           <span class="grade-badge ${gradeCls}">${gradeText}</span>
-          ${r.grade !== 'perfect' ? `<span class="text-xs text-slate-400">Your pick: [${r.userTile.left}|${r.userTile.right}] &rarr; Better: [${r.aiTile.left}|${r.aiTile.right}] on ${r.aiSide}</span>` : ''}
+          ${r.grade !== 'perfect' ? (() => {
+            const userPct = scorePct(r.userScore, allScores);
+            const aiPct = scorePct(r.aiScore, allScores);
+            const gap = aiPct - userPct;
+            const mcUser = r.mcResults ? r.mcResults.find(m => m.tile.id === r.userTile.id) : null;
+            const mcAi = r.mcResults ? r.mcResults.find(m => m.tile.id === r.aiTile.id) : null;
+            const mcGap = mcUser && mcAi ? Math.round((mcAi.winRate - mcUser.winRate) * 100) : null;
+            return `<span class="text-xs text-slate-400">Your pick: [${r.userTile.left}|${r.userTile.right}]</span>
+              <span class="text-xs font-mono font-bold" style="color:${scoreColor(userPct)}">H:${userPct}</span>
+              ${mcUser ? `<span class="text-xs font-mono" style="color:${scoreColor(Math.round(mcUser.winRate*100))}">MC:${Math.round(mcUser.winRate*100)}%</span>` : ''}
+              <span class="text-xs text-slate-500">&rarr;</span>
+              <span class="text-xs text-slate-400">Best: [${r.aiTile.left}|${r.aiTile.right}]</span>
+              <span class="text-xs font-mono font-bold text-emerald-400">H:${aiPct}</span>
+              ${mcAi ? `<span class="text-xs font-mono text-emerald-400">MC:${Math.round(mcAi.winRate*100)}%</span>` : ''}
+              ${gap > 0 ? `<span class="text-xs font-mono text-red-400">(−${gap}${mcGap !== null && mcGap > 0 ? ` / MC:−${mcGap}%` : mcGap !== null && mcGap < 0 ? ` / MC:+${-mcGap}%` : ''})</span>` : ''}`;
+          })() : `<span class="text-xs font-mono text-emerald-400">H:100</span>${r.mcResults && r.mcResults[0] ? `<span class="text-xs font-mono text-emerald-400">MC:${Math.round(r.mcResults[0].winRate*100)}%</span>` : ''}`}
           <span class="text-xs text-slate-600 ml-auto">ends: L=${currentGame.snapshots[currentStep].leftEnd} R=${currentGame.snapshots[currentStep].rightEnd}</span>
         </div>
 
@@ -1317,21 +1348,28 @@
 
         ${r.allOptions && r.allOptions.length > 1 ? `
         <div class="border-t border-slate-700 pt-1.5 mt-1.5">
-          <div class="text-xs text-slate-500 mb-1">Tile ranking:</div>
+          <div class="text-xs text-slate-500 mb-1 flex items-center gap-3">
+            <span>Tile ranking:</span>
+            <span class="text-slate-600 font-mono">H = heuristic${r.mcResults ? '  MC = simulation win%' : ''}</span>
+          </div>
           ${r.allOptions.slice(0, 6).map((o, i) => {
-            const q = scoreToQuality(o.score, allScores);
+            const hPct = scorePct(o.score, allScores);
+            const hCol = scoreColor(hPct);
             const isAi = o.tile.id === r.aiTile.id && o.side === r.aiSide;
             const isUser = o.tile.id === r.userTile.id && o.side === r.userSide;
-            const marker = isAi ? ' (best)' : isUser ? ' (yours)' : '';
+            const tag = isAi ? 'AI' : isUser ? 'YOU' : '';
             const mc = r.mcResults ? r.mcResults.find(m => m.tile.id === o.tile.id) : null;
-            const mcStr = mc ? `<span class="text-blue-400 font-mono">${(mc.winRate*100).toFixed(0)}%</span>` : '';
-            return `<div class="text-xs mb-1">
+            const mcPct = mc ? Math.round(mc.winRate * 100) : null;
+            const mcCol = mc ? scoreColor(mcPct) : '';
+            return `<div class="text-xs mb-1.5">
               <div class="flex items-center gap-1">
                 <span class="font-mono w-3 text-slate-500">${i+1}.</span>
-                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'}">[${o.tile.left}|${o.tile.right}] ${o.side}</span>
-                <span class="${q.cls}">${q.label}</span>
-                ${mcStr}
-                ${marker ? `<span class="${isAi ? 'text-emerald-500' : 'text-yellow-500'}">${marker}</span>` : ''}
+                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'} w-16">[${o.tile.left}|${o.tile.right}] ${o.side}</span>
+                <span class="font-mono font-bold w-8 text-right" style="color:${hCol}">H:${hPct}</span>
+                <div class="flex-1 bg-slate-700 rounded-full h-1.5 mx-1" style="max-width:60px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>
+                ${mcPct !== null ? `<span class="font-mono font-bold w-11 text-right" style="color:${mcCol}">MC:${mcPct}%</span>
+                <div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:40px"><div class="h-1.5 rounded-full" style="width:${mcPct}%;background:${mcCol}"></div></div>` : ''}
+                ${tag ? `<span class="font-mono text-xs px-1 rounded ${isAi ? 'bg-emerald-900 text-emerald-300' : 'bg-yellow-900 text-yellow-300'}">${tag}</span>` : ''}
               </div>
               ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
             </div>`;
@@ -1477,14 +1515,20 @@
           </div>
           ${snap.allOptions && snap.allOptions.length > 1 ? `
           <div class="mt-2 pt-1.5 border-t border-slate-700">
-            <div class="text-xs text-slate-500 mb-1">Other options (best to worst):</div>
+            <div class="text-xs text-slate-500 mb-1">All options (best to worst):</div>
             ${snap.allOptions.slice(0, 6).map((o, i) => {
-              const q = scoreToQuality(o.score, allScores);
+              const hPct = scorePct(o.score, allScores);
+              const hCol = scoreColor(hPct);
+              const mc = mcResults ? mcResults.find(m => m.tile.id === o.tile.id) : null;
+              const mcPct = mc ? Math.round(mc.winRate * 100) : null;
+              const mcCol = mc ? scoreColor(mcPct) : '';
               return `<div class="text-xs ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'} mb-1">
                 <div class="flex items-center gap-1">
                   <span class="font-mono w-3">${i+1}.</span>
-                  <span>[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
-                  <span class="${q.cls}">${q.label}</span>
+                  <span class="w-14">[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
+                  <span class="font-mono font-bold w-7 text-right" style="color:${hCol}">${hPct}</span>
+                  <div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:50px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>
+                  ${mcPct !== null ? `<span class="font-mono font-bold text-right" style="color:${mcCol}">${mcPct}%</span>` : ''}
                 </div>
                 ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
               </div>`;
