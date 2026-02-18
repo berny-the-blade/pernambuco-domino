@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Domino Pernambucano — Strategy Simulator</title>
+  <title>Domino Pernambucano — Strategy Trainer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -16,7 +16,11 @@
     .tile-h .tile-half:first-child { border-right: 1.5px solid #94a3b8; }
     .tile-played { opacity: 0.4; border-color: #334155; }
     .tile-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
-    .tile-playable { border-color: #eab308 !important; box-shadow: 0 0 8px rgba(234,179,8,0.4); }
+    .tile-playable { border-color: #eab308 !important; box-shadow: 0 0 8px rgba(234,179,8,0.4); cursor: pointer !important; }
+    .tile-playable:hover { transform: scale(1.15); box-shadow: 0 0 16px rgba(234,179,8,0.8); }
+    .tile-wrong { border-color: #ef4444 !important; box-shadow: 0 0 12px rgba(239,68,68,0.6); }
+    .tile-optimal { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
+    .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
     .dot { width: 5px; height: 5px; background: #1e293b; border-radius: 50%; position: absolute; }
     .dot-sm { width: 4px; height: 4px; }
     .board-tile { display: inline-flex; border: 1.5px solid #64748b; border-radius: 4px; background: #fef3c7; }
@@ -32,10 +36,32 @@
     .speed-btn.active { background: #22c55e; color: #0f172a; }
     .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
     .btn:hover { transform: scale(1.05); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
     .btn-green { background: #22c55e; color: #0f172a; }
     .btn-blue { background: #3b82f6; color: white; }
     .btn-gray { background: #334155; color: #e2e8f0; }
     .btn-yellow { background: #eab308; color: #0f172a; }
+    .btn-red { background: #ef4444; color: white; }
+    .btn-purple { background: #8b5cf6; color: white; }
+    .mode-btn.active { ring: 2px; box-shadow: 0 0 0 2px #22c55e; }
+    .prob-cell { width: 20px; height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; }
+    .strength-bar { height: 8px; border-radius: 4px; transition: width 0.5s, background 0.5s; }
+    .tab { padding: 6px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600; font-size: 12px; border: 1px solid #334155; border-bottom: none; }
+    .tab.active { background: #1e293b; color: #22c55e; border-color: #22c55e; }
+    .tab:not(.active) { background: #0f172a; color: #64748b; }
+    .grade-badge { padding: 2px 8px; border-radius: 12px; font-weight: 700; font-size: 11px; }
+    .grade-perfect { background: #22c55e; color: #0f172a; }
+    .grade-good { background: #f59e0b; color: #0f172a; }
+    .grade-ok { background: #f97316; color: white; }
+    .grade-bad { background: #ef4444; color: white; }
+    .quiz-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; border-radius: 12px; z-index: 10; }
+    .pulse { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .tooltip { position: relative; }
+    .tooltip .tip-text { visibility: hidden; background: #1e293b; color: #e2e8f0; padding: 4px 8px; border-radius: 4px; position: absolute; bottom: 120%; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 11px; z-index: 20; border: 1px solid #475569; }
+    .tooltip:hover .tip-text { visibility: visible; }
+    .side-pick-btn { padding: 4px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; font-size: 13px; }
+    .side-pick-btn:hover { transform: scale(1.1); }
   </style>
 </head>
 <body>
@@ -60,19 +86,19 @@
       ).join('');
     }
 
-    function tileHTML(tile, cls = '', orient = 'v', highlight = false, playable = false) {
-      const hCls = highlight ? ' tile-highlight' : playable ? ' tile-playable' : '';
+    function tileHTML(tile, cls = '', orient = 'v', extraCls = '', onClick = '') {
       const dir = orient === 'v' ? 'tile-v' : 'tile-h';
       const sm = cls.includes('board') ? true : false;
       const base = cls.includes('board') ? 'board-tile' : 'tile';
       const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
-      return `<div class="${base} ${dirB}${hCls}" title="${tile.left}-${tile.right}">
+      const clickAttr = onClick ? `onclick="${onClick}"` : '';
+      return `<div class="${base} ${dirB} ${extraCls}" title="${tile.left}-${tile.right}" ${clickAttr}>
         <div class="tile-half">${renderDots(tile.left, sm)}</div>
         <div class="tile-half">${renderDots(tile.right, sm)}</div>
       </div>`;
     }
 
-    // ========== GAME LOGIC (from domino-brain.js) ==========
+    // ========== GAME LOGIC ==========
 
     function createDeck() {
       const d = [];
@@ -97,9 +123,18 @@
     }
 
     function couldPlayBothEnds(t, l, r) {
-      if (l === null || r === null || l === r) return false;
+      if (l === null || r === null) return false;
       return (t.left === l || t.right === l) && (t.left === r || t.right === r);
     }
+
+    function canPlayOnSide(tile, end) {
+      return tile.left === end || tile.right === end;
+    }
+
+    // Global player name mapping
+    const PLAYER_NAMES = ['You', 'Opp Left', 'Partner', 'Opp Right'];
+    const PLAYER_NAMES_FULL = ['You (P0)', 'Opp Left (P1)', 'Partner (P2)', 'Opp Right (P3)'];
+    function pn(idx) { return PLAYER_NAMES[idx] || `P${idx}`; }
 
     // Knowledge tracker
     class Knowledge {
@@ -108,6 +143,15 @@
         this.played = new Set();
         this.allTiles = createDeck();
         this.playsBy = [[], [], [], []];
+        this.passedOn = [[], [], [], []];
+      }
+      clone() {
+        const k = new Knowledge();
+        k.cantHave = this.cantHave.map(s => new Set(s));
+        k.played = new Set(this.played);
+        k.playsBy = this.playsBy.map(a => a.map(t => ({...t})));
+        k.passedOn = this.passedOn.map(a => [...a]);
+        return k;
       }
       recordPlay(p, t) {
         this.played.add(t.id);
@@ -116,6 +160,7 @@
       recordPass(p, lE, rE) {
         this.cantHave[p].add(lE);
         this.cantHave[p].add(rE);
+        this.passedOn[p].push({ lE, rE });
       }
       inferStrength(p) {
         const s = [0,0,0,0,0,0,0];
@@ -128,33 +173,40 @@
         for (const t of this.allTiles) { if (!this.played.has(t.id) && (t.left === n || t.right === n)) c++; }
         return c;
       }
+      // For probability tracker: which tiles could player possibly hold?
+      possibleTilesFor(p) {
+        const possible = [];
+        for (const t of this.allTiles) {
+          if (this.played.has(t.id)) continue;
+          if (this.cantHave[p].has(t.left) && this.cantHave[p].has(t.right)) continue;
+          if (t.left === t.right && this.cantHave[p].has(t.left)) continue;
+          possible.push(t);
+        }
+        return possible;
+      }
     }
 
-    // Smart AI
-    function smartAI(hand, lE, rE, bLen, player, knowledge) {
+    // Smart AI - returns all scored options (not just best)
+    function smartAI(hand, lE, rE, bLen, player, knowledge, returnAll = false) {
       const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
-      if (playable.length === 0) return null;
+      if (playable.length === 0) return returnAll ? [] : null;
 
       if (bLen === 0) {
         const sc = [0,0,0,0,0,0,0];
         for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
-        let best = playable[0], bs = -1;
-        for (const t of playable) {
+        const scored = playable.map(t => {
           let s = sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2;
-          if (s > bs) { bs = s; best = t; }
-        }
-        return { tile: best, side: null, reasons: [`Open with dominant suit (${best.left}=${sc[best.left]}, ${best.right}=${sc[best.right]})`] };
+          return { tile: t, score: s, side: null, reasons: [`Open: suit ${t.left}=${sc[t.left]}, suit ${t.right}=${sc[t.right]}${t.left===t.right?' (double bonus)':''}`] };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        return returnAll ? scored : scored[0];
       }
 
       const partner = (player + 2) % 4;
       const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
 
-      const scored = playable.map(tile => {
-        let score = 0;
-        const reasons = [];
-        // Try both sides
-        let bestSide = null, bestSideScore = -Infinity;
-
+      const scored = playable.flatMap(tile => {
+        const options = [];
         for (const side of ['left', 'right']) {
           const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
           if (!cS) continue;
@@ -170,16 +222,31 @@
           // Suit control
           const myCount = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd || x.left === otherEnd || x.right === otherEnd)).length;
           ss += myCount * 15;
-          if (myCount > 0) sr.push(`${myCount} more tiles match new ends ${newEnd}/${otherEnd}`);
+          if (myCount > 0) sr.push(`${myCount} more tiles match ends ${newEnd}/${otherEnd}`);
 
           // Blocking
-          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 25; sr.push(`Blocks opponent ${opp1}`); }
-          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 25; sr.push(`Blocks opponent ${opp2}`); }
+          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp1)}`); }
+          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp2)}`); }
 
-          // Partner support
+          // Partner support — check if partner has played tiles with these numbers
+          // Discount: remaining tiles with that number minus tiles WE hold with it
           const pStr = knowledge.inferStrength(partner);
-          const pAff = (pStr[newEnd]||0) + (pStr[otherEnd]||0);
-          if (pAff > 0) { ss += pAff * 8; sr.push(`Partner strong in ${newEnd}/${otherEnd}`); }
+          let pAff = 0;
+          const partnerDetails = [];
+          for (const endNum of [newEnd, otherEnd]) {
+            const played = pStr[endNum] || 0;
+            if (played > 0) {
+              // How many tiles with this number are left in play (not played, not in our hand)?
+              const remaining = knowledge.remainingWithNumber(endNum);
+              const weHold = hand.filter(x => x.id !== tile.id && (x.left === endNum || x.right === endNum)).length;
+              const othersCouldHave = remaining - weHold;
+              if (othersCouldHave > 0 && !knowledge.cantHave[partner].has(endNum)) {
+                pAff += played;
+                partnerDetails.push(`${endNum}s (played ${played}x, ${othersCouldHave} still out)`);
+              }
+            }
+          }
+          if (pAff > 0) { ss += pAff * 8; sr.push(`Partner played ${partnerDetails.join(' & ')} — may have more`); }
           if (knowledge.cantHave[partner].has(newEnd)) { ss -= 10; sr.push(`Partner can't have ${newEnd}`); }
 
           // Dump heavy
@@ -203,14 +270,68 @@
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
           if (estPHand <= 2 && estPHand > 0) { ss += 15; sr.push(`Partner close (est. ${estPHand} tiles)`); }
 
-          if (ss > bestSideScore) { bestSideScore = ss; bestSide = side; score = ss; reasons.length = 0; reasons.push(...sr); }
+          options.push({ tile, score: ss, reasons: sr, side });
         }
-
-        return { tile, score, reasons, side: bestSide };
+        return options;
       });
 
       scored.sort((a, b) => b.score - a.score);
-      return scored[0];
+
+      // Deduplicate: keep best side per tile
+      if (returnAll) {
+        const seen = new Set();
+        const deduped = [];
+        for (const opt of scored) {
+          if (!seen.has(opt.tile.id)) {
+            seen.add(opt.tile.id);
+            deduped.push(opt);
+          }
+        }
+        return deduped;
+      }
+      return scored[0] || null;
+    }
+
+    // Hand strength evaluation
+    function evaluateHandStrength(hand, lE, rE, bLen, player, knowledge) {
+      const metrics = {};
+      // Suit depth
+      const sc = [0,0,0,0,0,0,0];
+      for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+      const maxSuit = Math.max(...sc);
+      metrics.suitDepth = { value: maxSuit, label: `Deepest suit: ${maxSuit}`, good: maxSuit >= 4 };
+
+      // Doubles
+      const doubles = hand.filter(t => t.left === t.right);
+      const isoDoubles = doubles.filter(d => {
+        return hand.filter(x => x.id !== d.id && (x.left === d.left || x.right === d.left)).length === 0;
+      });
+      metrics.doubles = { value: doubles.length, label: `${doubles.length} doubles (${isoDoubles.length} isolated)`, good: doubles.length <= 2 && isoDoubles.length === 0 };
+
+      // Playable now
+      const playable = bLen > 0 ? hand.filter(t => canPlay(t, lE, rE, bLen)).length : hand.length;
+      metrics.playable = { value: playable, label: `${playable}/${hand.length} playable`, good: playable >= 2 };
+
+      // Total pips (risk in blocked game)
+      const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
+      metrics.pips = { value: pips, label: `${pips} pips in hand`, good: pips <= 20 };
+
+      // Connectivity (unique numbers covered)
+      const nums = new Set();
+      for (const t of hand) { nums.add(t.left); nums.add(t.right); }
+      metrics.coverage = { value: nums.size, label: `${nums.size}/7 numbers covered`, good: nums.size >= 5 };
+
+      // Overall score 0-100
+      let score = 0;
+      score += Math.min(maxSuit, 5) * 8; // 0-40
+      score += Math.max(0, 3 - doubles.length) * 5; // 0-15
+      score -= isoDoubles.length * 10; // penalty
+      score += playable * 5; // 0-30
+      score += Math.max(0, 30 - pips) * 0.5; // 0-15
+      score += nums.size * 2; // 0-14
+      score = Math.max(0, Math.min(100, score));
+
+      return { metrics, score, pips };
     }
 
     // ========== SIMULATION ENGINE ==========
@@ -218,32 +339,31 @@
     function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight) {
       const hands = initHands.map(h => h.map(t => ({...t})));
       let board = [...initBoard], lE = initLeft, rE = initRight;
-      let cur = startPlayer, passCount = 0, prevL = lE, prevR = rE;
+      let cur = startPlayer, passCount = 0;
       const knowledge = new Knowledge();
       for (const t of initBoard) knowledge.recordPlay(-1, t);
 
       const snapshots = [];
-      // Initial snapshot
       snapshots.push({
         move: 0, player: -1, action: 'start', tile: null, side: null, reasons: ['Game begins'],
         hands: hands.map(h => h.map(t => ({...t}))),
         board: [...board], leftEnd: lE, rightEnd: rE, currentPlayer: cur,
-        knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => [...a]) }
+        knowledge: knowledge.clone()
       });
 
       let moveNum = 0;
       while (moveNum < 200) {
         moveNum++;
-        const decision = smartAI(hands[cur], lE, rE, board.length, cur, knowledge);
+        // Get ALL scored options for this player
+        const allOptions = smartAI(hands[cur], lE, rE, board.length, cur, knowledge, true);
+        const decision = allOptions.length > 0 ? allOptions[0] : null;
 
         if (decision) {
           passCount = 0;
           const { tile, side: prefSide, reasons } = decision;
           let side = prefSide;
           if (board.length > 0 && !side) {
-            const cL = tile.left === lE || tile.right === lE;
-            const cR = tile.left === rE || tile.right === rE;
-            side = cL ? 'left' : 'right';
+            side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
           }
 
           const playedTile = {...tile};
@@ -280,15 +400,15 @@
           snapshots.push({
             move: moveNum, player: cur, action: 'play', tile: playedTile, side: side || 'first',
             reasons, score: decision.score,
+            allOptions: allOptions.map(o => ({ tile: {...o.tile}, score: o.score, side: o.side, reasons: [...o.reasons] })),
             hands: hands.map(h => h.map(t => ({...t}))),
             board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
-            knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => a.map(t=>({...t}))) },
+            knowledge: knowledge.clone(),
             outcome
           });
 
           if (outcome) return { snapshots, outcome };
-          prevL = lE; prevR = rE;
           cur = (cur + 1) % 4;
 
         } else {
@@ -310,10 +430,11 @@
           snapshots.push({
             move: moveNum, player: cur, action: 'pass', tile: null, side: null,
             reasons: [`No tiles matching ${lE} or ${rE}`, `Known dead: {${knowledge.deadNumbers(cur).join(', ')}}`],
+            allOptions: [],
             hands: hands.map(h => h.map(t => ({...t}))),
             board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
-            knowledge: { cantHave: knowledge.cantHave.map(s => [...s]), playsBy: knowledge.playsBy.map(a => a.map(t=>({...t}))) },
+            knowledge: knowledge.clone(),
             outcome
           });
 
@@ -346,12 +467,554 @@
       };
     }
 
-    // ========== RENDERER ==========
+    // ========== MONTE CARLO LOOKAHEAD ==========
+
+    const ALL_TILES = createDeck();
+
+    // Generate a random deal of remaining tiles consistent with knowledge constraints
+    function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
+      // Pool: all unplayed tiles NOT in my hand
+      const myIds = new Set(myHand.map(t => t.id));
+      const pool = [];
+      for (const t of ALL_TILES) {
+        if (knowledge.played.has(t.id)) continue;
+        if (myIds.has(t.id)) continue;
+        pool.push({ ...t });
+      }
+
+      // Shuffle pool
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+
+      // Assign tiles to players, respecting cantHave constraints
+      const hands = [[], [], [], []];
+      hands[myIdx] = myHand.map(t => ({ ...t }));
+      const assigned = new Set();
+
+      // First pass: greedily assign
+      for (let p = 0; p < 4; p++) {
+        if (p === myIdx) continue;
+        for (const t of pool) {
+          if (assigned.has(t.id)) continue;
+          if (hands[p].length >= handSizes[p]) break;
+          // Check if player CAN have this tile
+          const cantL = knowledge.cantHave[p].has(t.left);
+          const cantR = knowledge.cantHave[p].has(t.right);
+          if (t.left === t.right && cantL) continue; // double: needs the number
+          if (cantL && cantR) continue; // both numbers blocked
+          hands[p].push({ ...t });
+          assigned.add(t.id);
+        }
+      }
+
+      // Check all hands are full (may fail with tight constraints)
+      for (let p = 0; p < 4; p++) {
+        if (p === myIdx) continue;
+        if (hands[p].length < handSizes[p]) {
+          // Fill remaining from unassigned pool (relaxing constraints)
+          for (const t of pool) {
+            if (assigned.has(t.id)) continue;
+            if (hands[p].length >= handSizes[p]) break;
+            hands[p].push({ ...t });
+            assigned.add(t.id);
+          }
+        }
+      }
+
+      return hands;
+    }
+
+    // Simulate a game from a given position using smartAI for all players
+    function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge) {
+      const simHands = hands.map(h => h.map(t => ({ ...t })));
+      let simBoard = board.map(t => ({ ...t }));
+      let simLE = lE, simRE = rE;
+      let cur = nextPlayer;
+      let passCount = 0;
+      const simKnowledge = knowledge.clone();
+
+      for (let move = 0; move < 100; move++) {
+        const decision = smartAI(simHands[cur], simLE, simRE, simBoard.length, cur, simKnowledge, false);
+
+        if (decision) {
+          passCount = 0;
+          const { tile, side: prefSide } = decision;
+          let side = prefSide;
+          if (!side) side = (tile.left === simLE || tile.right === simLE) ? 'left' : 'right';
+
+          simHands[cur] = simHands[cur].filter(t => t.id !== tile.id);
+          simKnowledge.recordPlay(cur, tile);
+
+          const pL = simLE, pR = simRE;
+
+          if (simBoard.length === 0) {
+            simBoard = [tile]; simLE = tile.left; simRE = tile.right;
+          } else {
+            let placed = { ...tile };
+            if (side === 'left') {
+              if (tile.left === simLE) placed = { left: tile.right, right: tile.left, id: tile.id };
+              simBoard.unshift(placed); simLE = placed.left;
+            } else {
+              if (tile.right === simRE) placed = { left: tile.right, right: tile.left, id: tile.id };
+              simBoard.push(placed); simRE = placed.right;
+            }
+          }
+
+          if (simHands[cur].length === 0) {
+            return { winnerTeam: cur % 2 };
+          }
+          cur = (cur + 1) % 4;
+        } else {
+          passCount++;
+          simKnowledge.recordPass(cur, simLE, simRE);
+          if (passCount >= 4) {
+            const hv = simHands.map((h, i) => ({
+              team: i % 2, points: h.reduce((s, t) => s + t.left + t.right, 0)
+            }));
+            const t0 = hv.filter(v => v.team === 0).reduce((s, v) => s + v.points, 0);
+            const t1 = hv.filter(v => v.team === 1).reduce((s, v) => s + v.points, 0);
+            if (t0 < t1) return { winnerTeam: 0 };
+            if (t1 < t0) return { winnerTeam: 1 };
+            return { winnerTeam: -1 }; // tie
+          }
+          cur = (cur + 1) % 4;
+        }
+      }
+      return { winnerTeam: -1 };
+    }
+
+    // Run Monte Carlo evaluation for all playable tiles from current position
+    function monteCarloEval(snap, player, numSims = 80) {
+      const hand = snap.hands[player];
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const board = snap.board;
+      const knowledge = snap.knowledge;
+
+      const playable = hand.filter(t => canPlay(t, lE, rE, board.length));
+      if (playable.length === 0) return [];
+      if (playable.length === 1) return [{ tile: playable[0], winRate: 0.5, sims: 0, side: null }];
+
+      const handSizes = snap.hands.map(h => h.length);
+      const myTeam = player % 2;
+
+      const results = [];
+
+      for (const tile of playable) {
+        // Determine best side(s) to test
+        const sides = [];
+        if (board.length === 0) {
+          sides.push(null);
+        } else {
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+        }
+
+        let bestWinRate = 0, bestSide = sides[0];
+
+        for (const side of sides) {
+          let wins = 0, validSims = 0;
+
+          // Compute board state after playing this tile
+          let newLE = lE, newRE = rE;
+          const newBoard = board.map(t => ({ ...t }));
+          let placed = { ...tile };
+
+          if (board.length === 0) {
+            newBoard.push(placed); newLE = tile.left; newRE = tile.right;
+          } else if (side === 'left') {
+            if (tile.left === lE) placed = { left: tile.right, right: tile.left, id: tile.id };
+            newBoard.unshift(placed); newLE = placed.left;
+          } else {
+            if (tile.right === rE) placed = { left: tile.right, right: tile.left, id: tile.id };
+            newBoard.push(placed); newRE = placed.right;
+          }
+
+          const newHandSizes = [...handSizes];
+          newHandSizes[player]--;
+
+          // Check instant win
+          if (newHandSizes[player] === 0) {
+            bestWinRate = 1.0;
+            bestSide = side;
+            break;
+          }
+
+          const newKnowledge = knowledge.clone();
+          newKnowledge.recordPlay(player, tile);
+          const myNewHand = hand.filter(t => t.id !== tile.id);
+
+          for (let sim = 0; sim < numSims; sim++) {
+            const simHands = generateConsistentDeal(myNewHand, newHandSizes, newKnowledge, player);
+            const result = simulateFromPosition(simHands, newBoard, newLE, newRE, (player + 1) % 4, newKnowledge);
+            if (result.winnerTeam === myTeam) wins++;
+            validSims++;
+          }
+
+          const wr = validSims > 0 ? wins / validSims : 0.5;
+          if (wr > bestWinRate) { bestWinRate = wr; bestSide = side; }
+        }
+
+        results.push({ tile, winRate: bestWinRate, sims: numSims, side: bestSide });
+      }
+
+      return results.sort((a, b) => b.winRate - a.winRate);
+    }
+
+    // ========== STATE ==========
 
     let currentGame = null;
     let currentStep = 0;
     let autoPlayTimer = null;
     let autoPlaySpeed = 1500;
+    let gameMode = 'watch'; // 'watch' | 'quiz'
+    let rightPanelTab = 'reasoning'; // 'reasoning' | 'probability' | 'stats'
+    let deepAnalysis = false;        // Monte Carlo toggle
+    let mcResults = null;            // cached MC results for current step
+    let mcRunning = false;           // is MC currently computing?
+
+    // Quiz state
+    let quizWaiting = false;       // Are we waiting for user to pick a tile?
+    let quizSidePick = null;       // {tile, canLeft, canRight} — waiting for side choice
+    let quizResult = null;         // { userTile, userSide, aiTile, aiSide, grade, scoreDiff }
+    let quizShowingResult = false;
+
+    // Stats tracking (persists across games in session)
+    let stats = {
+      totalMoves: 0,
+      optimalMoves: 0,
+      goodMoves: 0,    // within 10 pts
+      okMoves: 0,      // within 25 pts
+      badMoves: 0,     // worse
+      passedCorrectly: 0,
+      games: 0,
+      history: []  // last 20 decisions
+    };
+
+    // Load stats from localStorage
+    try {
+      const saved = localStorage.getItem('domino-trainer-stats');
+      if (saved) stats = JSON.parse(saved);
+    } catch(e) {}
+
+    function saveStats() {
+      try { localStorage.setItem('domino-trainer-stats', JSON.stringify(stats)); } catch(e) {}
+    }
+
+    // ========== QUIZ LOGIC ==========
+
+    function isQuizTurn() {
+      if (gameMode !== 'quiz' || !currentGame) return false;
+      const snap = currentGame.snapshots[currentStep];
+      // We quiz on P0's turns (the next move to be revealed)
+      // The snapshot at currentStep shows the state BEFORE this move
+      // Actually, we need to check the NEXT snapshot's player
+      const nextStep = currentStep + 1;
+      if (nextStep >= currentGame.snapshots.length) return false;
+      const nextSnap = currentGame.snapshots[nextStep];
+      return nextSnap.player === 0;
+    }
+
+    function startQuiz() {
+      quizWaiting = true;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      render();
+    }
+
+    function quizPickTile(tileId) {
+      if (!quizWaiting || quizSidePick) return;
+      const snap = currentGame.snapshots[currentStep];
+      const tile = snap.hands[0].find(t => t.id === tileId);
+      if (!tile) return;
+
+      // Check if this tile can play on both sides
+      const canLeft = canPlayOnSide(tile, snap.leftEnd);
+      const canRight = canPlayOnSide(tile, snap.rightEnd);
+
+      if (snap.leftEnd === snap.rightEnd) {
+        // Both ends same number, only one effective side
+        if (canLeft) {
+          finishQuizPick(tile, 'left');
+        } else {
+          // tile can't play — user picked wrong
+          finishQuizPick(tile, null);
+        }
+      } else if (canLeft && canRight) {
+        // Tile can play both sides — ask which
+        quizSidePick = { tile, canLeft, canRight };
+        render();
+      } else if (canLeft) {
+        finishQuizPick(tile, 'left');
+      } else if (canRight) {
+        finishQuizPick(tile, 'right');
+      }
+    }
+
+    function quizPickSide(side) {
+      if (!quizSidePick) return;
+      finishQuizPick(quizSidePick.tile, side);
+      quizSidePick = null;
+    }
+
+    function finishQuizPick(userTile, userSide) {
+      const nextSnap = currentGame.snapshots[currentStep + 1];
+      const snap = currentGame.snapshots[currentStep];
+      const aiTile = nextSnap.tile;
+      const aiSide = nextSnap.side;
+      const aiScore = nextSnap.score || 0;
+
+      // Find user's tile score and reasons from allOptions
+      const allOpts = nextSnap.allOptions || [];
+      const userOpt = allOpts.find(o => o.tile.id === userTile.id && (o.side === userSide || !userSide));
+      const aiOpt = allOpts.find(o => o.tile.id === aiTile.id && o.side === aiSide);
+      const userScore = userOpt ? userOpt.score : -50;
+
+      const scoreDiff = aiScore - userScore;
+      let grade;
+      if (userTile.id === aiTile.id && userSide === aiSide) grade = 'perfect';
+      else if (userTile.id === aiTile.id) grade = 'good';
+      else if (scoreDiff <= 5) grade = 'perfect';
+      else if (scoreDiff <= 15) grade = 'good';
+      else if (scoreDiff <= 30) grade = 'ok';
+      else grade = 'bad';
+
+      const canP = canPlay(userTile, snap.leftEnd, snap.rightEnd, snap.board.length);
+      if (!canP) grade = 'bad';
+
+      // Build detailed explanation context
+      const knowledge = snap.knowledge;
+      const hand = snap.hands[0];
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+
+      // Compute what ends each choice creates
+      const aiNewEnds = computeNewEnds(aiTile, aiSide, lE, rE);
+      const userNewEnds = userSide ? computeNewEnds(userTile, userSide, lE, rE) : null;
+
+      // Build detailed comparison
+      const detail = buildDetailedExplanation({
+        userTile, userSide, userScore, userReasons: userOpt ? userOpt.reasons : [],
+        aiTile, aiSide, aiScore, aiReasons: aiOpt ? aiOpt.reasons : nextSnap.reasons || [],
+        aiNewEnds, userNewEnds,
+        hand, knowledge, lE, rE, grade, scoreDiff, allOptions: allOpts
+      });
+
+      // Run Monte Carlo if deep analysis is on
+      let quizMC = null;
+      if (deepAnalysis) {
+        quizMC = monteCarloEval(snap, 0, 80);
+      }
+
+      quizResult = {
+        userTile, userSide, aiTile, aiSide, grade, scoreDiff, userScore, aiScore,
+        allOptions: allOpts, detail, aiNewEnds, userNewEnds,
+        userReasons: userOpt ? userOpt.reasons : [],
+        aiReasons: aiOpt ? aiOpt.reasons : nextSnap.reasons || [],
+        mcResults: quizMC
+      };
+      quizWaiting = false;
+      quizShowingResult = true;
+
+      // Track stats
+      stats.totalMoves++;
+      if (grade === 'perfect') stats.optimalMoves++;
+      else if (grade === 'good') stats.goodMoves++;
+      else if (grade === 'ok') stats.okMoves++;
+      else stats.badMoves++;
+      stats.history.push({ grade, scoreDiff, userTile: `${userTile.left}-${userTile.right}`, aiTile: `${aiTile.left}-${aiTile.right}` });
+      if (stats.history.length > 30) stats.history.shift();
+      saveStats();
+
+      render();
+    }
+
+    function computeNewEnds(tile, side, lE, rE) {
+      if (!side) return { newLeft: lE, newRight: rE };
+      if (side === 'left') {
+        const newL = tile.left === lE ? tile.right : tile.left;
+        return { newLeft: newL, newRight: rE };
+      } else {
+        const newR = tile.right === rE ? tile.left : tile.right;
+        return { newLeft: lE, newRight: newR };
+      }
+    }
+
+    function buildDetailedExplanation(ctx) {
+      const { userTile, userSide, userScore, userReasons, aiTile, aiSide, aiScore, aiReasons,
+              aiNewEnds, userNewEnds, hand, knowledge, lE, rE, grade, scoreDiff, allOptions } = ctx;
+      const lines = [];
+      const pNames = PLAYER_NAMES_FULL;
+
+      if (grade === 'perfect') {
+        lines.push({ type: 'success', text: 'You picked the optimal play! Well done.' });
+        if (aiReasons.length > 0) {
+          lines.push({ type: 'info', text: `Why it's best: ${aiReasons.join('. ')}` });
+        }
+        return lines;
+      }
+
+      // === HEADER: What AI chose and why ===
+      lines.push({ type: 'header', text: `Better play: [${aiTile.left}|${aiTile.right}] on ${aiSide}` });
+
+      // AI's reasons
+      if (aiReasons.length > 0) {
+        for (const r of aiReasons) {
+          lines.push({ type: 'ai-reason', text: r });
+        }
+      }
+
+      // === What you chose and its shortcomings ===
+      lines.push({ type: 'header2', text: `Your pick: [${userTile.left}|${userTile.right}]${userSide ? ' on ' + userSide : ''}` });
+      if (userReasons.length > 0) {
+        for (const r of userReasons) {
+          lines.push({ type: 'user-reason', text: r });
+        }
+      }
+
+      // === DETAILED COMPARISON ===
+
+      // 1. Board ends comparison
+      if (aiNewEnds && userNewEnds) {
+        const aiEnds = `${aiNewEnds.newLeft}/${aiNewEnds.newRight}`;
+        const userEnds = `${userNewEnds.newLeft}/${userNewEnds.newRight}`;
+        if (aiEnds !== userEnds) {
+          // Count how many tiles in remaining hand match each set of ends
+          const remainingHand = hand.filter(t => t.id !== aiTile.id && t.id !== userTile.id);
+          const aiMyFollow = hand.filter(t => t.id !== aiTile.id &&
+            (t.left === aiNewEnds.newLeft || t.right === aiNewEnds.newLeft || t.left === aiNewEnds.newRight || t.right === aiNewEnds.newRight)).length;
+          const userMyFollow = hand.filter(t => t.id !== userTile.id &&
+            (t.left === userNewEnds.newLeft || t.right === userNewEnds.newLeft || t.left === userNewEnds.newRight || t.right === userNewEnds.newRight)).length;
+
+          if (aiMyFollow > userMyFollow) {
+            lines.push({ type: 'compare',
+              text: `Board ends: AI leaves ${aiEnds} (you have ${aiMyFollow} follow-up tiles) vs your pick leaves ${userEnds} (only ${userMyFollow} follow-ups). More follow-ups = you stay in control.`
+            });
+          } else if (aiMyFollow < userMyFollow) {
+            lines.push({ type: 'compare',
+              text: `Board ends: Your pick leaves ${userEnds} (${userMyFollow} follow-ups) vs AI's ${aiEnds} (${aiMyFollow}). Your ends are actually better for suit control, but other factors matter more here.`
+            });
+          }
+        }
+      }
+
+      // 2. Opponent analysis from passes
+      for (const oppIdx of [1, 3]) {
+        const dead = knowledge ? knowledge.deadNumbers(oppIdx) : [];
+        if (dead.length === 0) continue;
+
+        if (aiNewEnds) {
+          const aiBlocksOpp = dead.includes(aiNewEnds.newLeft) && dead.includes(aiNewEnds.newRight);
+          const userBlocksOpp = userNewEnds && dead.includes(userNewEnds.newLeft) && dead.includes(userNewEnds.newRight);
+
+          if (aiBlocksOpp && !userBlocksOpp) {
+            lines.push({ type: 'opponent',
+              text: `${pNames[oppIdx]} passed and can't have {${dead.join(', ')}}. The AI's play leaves ends ${aiNewEnds.newLeft}/${aiNewEnds.newRight} which BLOCKS them completely — they'll pass again. Your pick doesn't achieve this.`
+            });
+          }
+        }
+      }
+
+      // 3. Partner analysis
+      if (knowledge) {
+        const partnerDead = knowledge.deadNumbers(2);
+        const partnerStrength = knowledge.inferStrength(2);
+        const partnerPlays = knowledge.playsBy[2] || [];
+
+        if (aiNewEnds && userNewEnds) {
+          // Does AI's play help partner more?
+          const aiPartnerHelp = !partnerDead.includes(aiNewEnds.newLeft) || !partnerDead.includes(aiNewEnds.newRight);
+          const userPartnerHurt = partnerDead.includes(userNewEnds.newLeft) && partnerDead.includes(userNewEnds.newRight);
+
+          if (userPartnerHurt && aiPartnerHelp) {
+            lines.push({ type: 'partner',
+              text: `Partner can't have {${partnerDead.join(', ')}}. Your pick leaves ends ${userNewEnds.newLeft}/${userNewEnds.newRight} which blocks your own partner! The AI avoids this.`
+            });
+          }
+
+          // Partner suit affinity — only if tiles with that number are still out there
+          const strongSuits = partnerStrength.map((v, i) => ({ suit: i, count: v })).filter(x => x.count >= 2).sort((a, b) => b.count - a.count);
+          if (strongSuits.length > 0 && knowledge) {
+            const topSuit = strongSuits[0].suit;
+            const remaining = knowledge.remainingWithNumber(topSuit);
+            const weHold = hand.filter(t => t.left === topSuit || t.right === topSuit).length;
+            const othersCouldHave = remaining - weHold;
+            if (othersCouldHave > 0 && !partnerDead.includes(topSuit)) {
+              const aiHasPartnerSuit = aiNewEnds.newLeft === topSuit || aiNewEnds.newRight === topSuit;
+              const userHasPartnerSuit = userNewEnds.newLeft === topSuit || userNewEnds.newRight === topSuit;
+              if (aiHasPartnerSuit && !userHasPartnerSuit) {
+                lines.push({ type: 'partner',
+                  text: `Partner played ${strongSuits[0].count} tiles with ${topSuit}s and ${othersCouldHave} tiles with ${topSuit} are still unaccounted for (not in your hand or played). AI leaves a ${topSuit}-end so partner can likely play. Your pick doesn't.`
+                });
+              }
+            }
+          }
+        }
+
+        // Partner close to winning
+        const estPartnerHand = Math.max(0, 6 - partnerPlays.length);
+        if (estPartnerHand <= 2 && estPartnerHand > 0) {
+          lines.push({ type: 'partner',
+            text: `Partner has ~${estPartnerHand} tile${estPartnerHand > 1 ? 's' : ''} left — they're close to winning! Prioritize leaving ends they can play, even at your own expense.`
+          });
+        }
+      }
+
+      // 4. Double management
+      if (aiTile.left === aiTile.right && userTile.left !== userTile.right) {
+        const aiDblNum = aiTile.left;
+        const support = hand.filter(t => t.id !== aiTile.id && (t.left === aiDblNum || t.right === aiDblNum)).length;
+        if (support === 0) {
+          lines.push({ type: 'strategy',
+            text: `The AI plays the isolated double [${aiDblNum}|${aiDblNum}] now while it can. Doubles only match one number and become harder to play later. If you hold it and the board moves away from ${aiDblNum}s, you're stuck with it.`
+          });
+        } else {
+          lines.push({ type: 'strategy',
+            text: `The AI clears the double [${aiDblNum}|${aiDblNum}] early — doubles are inflexible (only connect to one number). Better to play them when the opportunity is there.`
+          });
+        }
+      }
+
+      // 5. Heavy tile dumping
+      if (aiTile.left + aiTile.right > userTile.left + userTile.right + 3) {
+        lines.push({ type: 'strategy',
+          text: `The AI dumps the heavier tile (${aiTile.left + aiTile.right} pips vs your ${userTile.left + userTile.right} pips). If the game blocks, your team's total pips decide who loses. Getting rid of heavy tiles early is safer.`
+        });
+      }
+
+      // 6. Scarcity warning
+      if (knowledge && aiNewEnds) {
+        const aiLeftRem = knowledge.remainingWithNumber(aiNewEnds.newLeft);
+        const aiRightRem = knowledge.remainingWithNumber(aiNewEnds.newRight);
+        if (userNewEnds) {
+          const userLeftRem = knowledge.remainingWithNumber(userNewEnds.newLeft);
+          const userRightRem = knowledge.remainingWithNumber(userNewEnds.newRight);
+          if ((userLeftRem <= 1 || userRightRem <= 1) && aiLeftRem > 1 && aiRightRem > 1) {
+            const scarce = userLeftRem <= 1 ? userNewEnds.newLeft : userNewEnds.newRight;
+            lines.push({ type: 'warning',
+              text: `Your pick creates a near-dead end: only ${knowledge.remainingWithNumber(scarce)} tile(s) left with ${scarce}. The board could stall. The AI avoids scarce numbers as ends.`
+            });
+          }
+        }
+      }
+
+      // If no detailed lines beyond header, add a generic one
+      if (lines.filter(l => !l.type.includes('header') && l.type !== 'user-reason').length === 0) {
+        lines.push({ type: 'info', text: `The AI's choice is stronger due to a combination of suit control, blocking opponents, and/or supporting your partner.` });
+      }
+
+      return lines;
+    }
+
+    function quizContinue() {
+      quizShowingResult = false;
+      quizResult = null;
+      stepForward();
+    }
+
+    // ========== RENDERER ==========
 
     function render() {
       const app = document.getElementById('app');
@@ -362,174 +1025,308 @@
 
       const snap = currentGame.snapshots[currentStep];
       const total = currentGame.snapshots.length;
-      const pNames = ['You (P0)', 'Opp Left (P1)', 'Partner (P2)', 'Opp Right (P3)'];
+      const pNames = PLAYER_NAMES_FULL;
       const pTeams = ['T1', 'T2', 'T1', 'T2'];
       const teamColors = ['#3b82f6', '#ef4444'];
+
+      // Check if we should start a quiz
+      const shouldQuiz = isQuizTurn() && !quizWaiting && !quizShowingResult;
+
+      // Hand strength for P0
+      const handStrength = evaluateHandStrength(snap.hands[0], snap.leftEnd, snap.rightEnd, snap.board.length, 0, snap.knowledge);
 
       app.innerHTML = `
         <div class="max-w-7xl mx-auto p-3">
           <!-- Header -->
           <div class="flex items-center justify-between mb-3">
-            <h1 class="text-xl font-bold text-emerald-400">Domino Pernambucano — Strategy Simulator</h1>
-            <div class="flex gap-2">
-              <button class="btn btn-yellow" onclick="newGame()">New Game</button>
+            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano — Strategy Trainer</h1>
+            <div class="flex gap-2 items-center">
+              <div class="flex gap-1 mr-2">
+                <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch Mode</button>
+                <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">Quiz Mode</button>
+                <button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>
+              </div>
+              <button class="btn btn-yellow text-sm" onclick="newGame()">New Game</button>
             </div>
           </div>
 
           <div class="grid grid-cols-12 gap-3">
-            <!-- LEFT: Game Board -->
+            <!-- LEFT: Game Board (8 cols) -->
             <div class="col-span-8">
               <!-- Top player (P2 - Partner) -->
               ${renderPlayerArea(2, snap, pNames, pTeams, teamColors)}
 
               <!-- Middle: Left opp + Board + Right opp -->
               <div class="flex gap-2 my-2">
-                <!-- Left opponent (P1) -->
                 <div class="w-24 flex-shrink-0">
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
-
-                <!-- Board -->
-                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] flex items-center justify-center">
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-3 min-h-[200px] flex items-center justify-center relative">
                   <div class="flex flex-wrap gap-1 items-center justify-center">
                     ${renderBoard(snap)}
                   </div>
+                  ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                 </div>
-
-                <!-- Right opponent (P3) -->
                 <div class="w-24 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
                 </div>
               </div>
 
-              <!-- Bottom player (P0 - You) -->
-              ${renderPlayerArea(0, snap, pNames, pTeams, teamColors, true)}
+              <!-- Bottom player (P0 - You) with quiz interaction -->
+              ${renderPlayerAreaP0(snap, pNames, pTeams, teamColors, shouldQuiz)}
+
+              <!-- Hand Strength Meter -->
+              ${renderHandStrength(handStrength, snap.hands[0].length)}
 
               <!-- Controls -->
-              <div class="bg-slate-800 rounded-xl p-3 mt-2 flex items-center gap-3">
-                <button class="btn btn-gray" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo; Start</button>
-                <button class="btn btn-gray" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
-                <button class="btn btn-green" onclick="stepForward()" ${currentStep>=total-1?'disabled':''}>Next &rsaquo;</button>
-                <button class="btn btn-gray" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>End &raquo;</button>
-                <div class="mx-2 text-slate-400">|</div>
-                <button class="btn ${autoPlayTimer ? 'btn-yellow' : 'btn-blue'}" onclick="toggleAutoPlay()">
-                  ${autoPlayTimer ? 'Pause' : 'Auto Play'}
+              <div class="bg-slate-800 rounded-xl p-3 mt-2 flex items-center gap-3 flex-wrap">
+                <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
+                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
+                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1 || quizWaiting?'disabled':''}>Next &rsaquo;</button>
+                <button class="btn btn-gray text-sm" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>&raquo;</button>
+                <div class="mx-1 text-slate-600">|</div>
+                ${gameMode === 'watch' ? `
+                <button class="btn text-sm ${autoPlayTimer ? 'btn-yellow' : 'btn-blue'}" onclick="toggleAutoPlay()">
+                  ${autoPlayTimer ? 'Pause' : 'Auto'}
                 </button>
                 <div class="flex gap-1">
                   ${[2000, 1000, 500].map(s => `<button class="btn btn-gray speed-btn text-xs ${autoPlaySpeed===s?'active':''}" onclick="setSpeed(${s})">${s===2000?'Slow':s===1000?'Med':'Fast'}</button>`).join('')}
-                </div>
-                <div class="ml-auto text-slate-400 text-sm">
-                  Move <span class="text-white font-bold">${snap.move}</span> / ${currentGame.snapshots[total-1].move}
-                  &nbsp;(Step ${currentStep+1}/${total})
+                </div>` : `
+                <span class="text-xs text-purple-400 font-bold pulse">QUIZ MODE — Pick your tile at P0's turns</span>
+                `}
+                <div class="ml-auto text-slate-400 text-xs">
+                  Move <span class="text-white font-bold">${snap.move}</span>/${currentGame.snapshots[total-1].move}
+                  (${currentStep+1}/${total})
                 </div>
               </div>
 
-              <!-- Board ends indicator -->
-              <div class="flex justify-center gap-6 mt-2">
-                <div class="bg-slate-800 rounded-lg px-4 py-2 text-center">
-                  <div class="text-xs text-slate-400">Left End</div>
-                  <div class="text-2xl font-bold ${snap.leftEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.leftEnd !== null ? snap.leftEnd : '-'}</div>
+              <!-- Board ends -->
+              <div class="flex justify-center gap-4 mt-2">
+                <div class="bg-slate-800 rounded-lg px-3 py-1.5 text-center">
+                  <div class="text-xs text-slate-400">Left</div>
+                  <div class="text-xl font-bold ${snap.leftEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.leftEnd ?? '-'}</div>
                 </div>
-                <div class="bg-slate-800 rounded-lg px-4 py-2 text-center">
-                  <div class="text-xs text-slate-400">Right End</div>
-                  <div class="text-2xl font-bold ${snap.rightEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.rightEnd !== null ? snap.rightEnd : '-'}</div>
+                <div class="bg-slate-800 rounded-lg px-3 py-1.5 text-center">
+                  <div class="text-xs text-slate-400">Right</div>
+                  <div class="text-xl font-bold ${snap.rightEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.rightEnd ?? '-'}</div>
                 </div>
-                ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-4 py-2 text-center border border-emerald-500">
+                ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-3 py-1.5 text-center border border-emerald-500">
                   <div class="text-xs text-emerald-300">Result</div>
-                  <div class="text-lg font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt)` : ''}</div>
-                  ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">P${snap.outcome.winner} (${pTeams[snap.outcome.winner]})</div>` : ''}
+                  <div class="text-sm font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt)` : ''}</div>
+                  ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">${pn(snap.outcome.winner)} (${pTeams[snap.outcome.winner]})</div>` : ''}
                 </div>` : ''}
               </div>
             </div>
 
-            <!-- RIGHT: Log Panel -->
+            <!-- RIGHT: Analysis Panel (4 cols) -->
             <div class="col-span-4">
               <div class="bg-slate-800 rounded-xl p-3 h-full flex flex-col">
-                <h2 class="text-sm font-bold text-slate-300 mb-2">Move-by-Move Reasoning</h2>
-
-                <!-- Current move detail -->
-                ${snap.move > 0 ? `
-                <div class="bg-slate-900 rounded-lg p-3 mb-3 border ${snap.action === 'pass' ? 'border-orange-500' : 'border-emerald-500'}">
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${teamColors[snap.player%2]}">P${snap.player} ${pTeams[snap.player]}</span>
-                    <span class="text-sm font-bold ${snap.action === 'pass' ? 'text-orange-400' : 'text-emerald-400'}">
-                      ${snap.action === 'pass' ? 'PASSES' : `plays [${snap.tile.left}|${snap.tile.right}] on ${snap.side}`}
-                    </span>
-                    ${snap.score !== undefined ? `<span class="text-xs text-slate-400 ml-auto">score: ${snap.score}</span>` : ''}
-                  </div>
-                  <div class="space-y-1">
-                    ${(snap.reasons || []).map(r => `<div class="text-xs text-slate-300 flex items-start gap-1">
-                      <span class="text-emerald-400 mt-0.5">&#9654;</span> ${r}
-                    </div>`).join('')}
-                  </div>
-                </div>` : `
-                <div class="bg-slate-900 rounded-lg p-3 mb-3 border border-slate-600">
-                  <div class="text-sm text-slate-400">
-                    P${currentGame.autoPlayedBy} auto-plays [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (highest double).
-                    Click <b>Next</b> to step through moves.
-                  </div>
-                </div>`}
-
-                <!-- Knowledge panel -->
-                <div class="bg-slate-900 rounded-lg p-2 mb-3">
-                  <div class="text-xs font-bold text-slate-400 mb-1">Intelligence (what we know)</div>
-                  ${[0,1,2,3].map(p => {
-                    const dead = snap.knowledge?.cantHave?.[p] || [];
-                    if (dead.length === 0) return '';
-                    return `<div class="text-xs mb-0.5"><span style="color:${teamColors[p%2]}">P${p}:</span> can't have <span class="text-red-400 font-mono">{${dead.join(', ')}}</span></div>`;
-                  }).join('')}
-                  ${snap.knowledge?.cantHave?.every(s => s.length === 0) ? '<div class="text-xs text-slate-500">No intelligence yet</div>' : ''}
+                <!-- Tabs -->
+                <div class="flex gap-1 mb-2">
+                  <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">Reasoning</div>
+                  <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
+                  <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
                 </div>
 
-                <!-- Move log -->
-                <div id="log-container" class="flex-1 overflow-y-auto space-y-1 max-h-[400px]">
-                  ${currentGame.snapshots.slice(1).map((s, i) => {
-                    const stepIdx = i + 1;
-                    const isCur = stepIdx === currentStep;
-                    const isPast = stepIdx < currentStep;
-                    return `<div class="log-entry rounded px-2 py-1 cursor-pointer text-xs ${isCur ? 'active' : isPast ? 'past' : ''}"
-                      onclick="goTo(${stepIdx})" id="log-${stepIdx}">
-                      <span class="font-mono text-slate-500">#${s.move}</span>
-                      <span class="font-bold" style="color:${teamColors[s.player%2]}">P${s.player}</span>
-                      ${s.action === 'pass'
-                        ? '<span class="text-orange-400">passes</span>'
-                        : `<span class="text-emerald-400">[${s.tile.left}|${s.tile.right}]</span> <span class="text-slate-400">${s.side}</span>`}
-                      ${s.outcome ? `<span class="text-yellow-400 ml-1">${s.outcome.winType || s.outcome.type}</span>` : ''}
-                    </div>`;
-                  }).join('')}
-                </div>
+                ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
+                  rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
+                  renderStatsPanel()}
               </div>
             </div>
           </div>
         </div>
       `;
 
-      // Scroll active log entry into view
+      // Auto-scroll log
       const activeLog = document.getElementById(`log-${currentStep}`);
       if (activeLog) activeLog.scrollIntoView({ block: 'nearest' });
+
+      // If should quiz and mode=quiz, trigger after render
+      if (shouldQuiz && !quizWaiting && !quizShowingResult) {
+        startQuiz();
+      }
     }
 
-    function renderPlayerArea(playerIdx, snap, names, teams, colors, showFace = false) {
+    function renderOutcomeOverlay(snap, pTeams) {
+      const o = snap.outcome;
+      return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
+        <div class="text-center">
+          <div class="text-3xl font-bold text-emerald-400 mb-1">${o.winType || o.type.toUpperCase()}</div>
+          ${o.winner !== undefined ? `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt</div>` : `<div class="text-lg text-yellow-400">Tied!</div>`}
+        </div>
+      </div>`;
+    }
+
+    function renderPlayerArea(playerIdx, snap, names, teams, colors) {
       const hand = snap.hands[playerIdx] || [];
       const isActive = snap.currentPlayer === playerIdx;
-      const playedTile = snap.player === playerIdx && snap.action === 'play' ? snap.tile : null;
 
       return `
-        <div class="player-area bg-slate-800 rounded-xl p-3 border-2 ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
+        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
             <span class="text-xs ${isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${isActive ? 'PLAYING' : `${hand.length} tiles`}</span>
           </div>
-          <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
-            ${showFace
-              ? hand.map(t => {
-                  const hl = playedTile && t.id === playedTile.id;
-                  const pl = isActive && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length);
-                  return tileHTML(t, '', 'v', hl, pl);
-                }).join('')
-              : hand.map((_, i) => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
+          <div class="flex flex-wrap gap-1.5 justify-center min-h-[50px]">
+            ${hand.map(() => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
           </div>
         </div>`;
+    }
+
+    function renderPlayerAreaP0(snap, names, teams, colors, shouldQuiz) {
+      const hand = snap.hands[0] || [];
+      const isActive = snap.currentPlayer === 0;
+      const playerIdx = 0;
+
+      // Determine tile classes
+      const getTileCls = (t) => {
+        if (quizShowingResult && quizResult) {
+          if (t.id === quizResult.aiTile.id) return 'tile-optimal';
+          if (t.id === quizResult.userTile.id && quizResult.grade === 'bad') return 'tile-wrong';
+          if (t.id === quizResult.userTile.id) return 'tile-good';
+        }
+        if (quizWaiting && isActive) {
+          if (canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) return 'tile-playable';
+        }
+        return '';
+      };
+
+      const getTileClick = (t) => {
+        if (quizWaiting && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
+          return `quizPickTile('${t.id}')`;
+        }
+        return '';
+      };
+
+      return `
+        <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 relative ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold" style="color:${colors[0]}">${names[0]} (${teams[0]})</span>
+            <span class="text-xs ${isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${isActive ? 'YOUR TURN' : `${hand.length} tiles`}</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
+            ${hand.map(t => tileHTML(t, '', 'v', getTileCls(t), getTileClick(t))).join('')}
+          </div>
+          ${quizWaiting && !quizSidePick ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">Click a tile to play it</span></div>` : ''}
+          ${quizSidePick ? renderSidePickOverlay() : ''}
+          ${quizShowingResult ? renderQuizResultBadge() : ''}
+        </div>`;
+    }
+
+    function renderSidePickOverlay() {
+      const t = quizSidePick.tile;
+      return `<div class="text-center mt-2 bg-slate-900 rounded-lg p-2 border border-purple-500">
+        <div class="text-xs text-purple-300 mb-1">[${t.left}|${t.right}] can play on both ends. Which side?</div>
+        <div class="flex justify-center gap-3">
+          <button class="side-pick-btn bg-blue-600 text-white" onclick="quizPickSide('left')">Left End</button>
+          <button class="side-pick-btn bg-red-600 text-white" onclick="quizPickSide('right')">Right End</button>
+        </div>
+      </div>`;
+    }
+
+    // Convert raw AI score to human-readable quality label
+    function scoreToQuality(score, allScores) {
+      if (allScores.length <= 1) return { label: 'Only option', cls: 'text-slate-400' };
+      const best = allScores[0];
+      const worst = allScores[allScores.length - 1];
+      const range = best - worst;
+      if (range === 0) return { label: 'Equal', cls: 'text-slate-400' };
+      const pct = range > 0 ? ((score - worst) / range * 100) : 50;
+      if (pct >= 90) return { label: 'Best', cls: 'text-emerald-400' };
+      if (pct >= 65) return { label: 'Good', cls: 'text-yellow-400' };
+      if (pct >= 35) return { label: 'Okay', cls: 'text-orange-400' };
+      return { label: 'Weak', cls: 'text-red-400' };
+    }
+
+    function renderQuizResultBadge() {
+      if (!quizResult) return '';
+      const r = quizResult;
+      const gradeText = { perfect: 'PERFECT', good: 'GOOD', ok: 'OK', bad: 'MISS' }[r.grade];
+      const gradeCls = { perfect: 'grade-perfect', good: 'grade-good', ok: 'grade-ok', bad: 'grade-bad' }[r.grade];
+
+      // Use detail lines from buildDetailedExplanation
+      const detailLines = r.detail || [];
+      const allScores = (r.allOptions || []).map(o => o.score);
+
+      // Icon map for detail line types
+      const iconMap = {
+        'success': '<span class="text-emerald-400">&#10004;</span>',
+        'header': '<span class="text-emerald-400 font-bold">&#9733;</span>',
+        'header2': '<span class="text-yellow-400 font-bold">&#9679;</span>',
+        'ai-reason': '<span class="text-emerald-400">&#9654;</span>',
+        'user-reason': '<span class="text-yellow-400">&#9654;</span>',
+        'compare': '<span class="text-blue-400">&#8644;</span>',
+        'opponent': '<span class="text-red-400">&#9888;</span>',
+        'partner': '<span class="text-blue-400">&#9829;</span>',
+        'strategy': '<span class="text-purple-400">&#9881;</span>',
+        'warning': '<span class="text-orange-400">&#9888;</span>',
+        'info': '<span class="text-slate-400">&#9432;</span>'
+      };
+
+      const colorMap = {
+        'success': 'text-emerald-300',
+        'header': 'text-emerald-300 font-bold',
+        'header2': 'text-yellow-300 font-bold',
+        'ai-reason': 'text-emerald-200',
+        'user-reason': 'text-yellow-200',
+        'compare': 'text-blue-200',
+        'opponent': 'text-red-200',
+        'partner': 'text-blue-200',
+        'strategy': 'text-purple-200',
+        'warning': 'text-orange-200',
+        'info': 'text-slate-300'
+      };
+
+      return `<div class="mt-2 bg-slate-900 rounded-lg p-3 border ${r.grade === 'perfect' ? 'border-emerald-500' : r.grade === 'bad' ? 'border-red-500' : 'border-yellow-500'}" style="max-height: 280px; overflow-y: auto;">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="grade-badge ${gradeCls}">${gradeText}</span>
+          ${r.grade !== 'perfect' ? `<span class="text-xs text-slate-400">Your pick: [${r.userTile.left}|${r.userTile.right}] &rarr; Better: [${r.aiTile.left}|${r.aiTile.right}] on ${r.aiSide}</span>` : ''}
+        </div>
+
+        <!-- Detailed explanation -->
+        <div class="space-y-1.5 mb-2">
+          ${detailLines.map(line => `
+            <div class="text-xs ${colorMap[line.type] || 'text-slate-300'} flex items-start gap-1.5">
+              <span class="mt-0.5 flex-shrink-0">${iconMap[line.type] || ''}</span>
+              <span>${line.text}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        ${r.allOptions && r.allOptions.length > 1 ? `
+        <div class="border-t border-slate-700 pt-1.5 mt-1.5">
+          <div class="text-xs text-slate-500 mb-1">Tile ranking:</div>
+          ${r.allOptions.slice(0, 5).map((o, i) => {
+            const q = scoreToQuality(o.score, allScores);
+            const isAi = o.tile.id === r.aiTile.id;
+            const isUser = o.tile.id === r.userTile.id;
+            const marker = isAi ? ' (best)' : isUser ? ' (yours)' : '';
+            const mc = r.mcResults ? r.mcResults.find(m => m.tile.id === o.tile.id) : null;
+            const mcStr = mc ? `<span class="text-blue-400 font-mono">${(mc.winRate*100).toFixed(0)}%</span>` : '';
+            return `<div class="text-xs mb-1">
+              <div class="flex items-center gap-1">
+                <span class="font-mono w-3 text-slate-500">${i+1}.</span>
+                <span class="${isAi ? 'text-emerald-400 font-bold' : isUser ? 'text-yellow-400' : 'text-slate-400'}">[${o.tile.left}|${o.tile.right}]</span>
+                <span class="${q.cls}">${q.label}</span>
+                ${mcStr}
+                ${marker ? `<span class="${isAi ? 'text-emerald-500' : 'text-yellow-500'}">${marker}</span>` : ''}
+              </div>
+              ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>` : ''}
+
+        ${r.mcResults && r.mcResults.length > 0 ? `
+        <div class="border-t border-blue-800 pt-1.5 mt-1.5">
+          <div class="text-xs text-blue-400 font-bold mb-1">Monte Carlo verdict:</div>
+          <div class="text-xs text-blue-300">Best by simulation: [${r.mcResults[0].tile.left}|${r.mcResults[0].tile.right}] with ${(r.mcResults[0].winRate*100).toFixed(0)}% win rate</div>
+          ${r.mcResults[0].tile.id !== r.aiTile.id ? '<div class="text-xs text-yellow-400">MC disagrees with heuristic — simulation sees deeper!</div>' : '<div class="text-xs text-emerald-400">MC confirms the heuristic choice</div>'}
+        </div>` : ''}
+
+        <div class="text-center mt-2">
+          <button class="btn btn-green text-xs" onclick="quizContinue()">Continue</button>
+        </div>
+      </div>`;
     }
 
     function renderSidePlayer(playerIdx, snap, names, teams, colors) {
@@ -539,7 +1336,7 @@
       return `
         <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
           <div class="text-xs font-bold text-center mb-1" style="color:${colors[playerIdx%2]}">${names[playerIdx].split('(')[0].trim()}</div>
-          <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} · ${hand.length}</div>
+          <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} - ${hand.length}</div>
           <div class="flex flex-col gap-0.5 items-center flex-1 justify-center">
             ${hand.map(() => `<div class="w-14 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
           </div>
@@ -557,43 +1354,610 @@
       }).join('');
     }
 
+    function renderHandStrength(hs, tileCount) {
+      if (tileCount === 0) return '';
+      const score = hs.score;
+      const color = score >= 65 ? '#22c55e' : score >= 45 ? '#eab308' : score >= 30 ? '#f97316' : '#ef4444';
+      const label = score >= 65 ? 'Strong' : score >= 45 ? 'Average' : score >= 30 ? 'Weak' : 'Danger';
+
+      return `<div class="bg-slate-800 rounded-lg px-3 py-1.5 mt-2 flex items-center gap-3">
+        <span class="text-xs text-slate-400 w-20">Hand Strength</span>
+        <div class="flex-1 bg-slate-700 rounded-full h-2.5">
+          <div class="strength-bar" style="width:${score}%; background:${color}"></div>
+        </div>
+        <span class="text-xs font-bold w-16 text-right" style="color:${color}">${score.toFixed(0)}% ${label}</span>
+        <div class="flex gap-2 ml-2">
+          ${Object.values(hs.metrics).map(m =>
+            `<span class="text-xs tooltip ${m.good ? 'text-slate-400' : 'text-orange-400'}">
+              ${m.label.split(':')[0].split(' ')[0]}
+              <span class="tip-text">${m.label}</span>
+            </span>`
+          ).join('')}
+        </div>
+      </div>`;
+    }
+
+    // ========== RIGHT PANEL TABS ==========
+
+    function renderReasoningPanel(snap, pNames, pTeams, teamColors) {
+      const allScores = (snap.allOptions || []).map(o => o.score);
+      return `
+        <!-- Current move detail -->
+        ${snap.move > 0 ? `
+        <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border ${snap.action === 'pass' ? 'border-orange-500' : 'border-emerald-500'}">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${teamColors[snap.player%2]}">${pn(snap.player)}</span>
+            <span class="text-xs font-bold ${snap.action === 'pass' ? 'text-orange-400' : 'text-emerald-400'}">
+              ${snap.action === 'pass' ? 'PASSES' : `plays [${snap.tile.left}|${snap.tile.right}] on ${snap.side}`}
+            </span>
+          </div>
+          <div class="text-xs text-slate-500 mb-1">Why this tile:</div>
+          <div class="space-y-0.5">
+            ${(snap.reasons || []).map(r => `<div class="text-xs text-slate-300 flex items-start gap-1">
+              <span class="text-emerald-400 mt-0.5">&#9654;</span> ${r}
+            </div>`).join('')}
+          </div>
+          ${snap.allOptions && snap.allOptions.length > 1 ? `
+          <div class="mt-2 pt-1.5 border-t border-slate-700">
+            <div class="text-xs text-slate-500 mb-1">Other options (best to worst):</div>
+            ${snap.allOptions.slice(0, 5).map((o, i) => {
+              const q = scoreToQuality(o.score, allScores);
+              return `<div class="text-xs ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'} mb-1">
+                <div class="flex items-center gap-1">
+                  <span class="font-mono w-3">${i+1}.</span>
+                  <span>[${o.tile.left}|${o.tile.right}]</span>
+                  <span class="${q.cls}">${q.label}</span>
+                </div>
+                ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+        </div>` : `
+        <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-slate-600">
+          <div class="text-xs text-slate-400">
+            ${pn(currentGame.autoPlayedBy)} auto-plays [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (highest double — first round rule).
+          </div>
+        </div>`}
+
+        <!-- Monte Carlo Analysis -->
+        ${renderMCPanel()}
+
+        <!-- Teaching tip -->
+        ${renderTeachingTip(snap)}
+
+        <!-- Knowledge panel -->
+        <div class="bg-slate-900 rounded-lg p-2 mb-2">
+          <div class="text-xs font-bold text-slate-400 mb-1">Intelligence</div>
+          ${[0,1,2,3].map(p => {
+            const dead = snap.knowledge ? snap.knowledge.deadNumbers(p) : [];
+            if (dead.length === 0) return '';
+            return `<div class="text-xs mb-0.5"><span style="color:${teamColors[p%2]}">${pn(p)}:</span> can't have <span class="text-red-400 font-mono">{${dead.join(', ')}}</span></div>`;
+          }).join('')}
+          ${snap.knowledge && [0,1,2,3].every(p => snap.knowledge.deadNumbers(p).length === 0) ? '<div class="text-xs text-slate-500">No intelligence yet</div>' : ''}
+        </div>
+
+        <!-- Move log -->
+        <div id="log-container" class="flex-1 overflow-y-auto space-y-0.5 max-h-[350px]">
+          ${currentGame.snapshots.slice(1).map((s, i) => {
+            const stepIdx = i + 1;
+            const isCur = stepIdx === currentStep;
+            const isPast = stepIdx < currentStep;
+            return `<div class="log-entry rounded px-2 py-0.5 cursor-pointer text-xs ${isCur ? 'active' : isPast ? 'past' : ''}"
+              onclick="goTo(${stepIdx})" id="log-${stepIdx}">
+              <span class="font-mono text-slate-500">#${s.move}</span>
+              <span class="font-bold" style="color:${teamColors[s.player%2]}">${pn(s.player)}</span>
+              ${s.action === 'pass'
+                ? '<span class="text-orange-400">passes</span>'
+                : `<span class="text-emerald-400">[${s.tile.left}|${s.tile.right}]</span> <span class="text-slate-400">${s.side}</span>`}
+              ${s.outcome ? `<span class="text-yellow-400 ml-1">${s.outcome.winType || s.outcome.type}</span>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    function renderTeachingTip(snap) {
+      if (snap.move === 0) return '';
+      const tips = [];
+      const reasons = snap.reasons || [];
+      const k = snap.knowledge;
+
+      // --- Analyze game state for context-aware tips ---
+      const partner = 2, opp1 = 1, opp3 = 3;
+
+      // Count tiles each player likely has
+      const handCounts = snap.hands.map(h => h.length);
+      const partnerTiles = handCounts[partner];
+      const opp1Tiles = handCounts[opp1];
+      const opp3Tiles = handCounts[opp3];
+      const myTiles = handCounts[0];
+
+      // Opponent pass data
+      const opp1Dead = k ? k.deadNumbers(opp1) : [];
+      const opp3Dead = k ? k.deadNumbers(opp3) : [];
+      const partnerDead = k ? k.deadNumbers(partner) : [];
+
+      // Partner strength (which numbers they've played a lot)
+      const partnerStr = k ? k.inferStrength(partner) : [0,0,0,0,0,0,0];
+      const partnerStrongSuits = partnerStr.map((v, i) => ({ num: i, count: v })).filter(x => x.count >= 2).sort((a, b) => b.count - a.count);
+
+      // === PASS TIPS ===
+      if (snap.action === 'pass') {
+        const dead = k ? k.deadNumbers(snap.player) : [];
+        const pName = pn(snap.player);
+
+        if (snap.player === opp1 || snap.player === opp3) {
+          // Opponent passed
+          if (dead.length >= 4) {
+            tips.push({ icon: '&#128270;', color: 'text-red-300',
+              text: `${pName} has passed on ${dead.length}/7 numbers — they're badly stuck. Leave board ends on numbers they lack and they'll keep passing.`,
+              rule: 'TRACK PASSES: Every pass reveals 2 numbers an opponent lacks. After 2 passes you know 4 dead numbers — nearly half the suits!'
+            });
+          } else if (dead.length >= 2) {
+            tips.push({ icon: '&#128270;', color: 'text-orange-300',
+              text: `${pName} can't have {${dead.join(', ')}}. Try to keep at least one of these numbers as a board end.`,
+              rule: 'MEMORIZE PASSES: In real play, say it in your head: "Left can\'t play 3 or 6." This is the most valuable free information in domino.'
+            });
+          } else {
+            tips.push({ icon: '&#128270;', color: 'text-yellow-300',
+              text: `${pName}'s first pass — they lack both ${snap.leftEnd} and ${snap.rightEnd}. File this away.`,
+              rule: 'FIRST PASS = GOLD: The first time someone passes, you learn 2 numbers. Keep these in memory for the rest of the round.'
+            });
+          }
+        } else if (snap.player === partner) {
+          tips.push({ icon: '&#128153;', color: 'text-blue-300',
+            text: `Partner passed — they can't play ${snap.leftEnd} or ${snap.rightEnd}. On your next turn, try to change the board ends to numbers partner has played before.`,
+            rule: 'HELP YOUR PARTNER: When partner passes, your #1 priority is changing the board to numbers they CAN play. A passing partner is a losing team.'
+          });
+        } else if (snap.player === 0) {
+          tips.push({ icon: '&#9888;', color: 'text-yellow-300',
+            text: `You passed — opponents now know you lack ${snap.leftEnd} and ${snap.rightEnd}. They'll try to keep these as ends to lock you out.`,
+            rule: 'YOUR PASSES HURT: Every time you pass, opponents gain intelligence. Play tiles that keep you flexible to avoid passing.'
+          });
+        }
+      }
+
+      // === PLAY TIPS ===
+      if (snap.action === 'play') {
+
+        // --- Partner close to winning ---
+        if (partnerTiles <= 2 && partnerTiles > 0) {
+          tips.push({ icon: '&#127942;', color: 'text-emerald-300',
+            text: `Partner has only ${partnerTiles} tile${partnerTiles > 1 ? 's' : ''} left! Prioritize leaving ends they can play over everything else — even over blocking opponents.`,
+            rule: 'ENDGAME RULE: When partner has 1-2 tiles, helping them go out is almost always the best play. Blocking is pointless if your team can win NOW. Count tiles: started with 6, played X, so they have 6-X.'
+          });
+        }
+
+        // --- Opponent close to winning ---
+        if (opp1Tiles <= 2 || opp3Tiles <= 2) {
+          const dangerOpp = opp1Tiles <= 2 ? opp1 : opp3;
+          const dangerCount = Math.min(opp1Tiles, opp3Tiles);
+          tips.push({ icon: '&#9888;', color: 'text-red-300',
+            text: `${pn(dangerOpp)} has only ${dangerCount} tile${dangerCount > 1 ? 's' : ''} left — danger! Block them or they'll win. Leave ends on numbers they've passed on.`,
+            rule: 'COUNT OPPONENT TILES: If an opponent has 1-2 tiles, blocking them becomes critical. Use their pass history to leave ends they can\'t play.'
+          });
+        }
+
+        // --- Partner suit reading ---
+        if (partnerStrongSuits.length > 0 && reasons.some(r => r.includes('Partner played'))) {
+          const top = partnerStrongSuits[0];
+          tips.push({ icon: '&#128153;', color: 'text-blue-300',
+            text: `Partner has played ${top.count} tiles with ${top.num}s — they likely have more. Leaving a ${top.num}-end lets them play.`,
+            rule: `READ PARTNER'S SUIT: When partner plays 2+ tiles with the same number, they're signaling strength. Keep that number as a board end. In real play: "Partner likes ${top.num}s" — simple but powerful.`
+          });
+        }
+
+        // --- Blocking play ---
+        if (reasons.some(r => r.includes('Blocks'))) {
+          const blockedOpp = opp1Dead.includes(snap.leftEnd) && opp1Dead.includes(snap.rightEnd) ? opp1 :
+                             opp3Dead.includes(snap.leftEnd) && opp3Dead.includes(snap.rightEnd) ? opp3 : -1;
+          if (blockedOpp >= 0) {
+            const blockedDead = blockedOpp === opp1 ? opp1Dead : opp3Dead;
+            tips.push({ icon: '&#128683;', color: 'text-red-300',
+              text: `${pn(blockedOpp)} is fully blocked — both ends (${snap.leftEnd}/${snap.rightEnd}) are in their dead set {${blockedDead.join(', ')}}.`,
+              rule: 'BLOCKING = TEMPO: A blocked opponent loses their turn. That\'s like getting a free extra move for your team. The more passes they make, the more turns your team gets.'
+            });
+          }
+        }
+
+        // --- Dead blocking (opponent already stuck, blocking is wasteful) ---
+        for (const oppIdx of [opp1, opp3]) {
+          const oppDead = k ? k.deadNumbers(oppIdx) : [];
+          if (oppDead.length >= 5 && handCounts[oppIdx] >= 3) {
+            tips.push({ icon: '&#128161;', color: 'text-amber-300',
+              text: `${pn(oppIdx)} is already stuck (can't have ${oppDead.length}/7 numbers, still holding ${handCounts[oppIdx]} tiles). No need to waste moves blocking them further — focus on helping partner or playing your strong suits.`,
+              rule: 'DEAD BLOCKING: If an opponent has passed 3+ times, they\'re stuck regardless. Don\'t waste moves blocking someone who\'s already dead. Help your partner or dump heavy tiles instead.'
+            });
+            break; // only one dead blocking tip
+          }
+        }
+
+        // --- Double management ---
+        if (snap.tile.left === snap.tile.right) {
+          const dblNum = snap.tile.left;
+          const support = snap.hands[snap.player] ? snap.hands[snap.player].filter(t => t.left === dblNum || t.right === dblNum).length : 0;
+          if (support === 0 && !tips.some(t => t.text.includes('double'))) {
+            tips.push({ icon: '&#9879;', color: 'text-purple-300',
+              text: `Played the [${dblNum}|${dblNum}] double${snap.hands[snap.player] && snap.hands[snap.player].some(t => t.left === dblNum || t.right === dblNum) ? '' : ' with no backup'}. Doubles only connect to one number — play them early before the board moves away.`,
+              rule: 'DOUBLES ARE TRAPS: A double [X|X] can only connect to X. If you hold it too long and all X-ends disappear, you\'re stuck. Play doubles at the first opportunity unless you have 2+ support tiles with that number.'
+            });
+          }
+        }
+
+        // --- Heavy tile dump ---
+        if (snap.tile.left + snap.tile.right >= 10 && reasons.some(r => r.includes('Dump heavy'))) {
+          tips.push({ icon: '&#9878;', color: 'text-orange-300',
+            text: `Dumped a heavy tile (${snap.tile.left + snap.tile.right} pips). If the game blocks, the team with fewer total pips wins.`,
+            rule: 'PIP MANAGEMENT: In a blocked game, every pip counts. Dump [6|5]=11, [6|4]=10 early. Keep light tiles [0|1]=1, [0|2]=2 for later. The 4 "dorme" tiles (undealt) average ~14 pips, so a blocked game is common.'
+          });
+        }
+
+        // --- Scarcity awareness ---
+        if (reasons.some(r => r.includes('Few tiles left'))) {
+          tips.push({ icon: '&#9888;', color: 'text-orange-300',
+            text: 'Created a scarce end — few tiles left with that number. This risks stalling the board.',
+            rule: 'AVOID DEAD ENDS: If 5+ of the 7 tiles with a number are played, that end is nearly dead. Creating it as a board end means nobody can play there. Count played tiles per number to avoid this.'
+          });
+        }
+
+        // --- Opening move tip ---
+        if (snap.move <= 2 && !tips.length) {
+          tips.push({ icon: '&#127919;', color: 'text-cyan-300',
+            text: 'Early game — focus on playing tiles from your deepest suit (the number you have the most of). This builds suit control for later.',
+            rule: 'OPENING STRATEGY: Play from your strongest suit first. If you have 4 tiles with 3s, play a 3 early to claim that end. Suit depth = control. The player who dominates a suit forces others to play around them.'
+          });
+        }
+
+        // --- Who's winning check ---
+        if (snap.move >= 8 && !tips.length) {
+          const myTeamTiles = myTiles + partnerTiles;
+          const oppTeamTiles = opp1Tiles + opp3Tiles;
+          if (myTeamTiles < oppTeamTiles - 2) {
+            tips.push({ icon: '&#128640;', color: 'text-emerald-300',
+              text: `Your team has ${myTeamTiles} tiles vs opponents' ${oppTeamTiles} — you're ahead! Play aggressively to help partner finish.`,
+              rule: '"WHO\'S WINNING?" CHECK: Before each play, quickly count: my tiles + partner\'s tiles vs both opponents. If your team has fewer tiles, play to help partner close out. If behind, slow down and block.'
+            });
+          } else if (oppTeamTiles < myTeamTiles - 2) {
+            tips.push({ icon: '&#9888;', color: 'text-red-300',
+              text: `Opponents have ${oppTeamTiles} tiles vs your team's ${myTeamTiles} — they're ahead. Focus on blocking and dumping heavy tiles in case it blocks.`,
+              rule: '"WHO\'S WINNING?" CHECK: When opponents have fewer tiles, the game might end soon in their favor. Shift to blocking (leave ends they can\'t play) and dump heavy tiles (reduce pip count for blocked game).'
+            });
+          }
+        }
+      }
+
+      // Nothing to show
+      if (tips.length === 0) return '';
+
+      // Show up to 2 tips
+      return tips.slice(0, 2).map(t => `
+        <div class="bg-indigo-950 rounded-lg p-2 mb-2 border border-indigo-700">
+          <div class="text-xs text-indigo-300 mb-1">
+            <span>${t.icon}</span> <span class="font-bold">Situation:</span> ${t.text}
+          </div>
+          <div class="text-xs ${t.color} bg-indigo-900/50 rounded px-2 py-1">
+            <span class="font-bold">Rule to memorize:</span> ${t.rule}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderMCPanel() {
+      if (!deepAnalysis) return '';
+      if (mcRunning) {
+        return `<div class="bg-blue-950 rounded-lg p-2.5 mb-2 border border-blue-700">
+          <div class="text-xs text-blue-300 pulse flex items-center gap-2">
+            <span class="inline-block w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></span>
+            Monte Carlo analyzing (80 simulations per tile)...
+          </div>
+        </div>`;
+      }
+      if (!mcResults || mcResults.length === 0) return '';
+
+      const best = mcResults[0];
+      const snap = currentGame.snapshots[currentStep];
+      const heuristicBest = snap.allOptions && snap.allOptions.length > 0 ? snap.allOptions[0] : null;
+      const disagree = heuristicBest && best.tile.id !== heuristicBest.tile.id;
+
+      return `<div class="bg-blue-950 rounded-lg p-2.5 mb-2 border ${disagree ? 'border-yellow-500' : 'border-blue-700'}">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-bold text-blue-300">Monte Carlo Analysis</span>
+          ${disagree ? '<span class="text-xs text-yellow-400 font-bold">DISAGREES with heuristic</span>' : '<span class="text-xs text-emerald-400">Confirms heuristic</span>'}
+        </div>
+        <div class="space-y-1">
+          ${mcResults.map((r, i) => {
+            const pct = (r.winRate * 100).toFixed(0);
+            const color = r.winRate >= 0.55 ? '#22c55e' : r.winRate >= 0.45 ? '#eab308' : '#ef4444';
+            const isBest = i === 0;
+            const isHeuristicPick = heuristicBest && r.tile.id === heuristicBest.tile.id;
+            return `<div class="flex items-center gap-2 text-xs">
+              <span class="${isBest ? 'text-emerald-400 font-bold' : 'text-slate-400'}">[${r.tile.left}|${r.tile.right}]</span>
+              <div class="flex-1 bg-slate-700 rounded-full h-2">
+                <div class="h-2 rounded-full" style="width:${pct}%;background:${color}"></div>
+              </div>
+              <span class="w-10 text-right font-mono" style="color:${color}">${pct}%</span>
+              ${isBest ? '<span class="text-emerald-500 text-xs">MC best</span>' : ''}
+              ${isHeuristicPick && !isBest ? '<span class="text-yellow-500 text-xs">heuristic pick</span>' : ''}
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="text-xs text-slate-600 mt-1">Win% from ${mcResults[0]?.sims || 80} simulated games per tile</div>
+      </div>`;
+    }
+
+    function renderProbabilityPanel(snap, pNames, teamColors) {
+      const knowledge = snap.knowledge;
+      if (!knowledge) return '<div class="text-xs text-slate-500">No data yet</div>';
+
+      const allTiles = createDeck();
+
+      // Build probability grid for each opponent
+      return `
+        <div class="space-y-3 overflow-y-auto flex-1">
+          ${[1, 2, 3].map(p => {
+            const possible = knowledge.possibleTilesFor(p);
+            const possibleIds = new Set(possible.map(t => t.id));
+            const handSize = snap.hands[p].length;
+            const dead = knowledge.deadNumbers(p);
+
+            return `
+              <div class="bg-slate-900 rounded-lg p-2">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs font-bold" style="color:${teamColors[p%2]}">${pNames[p]}</span>
+                  <span class="text-xs text-slate-400 tooltip">holds ${handSize}, could be ${possible.length} different tiles
+                    <span class="tip-text">They have ${handSize} tiles in hand. Based on passes and plays, ${possible.length} of the 28 tiles could be in their hand.</span>
+                  </span>
+                </div>
+                ${dead.length > 0 ? `<div class="text-xs text-red-400 mb-1">Passed on: {${dead.join(', ')}} — has none of these numbers</div>` : ''}
+                <div class="grid gap-px" style="grid-template-columns: repeat(8, 1fr)">
+                  <!-- Header row -->
+                  <div class="prob-cell text-slate-600"></div>
+                  ${[0,1,2,3,4,5,6].map(n => `<div class="prob-cell text-slate-400 font-bold">${n}</div>`).join('')}
+                  <!-- Data rows -->
+                  ${[0,1,2,3,4,5,6].map(row => `
+                    <div class="prob-cell text-slate-400 font-bold">${row}</div>
+                    ${[0,1,2,3,4,5,6].map(col => {
+                      if (col < row) return '<div class="prob-cell"></div>';
+                      const tid = `${row}-${col}`;
+                      const isPlayed = knowledge.played.has(tid);
+                      const isPossible = possibleIds.has(tid);
+                      const isInMyHand = snap.hands[0].some(t => t.id === tid);
+                      let bg, txt;
+                      if (isPlayed) { bg = '#1e293b'; txt = '#475569'; }
+                      else if (isInMyHand) { bg = '#1e3a5f'; txt = '#60a5fa'; }
+                      else if (isPossible) { bg = '#365314'; txt = '#a3e635'; }
+                      else { bg = '#450a0a'; txt = '#fca5a5'; }
+                      return `<div class="prob-cell" style="background:${bg};color:${txt}" title="${row}-${col}: ${isPlayed ? 'played' : isInMyHand ? 'in your hand' : isPossible ? 'possible' : 'impossible'}">${row}${col}</div>`;
+                    }).join('')}
+                  `).join('')}
+                </div>
+                <div class="flex gap-2 mt-1.5 text-xs">
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#365314"></span> Possible</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#450a0a"></span> Eliminated</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#1e3a5f"></span> Your hand</span>
+                  <span class="flex items-center gap-1"><span class="w-2 h-2 rounded" style="background:#1e293b"></span> Played</span>
+                </div>
+              </div>`;
+          }).join('')}
+
+          <!-- Suit exhaustion summary -->
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Suit Exhaustion</div>
+            <div class="grid grid-cols-7 gap-1">
+              ${[0,1,2,3,4,5,6].map(n => {
+                const rem = knowledge.remainingWithNumber(n);
+                const total = 7; // each number appears on 7 tiles
+                const played = total - rem;
+                const pct = (played / total * 100).toFixed(0);
+                const color = rem === 0 ? '#ef4444' : rem <= 2 ? '#f97316' : '#22c55e';
+                return `<div class="text-center">
+                  <div class="text-xs font-bold" style="color:${color}">${n}</div>
+                  <div class="bg-slate-700 rounded-full h-1.5 mt-0.5">
+                    <div class="h-1.5 rounded-full" style="width:${pct}%;background:${color}"></div>
+                  </div>
+                  <div class="text-xs text-slate-500">${rem} left</div>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderStatsPanel() {
+      const total = stats.totalMoves;
+      const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
+      const goodPct = total > 0 ? (((stats.optimalMoves + stats.goodMoves) / total) * 100).toFixed(1) : '0.0';
+
+      return `
+        <div class="space-y-3 flex-1 overflow-y-auto">
+          <div class="bg-slate-900 rounded-lg p-3 text-center">
+            <div class="text-3xl font-bold ${parseFloat(accuracy) >= 50 ? 'text-emerald-400' : parseFloat(accuracy) >= 30 ? 'text-yellow-400' : 'text-red-400'}">${accuracy}%</div>
+            <div class="text-xs text-slate-400">Perfect Play Rate</div>
+            <div class="text-lg font-bold text-blue-400 mt-1">${goodPct}%</div>
+            <div class="text-xs text-slate-400">Good or Better</div>
+          </div>
+
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-2">Breakdown (${total} moves)</div>
+            <div class="space-y-1.5">
+              ${[
+                { label: 'Perfect', count: stats.optimalMoves, color: '#22c55e', cls: 'grade-perfect' },
+                { label: 'Good', count: stats.goodMoves, color: '#f59e0b', cls: 'grade-good' },
+                { label: 'OK', count: stats.okMoves, color: '#f97316', cls: 'grade-ok' },
+                { label: 'Miss', count: stats.badMoves, color: '#ef4444', cls: 'grade-bad' }
+              ].map(g => {
+                const pct = total > 0 ? (g.count / total * 100).toFixed(0) : 0;
+                return `<div class="flex items-center gap-2">
+                  <span class="grade-badge ${g.cls} w-14 text-center">${g.label}</span>
+                  <div class="flex-1 bg-slate-700 rounded-full h-2">
+                    <div class="h-2 rounded-full" style="width:${pct}%;background:${g.color}"></div>
+                  </div>
+                  <span class="text-xs text-slate-400 w-12 text-right">${g.count} (${pct}%)</span>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Recent decisions -->
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Recent Decisions</div>
+            <div class="space-y-0.5 max-h-[200px] overflow-y-auto">
+              ${stats.history.length === 0 ? '<div class="text-xs text-slate-500">Play quiz mode to track decisions</div>' : ''}
+              ${[...stats.history].reverse().map((h, i) => `
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="grade-badge grade-${h.grade}" style="font-size:9px">${h.grade.toUpperCase()}</span>
+                  <span class="text-slate-400">You: [${h.userTile}]</span>
+                  ${h.grade !== 'perfect' ? `<span class="text-slate-500">AI: [${h.aiTile}]</span>` : ''}
+                  ${h.scoreDiff > 0 ? `<span class="text-red-400">-${h.scoreDiff}</span>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="text-center">
+            <button class="btn btn-red text-xs" onclick="resetStats()">Reset Stats</button>
+          </div>
+        </div>
+      `;
+    }
+
     function renderStartScreen() {
+      const hasStats = stats.totalMoves > 0;
       return `
         <div class="flex items-center justify-center min-h-screen">
-          <div class="text-center">
-            <h1 class="text-4xl font-bold text-emerald-400 mb-4">Domino Pernambucano</h1>
-            <p class="text-slate-400 mb-2">Strategy Simulator & Trainer</p>
-            <p class="text-sm text-slate-500 mb-8">Watch the Smart AI play with full reasoning for every move</p>
-            <button class="btn btn-green text-xl px-8 py-4" onclick="newGame()">Start Simulation</button>
+          <div class="text-center max-w-lg">
+            <h1 class="text-4xl font-bold text-emerald-400 mb-3">Domino Pernambucano</h1>
+            <p class="text-slate-400 mb-1">Strategy Trainer & Simulator</p>
+            <p class="text-sm text-slate-500 mb-6">Learn optimal play through AI reasoning, quizzes, and card tracking</p>
+            <div class="flex gap-4 justify-center mb-6">
+              <button class="btn btn-green text-lg px-6 py-3" onclick="setMode('watch'); newGame();">Watch AI Play</button>
+              <button class="btn btn-purple text-lg px-6 py-3" onclick="setMode('quiz'); newGame();">Quiz Mode</button>
+            </div>
+            <div class="grid grid-cols-3 gap-3 text-left mb-6">
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
+                <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move. See why each tile was chosen.</div>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-purple-400 font-bold text-sm mb-1">Quiz Mode</div>
+                <div class="text-xs text-slate-400">At your turns, pick the tile YOU would play. Get graded against the AI's optimal choice.</div>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-blue-400 font-bold text-sm mb-1">Card Tracker</div>
+                <div class="text-xs text-slate-400">Visual grid showing which tiles each opponent could hold. Practice counting cards.</div>
+              </div>
+            </div>
+            ${hasStats ? `
+            <div class="bg-slate-800 rounded-lg p-3 inline-block">
+              <div class="text-xs text-slate-400">Your accuracy: <span class="text-emerald-400 font-bold">${(stats.optimalMoves / stats.totalMoves * 100).toFixed(1)}%</span> perfect over ${stats.totalMoves} moves</div>
+            </div>` : ''}
+            <div class="mt-4 text-xs text-slate-600">
+              Keyboard: Arrow keys to navigate, N for new game, Space for next, P for auto-play
+            </div>
           </div>
         </div>`;
     }
 
     // ========== CONTROLS ==========
 
+    function setMode(m) {
+      gameMode = m;
+      stopAutoPlay();
+      quizWaiting = false;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      render();
+    }
+
+    function setTab(t) {
+      rightPanelTab = t;
+      render();
+    }
+
+    function toggleDeepAnalysis() {
+      deepAnalysis = !deepAnalysis;
+      mcResults = null;
+      render();
+      // If turning on and we're on a valid step, run MC
+      if (deepAnalysis && currentGame && currentStep > 0) {
+        runMCForCurrentStep();
+      }
+    }
+
+    function runMCForCurrentStep() {
+      if (!currentGame || !deepAnalysis) return;
+      const snap = currentGame.snapshots[currentStep];
+      if (snap.move === 0 || snap.action !== 'play') { mcResults = null; return; }
+      mcRunning = true;
+      render();
+      // Use setTimeout to let UI update with "Analyzing..." before blocking
+      setTimeout(() => {
+        // Run MC from the state BEFORE this move was made
+        const prevSnap = currentGame.snapshots[currentStep - 1];
+        mcResults = monteCarloEval(prevSnap, snap.player, 80);
+        mcRunning = false;
+        render();
+      }, 20);
+    }
+
     function newGame() {
       stopAutoPlay();
+      quizWaiting = false;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      mcResults = null;
+      stats.games++;
+      saveStats();
       currentGame = generateGame();
       currentStep = 0;
       render();
     }
 
+    function handleNext() {
+      if (quizShowingResult) {
+        quizContinue();
+        return;
+      }
+      if (quizWaiting) return; // blocked until user picks
+      stepForward();
+    }
+
     function stepForward() {
       if (!currentGame || currentStep >= currentGame.snapshots.length - 1) return;
       currentStep++;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      mcResults = null;
       render();
+      if (deepAnalysis) runMCForCurrentStep();
     }
 
     function stepBack() {
       if (!currentGame || currentStep <= 0) return;
       currentStep--;
+      quizWaiting = false;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      mcResults = null;
       render();
+      if (deepAnalysis) runMCForCurrentStep();
     }
 
     function goTo(step) {
       if (!currentGame) return;
+      quizWaiting = false;
+      quizResult = null;
+      quizShowingResult = false;
+      quizSidePick = null;
+      mcResults = null;
       currentStep = Math.max(0, Math.min(step, currentGame.snapshots.length - 1));
       render();
+      if (deepAnalysis) runMCForCurrentStep();
     }
 
     function toggleAutoPlay() {
@@ -620,12 +1984,18 @@
       else render();
     }
 
+    function resetStats() {
+      stats = { totalMoves: 0, optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0, passedCorrectly: 0, games: 0, history: [] };
+      saveStats();
+      render();
+    }
+
     // Keyboard controls
     document.addEventListener('keydown', e => {
-      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); stepForward(); }
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); handleNext(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); stepBack(); }
       else if (e.key === 'n') newGame();
-      else if (e.key === 'p') toggleAutoPlay();
+      else if (e.key === 'p') { if (gameMode === 'watch') toggleAutoPlay(); }
     });
 
     // Initial render
