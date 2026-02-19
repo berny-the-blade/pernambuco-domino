@@ -712,6 +712,583 @@
     // Global notebook — instantiated per game
     let notebook = null;
 
+    // ========== METRICS LIBRARY ==========
+
+    // Helper: compute new board ends after a move
+    function applyMove(snap, tile, side) {
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      if (snap.board.length === 0) return { newLeft: tile.left, newRight: tile.right };
+      if (side === 'left') {
+        return { newLeft: tile.left === lE ? tile.right : tile.left, newRight: rE };
+      } else {
+        return { newLeft: lE, newRight: tile.right === rE ? tile.left : tile.right };
+      }
+    }
+
+    function computeFlexibility(hand, tile) {
+      const leave = hand.filter(t => t.id !== tile.id);
+      if (leave.length === 0) return { flexibility: 1.0, leaveEntropy: 0, numDistribution: new Array(7).fill(0) };
+
+      const numCount = new Array(7).fill(0);
+      for (const t of leave) {
+        numCount[t.left]++;
+        if (t.left !== t.right) numCount[t.right]++;
+      }
+
+      let totalPlayable = 0, combos = 0;
+      for (let a = 0; a <= 6; a++) {
+        for (let b = a; b <= 6; b++) {
+          const playable = leave.filter(t =>
+            t.left === a || t.right === a || t.left === b || t.right === b
+          ).length;
+          totalPlayable += playable;
+          combos++;
+        }
+      }
+      const flexibility = totalPlayable / combos / Math.max(1, leave.length);
+
+      const total = numCount.reduce((s, c) => s + c, 0);
+      let entropy = 0;
+      for (const c of numCount) {
+        if (c > 0 && total > 0) {
+          const p = c / total;
+          entropy -= p * Math.log2(p);
+        }
+      }
+
+      return { flexibility, leaveEntropy: entropy, numDistribution: numCount };
+    }
+
+    function computeControlMetrics(snap, player, tile, side) {
+      const { newLeft, newRight } = applyMove(snap, tile, side);
+      const hand = snap.hands[player].filter(t => t.id !== tile.id);
+
+      // Count our tiles that match new ends
+      const myEndTiles = hand.filter(t =>
+        t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight
+      ).length;
+
+      // Suit dominance: fraction of remaining tiles with each end number that we hold
+      const suitDom = {};
+      const knowledge = snap.knowledge;
+      for (const n of [newLeft, newRight]) {
+        const remaining = ALL_TILES.filter(t =>
+          !knowledge.played.has(t.id) && (t.left === n || t.right === n)
+        ).length;
+        const weHave = hand.filter(t => t.left === n || t.right === n).length;
+        suitDom[n] = remaining > 0 ? weHave / remaining : 0;
+      }
+
+      // Expected forced passes on opponents using belief or knowledge
+      let expectedForcedPasses = 0;
+      for (const opp of [1, 3]) {
+        const dead = knowledge.cantHave[opp];
+        const cantPlayL = dead.has(newLeft);
+        const cantPlayR = dead.has(newRight);
+        if (cantPlayL && cantPlayR) expectedForcedPasses += 1.0;
+        else if (cantPlayL || cantPlayR) expectedForcedPasses += 0.3;
+      }
+
+      return {
+        myEndTiles,
+        suitDominance: suitDom,
+        expectedForcedPasses,
+        squeezeValue: expectedForcedPasses > 0.5 ? 'high' : expectedForcedPasses > 0.2 ? 'medium' : 'low'
+      };
+    }
+
+    function computeTempoMetrics(snap, player, tile, side) {
+      const myTeam = player % 2;
+      const myTurns = snap.hands.filter((h, i) => i % 2 === myTeam)
+        .reduce((s, h) => s + h.length, 0);
+      const oppTurns = snap.hands.filter((h, i) => i % 2 !== myTeam)
+        .reduce((s, h) => s + h.length, 0);
+
+      const { newLeft, newRight } = applyMove(snap, tile, side);
+      const nextPlayer = (player + 1) % 4;
+      const nextDead = snap.knowledge.cantHave[nextPlayer];
+      const nextCantPlayL = nextDead.has(newLeft);
+      const nextCantPlayR = nextDead.has(newRight);
+      const nextCanPlay = nextCantPlayL && nextCantPlayR ? 0 :
+                          nextCantPlayL || nextCantPlayR ? 0.5 : 1.0;
+      const nextIsOpp = nextPlayer % 2 !== myTeam;
+
+      return {
+        teamTurnsLeft: myTurns,
+        oppTurnsLeft: oppTurns,
+        nextPlayerCanPlay: nextCanPlay,
+        controlRetention: nextIsOpp ? (1 - nextCanPlay) : nextCanPlay
+      };
+    }
+
+    function computeInfoGain(snap, player, tile, side) {
+      const knowledge = snap.knowledge;
+      // Count total known void numbers across opponents as proxy for information state
+      let knownVoids = 0;
+      for (const p of [1, 2, 3]) knownVoids += knowledge.cantHave[p].size;
+
+      const { newLeft, newRight } = applyMove(snap, tile, side);
+      const nextP = (player + 1) % 4;
+      const nextDead = knowledge.cantHave[nextP];
+      const nextCantPlayL = nextDead.has(newLeft);
+      const nextCantPlayR = nextDead.has(newRight);
+
+      // Pass probability: 1.0 if both void, 0.3 if one void, else estimate
+      const passProb = nextCantPlayL && nextCantPlayR ? 1.0 :
+                       nextCantPlayL || nextCantPlayR ? 0.4 : 0.15;
+
+      // Information gain: pass reveals 2 numbers, play reveals 1 tile
+      const infoGain = passProb * 2.0 + (1 - passProb) * 0.5;
+      const normalizedGain = infoGain / 2.5; // 0 to ~1
+
+      return {
+        infoGain: normalizedGain,
+        passProb_nextPlayer: passProb,
+        diagnosticValue: normalizedGain > 0.5 ? 'high' : normalizedGain > 0.2 ? 'medium' : 'low'
+      };
+    }
+
+    function computePartnerSynergy(snap, player, tile, side) {
+      const partner = (player + 2) % 4;
+      const { newLeft, newRight } = applyMove(snap, tile, side);
+      const knowledge = snap.knowledge;
+
+      const partnerDead = knowledge.cantHave[partner];
+      const partnerCantPlayL = partnerDead.has(newLeft);
+      const partnerCantPlayR = partnerDead.has(newRight);
+      const partnerPlayProb = partnerCantPlayL && partnerCantPlayR ? 0 :
+                              partnerCantPlayL || partnerCantPlayR ? 0.5 : 0.85;
+
+      const partnerWasLocked = partnerDead.has(snap.leftEnd) && partnerDead.has(snap.rightEnd);
+      const partnerNowUnlocked = partnerPlayProb > 0.3;
+      const rescueValue = partnerWasLocked && partnerNowUnlocked ? 1.0 : 0.0;
+
+      // Check partner strength in new end numbers
+      const pStr = knowledge.inferStrength(partner);
+      const feedsPartner = pStr[newLeft] >= 2 || pStr[newRight] >= 2;
+
+      return {
+        partnerPlayProb,
+        partnerRescueValue: rescueValue,
+        feedsPartnerSuit: feedsPartner
+      };
+    }
+
+    // Compute all metrics for a move in one call
+    function computeAllMetrics(snap, player, tile, side) {
+      return {
+        flexibility: computeFlexibility(snap.hands[player], tile),
+        control: computeControlMetrics(snap, player, tile, side),
+        tempo: computeTempoMetrics(snap, player, tile, side),
+        info: computeInfoGain(snap, player, tile, side),
+        partner: computePartnerSynergy(snap, player, tile, side)
+      };
+    }
+
+    // ========== EXPLANATION ENGINE ==========
+
+    class ExplanationBuilder {
+      explain(bestMove, allMoves, snap, metrics) {
+        return {
+          tldr: this._buildTLDR(bestMove, snap, metrics),
+          keyDrivers: this._buildKeyDrivers(bestMove, metrics),
+          motifs: this._tagMotifs(bestMove, snap, metrics),
+          counterfactuals: this._buildCounterfactuals(bestMove, allMoves, snap)
+        };
+      }
+
+      _buildTLDR(best, snap, metrics) {
+        const { newLeft, newRight } = applyMove(snap, best.tile, best.side);
+        const reasons = [];
+        const knowledge = snap.knowledge;
+
+        for (const opp of [1, 3]) {
+          const dead = [...knowledge.cantHave[opp]];
+          if (dead.includes(newLeft) && dead.includes(newRight)) {
+            reasons.push(`blocks ${pn(opp)} (void in ${dead.join(',')})`);
+          }
+        }
+
+        const pStr = knowledge.inferStrength(2);
+        if (pStr[newLeft] >= 2 || pStr[newRight] >= 2) {
+          reasons.push(`feeds partner's strong suit`);
+        }
+
+        if (metrics && metrics.flexibility && metrics.flexibility.flexibility > 0.5) {
+          reasons.push(`keeps hand flexible`);
+        }
+
+        if (metrics && metrics.control && metrics.control.expectedForcedPasses > 0.5) {
+          reasons.push(`squeezes opponents`);
+        }
+
+        if (reasons.length === 0) reasons.push(`highest expected equity`);
+
+        return `Play [${best.tile.left}|${best.tile.right}] on ${best.side} — ${reasons.join(', ')}.`;
+      }
+
+      _buildKeyDrivers(best, metrics) {
+        const drivers = [];
+        drivers.push({
+          metric: 'E[pts]', value: best.expectedPoints.toFixed(2),
+          explanation: `Expected ${best.expectedPoints >= 0 ? 'gain' : 'loss'} of ${Math.abs(best.expectedPoints).toFixed(2)} pts`
+        });
+        drivers.push({
+          metric: 'Win%', value: (best.winRate * 100).toFixed(1) + '%',
+          explanation: `Team wins ${(best.winRate * 100).toFixed(1)}% of the time`
+        });
+        if (metrics && metrics.control) {
+          drivers.push({
+            metric: 'Forced passes', value: metrics.control.expectedForcedPasses.toFixed(1),
+            explanation: `Forces ~${metrics.control.expectedForcedPasses.toFixed(1)} opponent passes`
+          });
+        }
+        if (metrics && metrics.partner) {
+          drivers.push({
+            metric: 'Partner play%', value: (metrics.partner.partnerPlayProb * 100).toFixed(0) + '%',
+            explanation: `Partner can play ${(metrics.partner.partnerPlayProb * 100).toFixed(0)}% of the time`
+          });
+        }
+        return drivers;
+      }
+
+      _tagMotifs(best, snap, metrics) {
+        const motifs = [];
+        const { newLeft, newRight } = applyMove(snap, best.tile, best.side);
+        const knowledge = snap.knowledge;
+
+        for (const opp of [1, 3]) {
+          const dead = [...knowledge.cantHave[opp]];
+          if (dead.includes(newLeft) && dead.includes(newRight)) {
+            motifs.push({
+              name: 'BLOCK', icon: '\u26D4',
+              definition: 'Leaves ends opponent cannot play on.',
+              evidence: `${pn(opp)} void in {${dead.join(',')}}. Ends → ${newLeft}/${newRight}.`
+            });
+          }
+        }
+
+        const pStr = knowledge.inferStrength(2);
+        if (pStr[newLeft] >= 2 || pStr[newRight] >= 2) {
+          const suit = pStr[newLeft] >= 2 ? newLeft : newRight;
+          motifs.push({
+            name: 'FEED', icon: '\u2764',
+            definition: 'Opens an end in partner\'s strong suit.',
+            evidence: `Partner played ${pStr[suit]}x tiles with ${suit}.`
+          });
+        }
+
+        if (best.tile.left === best.tile.right) {
+          motifs.push({
+            name: 'CLEAR DOUBLE', icon: '\u2B1C',
+            definition: 'Play a double while opportunity exists.',
+            evidence: `[${best.tile.left}|${best.tile.right}] only connects to ${best.tile.left}s.`
+          });
+        }
+
+        if (metrics && metrics.info && metrics.info.infoGain > 0.4) {
+          motifs.push({
+            name: 'PROBE', icon: '\u2753',
+            definition: 'Maximizes information about opponent hands.',
+            evidence: `Next player ${(metrics.info.passProb_nextPlayer * 100).toFixed(0)}% to pass.`
+          });
+        }
+
+        if (metrics && metrics.tempo && metrics.tempo.controlRetention > 0.6) {
+          motifs.push({
+            name: 'TEMPO', icon: '\u26A1',
+            definition: 'Maintains initiative — opponents struggle to play.',
+            evidence: `Control retention: ${(metrics.tempo.controlRetention * 100).toFixed(0)}%.`
+          });
+        }
+
+        if (metrics && metrics.partner && metrics.partner.partnerRescueValue > 0) {
+          motifs.push({
+            name: 'RESCUE', icon: '\uD83D\uDEDF',
+            definition: 'Unlocks a locked partner by changing board ends.',
+            evidence: `Partner was blocked — this move opens new numbers for them.`
+          });
+        }
+
+        if (metrics && metrics.flexibility && metrics.flexibility.flexibility > 0.55) {
+          motifs.push({
+            name: 'FLEXIBLE', icon: '\uD83E\uDDF6',
+            definition: 'Preserves hand versatility for future turns.',
+            evidence: `Leave flexibility: ${(metrics.flexibility.flexibility * 100).toFixed(0)}%.`
+          });
+        }
+
+        return motifs;
+      }
+
+      _buildCounterfactuals(best, allMoves, snap) {
+        const top3 = allMoves.slice(0, 3);
+        return top3.map((m, i) => {
+          if (i === 0) return { move: m, comparison: 'BEST', delta: 0, reason: '' };
+          const delta = best.expectedPoints - m.expectedPoints;
+          const bE = applyMove(snap, best.tile, best.side);
+          const mE = applyMove(snap, m.tile, m.side);
+
+          let reason = '';
+          if (delta > 0.3) {
+            reason = `Loses ${delta.toFixed(2)} E[pts]: `;
+            if (m.winRate < best.winRate - 0.05) {
+              reason += `win% drops ${(best.winRate*100).toFixed(0)}%→${(m.winRate*100).toFixed(0)}%`;
+            } else {
+              reason += `worse ends (${mE.newLeft}/${mE.newRight} vs ${bE.newLeft}/${bE.newRight})`;
+            }
+          } else {
+            reason = `Close (${delta.toFixed(2)} E[pts] worse). Viable in some deals.`;
+          }
+          return { move: m, comparison: `#${i+1}`, delta, reason };
+        });
+      }
+    }
+
+    const explanationBuilder = new ExplanationBuilder();
+
+    function explainUncertainty(results) {
+      if (!results || results.length < 2) return null;
+      const best = results[0], second = results[1];
+      const gap = best.expectedPoints - second.expectedPoints;
+      const ciOverlap = gap < (best.ci95 + second.ci95);
+      if (!ciOverlap) return null;
+      return {
+        message: `Close call: [${best.tile.left}|${best.tile.right}] and [${second.tile.left}|${second.tile.right}] within CIs (gap: ${gap.toFixed(2)}).`,
+        recommendation: best.variance < second.variance
+          ? `[${best.tile.left}|${best.tile.right}] is also lower variance — safer.`
+          : `[${second.tile.left}|${second.tile.right}] has lower variance if you prefer safety.`
+      };
+    }
+
+    // ========== GAME EXPORTER ==========
+
+    class GameExporter {
+      export(game, analysis, nb) {
+        const lines = [];
+
+        lines.push(JSON.stringify({
+          type: 'header', version: '2.0',
+          timestamp: new Date().toISOString(),
+          matchScore: [...matchScore],
+          dobrada: scoreMultiplier,
+          engineConfig: { mcSims: MC_SIMS_QUIZ, seed: currentSeed || null }
+        }));
+
+        lines.push(JSON.stringify({
+          type: 'deal',
+          hands: game.originalHands ? game.originalHands.map(h => h.map(t => ({left:t.left, right:t.right, id:t.id}))) : null,
+          autoPlayedBy: game.autoPlayedBy,
+          autoTile: game.autoTile ? {left:game.autoTile.left, right:game.autoTile.right} : null
+        }));
+
+        const snapshots = game.snapshots || [];
+        for (let i = 0; i < snapshots.length; i++) {
+          const s = snapshots[i];
+          if (s.action !== 'play' || s.player < 0) continue;
+          const evalData = analysis ? analysis.find(a => a.stepIdx === i || a.move === s.move) : null;
+          lines.push(JSON.stringify({
+            type: 'decision', move: s.move, player: s.player,
+            tile: { left: s.tile.left, right: s.tile.right },
+            side: s.side,
+            boardEnds: [s.leftEnd, s.rightEnd],
+            handSize: s.hands[s.player].length,
+            allOptions: (s.allOptions || []).map(o => ({
+              tile: { left: o.tile.left, right: o.tile.right },
+              side: o.side, heuristicScore: o.score
+            })),
+            evaluation: evalData ? {
+              expectedPoints: evalData.playedEP, bestEP: evalData.bestEP,
+              eqLoss: evalData.eqLoss, grade: evalData.grade
+            } : null
+          }));
+        }
+
+        // Outcome from last snapshot
+        const last = snapshots[snapshots.length - 1];
+        if (last) {
+          lines.push(JSON.stringify({
+            type: 'outcome',
+            winner: last.winner ?? null,
+            winnerTeam: last.winnerTeam ?? null,
+            points: last.points ?? null,
+            resultType: last.resultType ?? null,
+            totalMoves: snapshots.filter(s => s.action === 'play').length
+          }));
+        }
+
+        return lines.join('\n');
+      }
+    }
+
+    function exportGame() {
+      if (!currentGame) return;
+      const exporter = new GameExporter();
+      const analysis = currentGame._analysisCache || null;
+      const jsonl = exporter.export(currentGame, analysis, notebook);
+      const blob = new Blob([jsonl], { type: 'application/jsonl' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `domino-game-${Date.now()}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function importGame(jsonlText) {
+      try {
+        const lines = jsonlText.trim().split('\n').map(JSON.parse);
+        const header = lines.find(l => l.type === 'header');
+        const deal = lines.find(l => l.type === 'deal');
+        const decisions = lines.filter(l => l.type === 'decision');
+        const outcome = lines.find(l => l.type === 'outcome');
+        if (!deal || !deal.hands) { alert('Invalid JSONL: missing deal data'); return; }
+
+        // Reconstruct by replaying the game from the deal
+        if (header && header.matchScore) matchScore = header.matchScore;
+        if (header && header.dobrada) scoreMultiplier = header.dobrada;
+
+        // Rebuild deck from deal hands
+        const allHands = deal.hands.map(h => h.map(t => {
+          const found = ALL_TILES.find(at => at.left === t.left && at.right === t.right);
+          return found || t;
+        }));
+
+        // Create game by replaying
+        const result = simulateFullRound(allHands, deal.autoPlayedBy, deal.autoTile ?
+          ALL_TILES.find(t => t.left === deal.autoTile.left && t.right === deal.autoTile.right) : null);
+
+        currentGame = result;
+        currentStep = 0;
+        quizWaiting = false;
+        quizResult = null;
+        gameMode = 'watch';
+        render();
+        alert(`Imported game: ${decisions.length} decisions, outcome: ${outcome ? outcome.resultType : 'unknown'}`);
+      } catch (e) {
+        alert('Import error: ' + e.message);
+      }
+    }
+
+    // ========== SELF-PLAY BENCHMARK ==========
+
+    function selfPlayBatch(numGames = 100, progressCb) {
+      const results = [];
+      let wins = [0, 0], totalPts = [0, 0], blocked = 0;
+      let idx = 0;
+
+      function runNext() {
+        if (idx >= numGames) {
+          const summary = {
+            games: numGames,
+            team0Wins: wins[0], team1Wins: wins[1],
+            team0WinPct: (wins[0] / numGames * 100).toFixed(1),
+            avgPts: [(totalPts[0] / numGames).toFixed(2), (totalPts[1] / numGames).toFixed(2)],
+            blockedPct: (blocked / numGames * 100).toFixed(1),
+            results
+          };
+          if (progressCb) progressCb(summary, true);
+          return summary;
+        }
+
+        newSeed();
+        const deck = shuffleDeck(ALL_TILES);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+        // Find highest double for opener
+        let opener = -1, openerTile = null;
+        for (let d = 6; d >= 0; d--) {
+          const dt = ALL_TILES.find(t => t.left === d && t.right === d);
+          for (let p = 0; p < 4; p++) {
+            if (hands[p].find(t => t.id === dt.id)) { opener = p; openerTile = dt; break; }
+          }
+          if (opener >= 0) break;
+        }
+
+        const game = simulateFullRound(hands, opener, openerTile);
+        const snaps = game.snapshots;
+        const lastSnap = snaps[snaps.length - 1];
+        const wTeam = lastSnap.winnerTeam ?? -1;
+        const pts = lastSnap.points ?? 0;
+        const rType = lastSnap.resultType ?? 'normal';
+
+        if (wTeam >= 0) { wins[wTeam]++; totalPts[wTeam] += pts; }
+        if (rType === 'blocked' || rType === 'tie') blocked++;
+
+        results.push({ game: idx, winnerTeam: wTeam, points: pts, type: rType });
+        idx++;
+        if (progressCb && idx % 10 === 0) progressCb({ done: idx, total: numGames }, false);
+        setTimeout(runNext, 0);
+      }
+
+      setTimeout(runNext, 0);
+    }
+
+    // ========== ELO TRACKING ==========
+
+    let eloRatings = JSON.parse(localStorage.getItem('domino_elo') || 'null') || { player: 1500, engine: 1500, history: [] };
+
+    function updateElo(playerWon, kFactor = 32) {
+      const pR = eloRatings.player, eR = eloRatings.engine;
+      const expectedP = 1 / (1 + Math.pow(10, (eR - pR) / 400));
+      const expectedE = 1 - expectedP;
+      const scoreP = playerWon ? 1 : 0;
+      const scoreE = playerWon ? 0 : 1;
+      eloRatings.player = Math.round(pR + kFactor * (scoreP - expectedP));
+      eloRatings.engine = Math.round(eR + kFactor * (scoreE - expectedE));
+      eloRatings.history.push({ date: Date.now(), player: eloRatings.player, engine: eloRatings.engine, result: playerWon ? 'win' : 'loss' });
+      if (eloRatings.history.length > 200) eloRatings.history.shift();
+      localStorage.setItem('domino_elo', JSON.stringify(eloRatings));
+    }
+
+    // ========== WEBWORKER FOR MC ==========
+
+    let evalWorker = null;
+    let workerPending = null;
+
+    function createEvalWorker() {
+      // Gather all functions needed for evaluation into the worker
+      const workerFns = [
+        SplitMix64.toString(),
+        canPlay.toString(),
+        couldPlayBothEnds.toString(),
+        `const ALL_TILES = ${JSON.stringify(ALL_TILES)};`
+      ].join('\n');
+
+      const workerCode = `
+        ${workerFns}
+
+        self.onmessage = function(e) {
+          const { taskId, type } = e.data;
+          if (type === 'ping') {
+            self.postMessage({ taskId, type: 'pong' });
+          }
+        };
+      `;
+
+      try {
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        evalWorker = new Worker(URL.createObjectURL(blob));
+        evalWorker.onmessage = function(e) {
+          if (workerPending && e.data.taskId === workerPending.taskId) {
+            workerPending.resolve(e.data.results);
+            workerPending = null;
+          }
+        };
+        evalWorker.onerror = function(err) {
+          console.warn('WebWorker error:', err.message);
+          if (workerPending) { workerPending.reject(err); workerPending = null; }
+        };
+      } catch (e) {
+        console.warn('WebWorker not available:', e.message);
+        evalWorker = null;
+      }
+    }
+
+    // Initialize worker on load (best effort)
+    try { createEvalWorker(); } catch(e) {}
+
     function shuffleDeck(deck) {
       const s = [...deck];
       const rng = getRng();
@@ -2051,6 +2628,8 @@
                 <button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>
               </div>
               <button class="btn btn-yellow text-sm" onclick="newGame()">${scoreMultiplier > 1 ? `New Game (x${scoreMultiplier})` : 'New Game'}</button>
+              <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export game as JSONL">Export</button>
+              <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL game">Import<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
             </div>
           </div>
 
@@ -2430,6 +3009,21 @@
           <div class="text-xs text-blue-300">Best: [${r.mcResults[0].tile.left}|${r.mcResults[0].tile.right}] E[pts]: ${fmtEP(r.mcResults[0].expectedPoints)} | Win: ${(r.mcResults[0].winRate*100).toFixed(0)}%</div>
           ${r.mcResults[0].tile.id !== r.aiTile.id ? '<div class="text-xs text-yellow-400">MC disagrees with heuristic — simulation sees deeper!</div>' : '<div class="text-xs text-emerald-400">MC confirms the heuristic choice</div>'}
         </div>` : ''}
+
+        ${(() => {
+          // Motif tags for the best move
+          try {
+            const snap = currentGame && currentStep > 0 ? currentGame.snapshots[currentStep - 1] : null;
+            if (!snap || !r.mcResults || r.mcResults.length === 0) return '';
+            const bestMC = r.mcResults[0];
+            const metrics = computeAllMetrics(snap, 0, bestMC.tile, bestMC.side);
+            const explanation = explanationBuilder.explain(bestMC, r.mcResults, snap, metrics);
+            if (explanation.motifs.length === 0) return '';
+            return `<div class="flex flex-wrap gap-1 mt-1.5">
+              ${explanation.motifs.map(m => `<span class="text-xs px-1.5 py-0.5 rounded-full bg-slate-800 border border-slate-600 text-slate-300" title="${m.evidence}">${m.icon || ''} ${m.name}</span>`).join('')}
+            </div>`;
+          } catch(e) { return ''; }
+        })()}
 
         ${r.missedDeductions && r.missedDeductions.length > 0 ? `
         <div class="border-t border-orange-800 pt-1.5 mt-1.5">
@@ -2932,6 +3526,48 @@
           }).join('')}
         </div>
         <div class="text-xs text-slate-600 mt-1">E[pts] from ${mcResults[0]?.sims || 80} sims/tile | Block: ${(best.blockRate*100).toFixed(0)}%</div>
+
+        ${(() => {
+          // Uncertainty notice when top 2 are close
+          const unc = explainUncertainty(mcResults);
+          if (!unc) return '';
+          return `<div class="bg-yellow-900/30 rounded p-1.5 mt-1.5 border border-yellow-800">
+            <div class="text-xs text-yellow-300">${unc.message}</div>
+            <div class="text-xs text-yellow-500">${unc.recommendation}</div>
+          </div>`;
+        })()}
+
+        ${(() => {
+          // Compute metrics for best move
+          try {
+            const metrics = computeAllMetrics(snap, snap.currentPlayer, best.tile, best.side);
+            const explanation = explanationBuilder.explain(best, mcResults, snap, metrics);
+            const motifs = explanation.motifs;
+            if (motifs.length === 0 && !metrics.control) return '';
+
+            return `<div class="border-t border-slate-700 pt-1.5 mt-1.5">
+              ${motifs.length > 0 ? `
+              <div class="flex flex-wrap gap-1 mb-1.5">
+                ${motifs.map(m => `<span class="text-xs px-1.5 py-0.5 rounded-full bg-slate-800 border border-slate-600 text-slate-300" title="${m.evidence}">${m.icon || ''} ${m.name}</span>`).join('')}
+              </div>` : ''}
+              <div class="grid grid-cols-3 gap-1 text-xs">
+                <div class="bg-slate-800 rounded p-1 text-center">
+                  <div class="text-slate-500">Flex</div>
+                  <div class="font-mono font-bold" style="color:${metrics.flexibility.flexibility > 0.5 ? '#22c55e' : metrics.flexibility.flexibility > 0.3 ? '#eab308' : '#ef4444'}">${(metrics.flexibility.flexibility * 100).toFixed(0)}%</div>
+                </div>
+                <div class="bg-slate-800 rounded p-1 text-center">
+                  <div class="text-slate-500">Control</div>
+                  <div class="font-mono font-bold text-blue-400">${metrics.control.myEndTiles}</div>
+                </div>
+                <div class="bg-slate-800 rounded p-1 text-center">
+                  <div class="text-slate-500">Squeeze</div>
+                  <div class="font-mono font-bold" style="color:${metrics.control.squeezeValue === 'high' ? '#ef4444' : metrics.control.squeezeValue === 'medium' ? '#eab308' : '#64748b'}">${metrics.control.expectedForcedPasses.toFixed(1)}</div>
+                </div>
+              </div>
+              <div class="text-xs text-slate-600 mt-1">${explanation.tldr}</div>
+            </div>`;
+          } catch(e) { return ''; }
+        })()}
       </div>`;
     }
 
@@ -3479,6 +4115,22 @@
             </div>
           </div>
 
+          <!-- Elo Rating -->
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Elo Rating</div>
+            <div class="flex justify-center gap-6 text-center">
+              <div>
+                <div class="text-lg font-bold font-mono text-blue-400">${eloRatings.player}</div>
+                <div class="text-xs text-slate-500">You</div>
+              </div>
+              <div>
+                <div class="text-lg font-bold font-mono text-red-400">${eloRatings.engine}</div>
+                <div class="text-xs text-slate-500">Engine</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-600 text-center mt-1">${eloRatings.history.length} rated games</div>
+          </div>
+
           <div class="text-center">
             <button class="btn btn-red text-xs" onclick="resetStats()">Reset Stats</button>
           </div>
@@ -3640,6 +4292,10 @@
         lastWinTeam = winTeam;
         // Check for match win — reset if match over
         if (matchScore[0] >= MATCH_TARGET || matchScore[1] >= MATCH_TARGET) {
+          // Update Elo on match completion (quiz mode only)
+          if (gameMode === 'quiz') {
+            updateElo(matchScore[0] >= MATCH_TARGET); // true if player's team won
+          }
           matchScore = [0, 0];
           scoreMultiplier = 1;
           lastWinTeam = null; // new match starts fresh
