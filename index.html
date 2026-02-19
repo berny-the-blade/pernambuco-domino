@@ -10,11 +10,300 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
-  <meta name="theme-color" content="#166534">
+  <meta name="theme-color" content="#0f3d1e">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; }
+    body { font-family: 'Poppins', system-ui, -apple-system, sans-serif; overflow-x: hidden; }
+
+    /* === Felt table texture === */
+    .felt-bg {
+      background: radial-gradient(ellipse at center, #1a5c2e 0%, #0f3d1e 60%, #0a2a14 100%);
+      position: relative;
+    }
+    .felt-bg::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg width='6' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+      opacity: 0.4;
+      pointer-events: none;
+      border-radius: inherit;
+    }
+
+    /* === Domino tile base === */
+    .domino-tile {
+      background: linear-gradient(145deg, #faf5e8, #ede6d3);
+      border: 2px solid #b8a88a;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25), inset 0 1px 2px rgba(255,255,255,0.6);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      cursor: default;
+      position: relative;
+    }
+    .domino-tile.playable {
+      border-color: #22c55e;
+      box-shadow: 0 0 12px rgba(34,197,94,0.5), 0 2px 6px rgba(0,0,0,0.25), inset 0 1px 2px rgba(255,255,255,0.6);
+      cursor: pointer;
+    }
+    .domino-tile.playable:hover {
+      transform: translateY(-6px) scale(1.05);
+      box-shadow: 0 0 20px rgba(34,197,94,0.7), 0 8px 16px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.6);
+    }
+    .domino-tile.playable:active {
+      transform: translateY(-2px) scale(1.02);
+    }
+    .domino-tile.unplayable {
+      opacity: 0.5;
+      filter: saturate(0.5);
+    }
+
+    /* === Domino dot (pip) === */
+    .domino-dot {
+      background: radial-gradient(circle, #1a1a1a 60%, #333 100%);
+      border-radius: 50%;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.5), 0 0.5px 0 rgba(255,255,255,0.3);
+    }
+
+    /* === Board tile === */
+    .board-tile {
+      background: linear-gradient(145deg, #f5f0e1, #e8e0cc);
+      border: 1.5px solid #a89878;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 0.5px 1px rgba(255,255,255,0.5);
+    }
+
+    /* === Face-down tiles (opponents) === */
+    .tile-back {
+      background: linear-gradient(145deg, #1a3a6e, #0f2548);
+      border: 1.5px solid #2a5090;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    .tile-back::after {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 2px;
+      background: repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(255,255,255,0.03) 2px, rgba(255,255,255,0.03) 4px);
+    }
+    .tile-back.partner {
+      background: linear-gradient(145deg, #1a5c3e, #0f3d28);
+      border-color: #2a7050;
+    }
+    .tile-back.partner::after {
+      border-color: rgba(255,255,255,0.08);
+    }
+
+    /* === Player panel === */
+    .player-panel {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      backdrop-filter: blur(4px);
+      transition: all 0.3s ease;
+    }
+    .player-panel.active-turn {
+      background: rgba(34,197,94,0.2);
+      border-color: rgba(34,197,94,0.5);
+      box-shadow: 0 0 20px rgba(34,197,94,0.15);
+    }
+
+    /* === My hand panel === */
+    .my-hand {
+      background: rgba(0,0,0,0.25);
+      border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      backdrop-filter: blur(4px);
+      transition: all 0.3s ease;
+    }
+    .my-hand.my-turn {
+      border-color: rgba(250,204,21,0.6);
+      box-shadow: 0 0 30px rgba(250,204,21,0.15), inset 0 0 20px rgba(250,204,21,0.05);
+    }
+
+    /* === Animations === */
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 8px rgba(250,204,21,0.3); }
+      50% { box-shadow: 0 0 20px rgba(250,204,21,0.6); }
+    }
+    @keyframes slide-down {
+      from { transform: translateY(-20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes bounce-in {
+      0% { transform: scale(0.5); opacity: 0; }
+      60% { transform: scale(1.05); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    @keyframes celebrate {
+      0% { transform: scale(1); }
+      25% { transform: scale(1.1) rotate(-2deg); }
+      50% { transform: scale(1.15) rotate(2deg); }
+      75% { transform: scale(1.1) rotate(-1deg); }
+      100% { transform: scale(1); }
+    }
+    @keyframes float-up {
+      0% { transform: translateY(0) scale(1); opacity: 1; }
+      100% { transform: translateY(-40px) scale(1.3); opacity: 0; }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+    .animate-slide-down { animation: slide-down 0.3s ease-out; }
+    .animate-fade-in { animation: fade-in 0.4s ease-out; }
+    .animate-bounce-in { animation: bounce-in 0.4s ease-out; }
+    .animate-celebrate { animation: celebrate 0.6s ease-out; }
+    .turn-pulse { animation: pulse-glow 2s ease-in-out infinite; }
+
+    /* === Score bar === */
+    .score-bar {
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+    }
+    .score-pip {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      border: 2px solid;
+      transition: all 0.3s ease;
+    }
+    .score-pip.filled {
+      transform: scale(1.1);
+    }
+
+    /* === Board area === */
+    .board-area {
+      background: radial-gradient(ellipse at center, #0d2e15 0%, #091f0e 100%);
+      border: 3px solid #1a4a2a;
+      border-radius: 16px;
+      box-shadow: inset 0 4px 20px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    /* === Buttons === */
+    .btn-primary {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: white;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(22,163,74,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(22,163,74,0.4); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+
+    .btn-secondary {
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: white;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      padding: 14px 24px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(37,99,235,0.3);
+    }
+    .btn-secondary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(37,99,235,0.4); }
+    .btn-secondary:active { transform: translateY(0); }
+
+    .btn-pass {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      color: white;
+      font-weight: 700;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 20px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 3px 8px rgba(234,88,12,0.3);
+    }
+    .btn-pass:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(234,88,12,0.4); }
+
+    /* === Glass card === */
+    .glass-card {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(12px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    /* === Message toast === */
+    .msg-toast {
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      color: white;
+      animation: slide-down 0.3s ease-out;
+    }
+
+    /* === Side choice buttons === */
+    .side-btn {
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.2s ease;
+      color: white;
+    }
+    .side-btn:hover { transform: translateY(-2px); }
+    .side-btn.left { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+    .side-btn.right { background: linear-gradient(135deg, #22c55e, #15803d); }
+
+    /* === Confetti === */
+    .confetti-piece {
+      position: fixed;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      animation: confetti-fall linear forwards;
+      pointer-events: none;
+      z-index: 100;
+    }
+    @keyframes confetti-fall {
+      0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+    }
+
+    /* === Input === */
+    .input-field {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid #d1d5db;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-family: inherit;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      outline: none;
+    }
+    .input-field:focus {
+      border-color: #22c55e;
+      box-shadow: 0 0 0 3px rgba(34,197,94,0.15);
+    }
+
+    /* === Scrollbar === */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -662,30 +951,34 @@
 
       // Domino dots pattern
       const DominoDots = ({ value, size = 'normal' }) => {
-        const dotSize = size === 'small' ? 'w-1 h-1' : 'w-1.5 h-1.5';
-        const containerSize = size === 'small' ? 'w-5 h-5' : 'w-8 h-8';
-        
+        const dotPx = size === 'small' ? 4 : size === 'board' ? 5 : 7;
+        const containerPx = size === 'small' ? 18 : size === 'board' ? 22 : 32;
+
         const patterns = {
           0: [],
           1: [[1,1]],
-          2: [[0,0],[2,2]],
-          3: [[0,0],[1,1],[2,2]],
+          2: [[0,2],[2,0]],
+          3: [[0,2],[1,1],[2,0]],
           4: [[0,0],[0,2],[2,0],[2,2]],
           5: [[0,0],[0,2],[1,1],[2,0],[2,2]],
           6: [[0,0],[0,2],[1,0],[1,2],[2,0],[2,2]]
         };
-        
+
         const dots = patterns[value] || [];
-        
+        const pad = size === 'small' ? '12%' : '10%';
+
         return (
-          <div className={containerSize + ' relative'}>
+          <div style={{ width: containerPx, height: containerPx, position: 'relative' }}>
             {dots.map((pos, idx) => (
-              <div 
+              <div
                 key={idx}
-                className={dotSize + ' bg-gray-800 rounded-full absolute'}
+                className="domino-dot"
                 style={{
-                  top: pos[0] === 0 ? '10%' : pos[0] === 1 ? '42%' : '74%',
-                  left: pos[1] === 0 ? '10%' : pos[1] === 1 ? '42%' : '74%'
+                  width: dotPx, height: dotPx,
+                  position: 'absolute',
+                  top: pos[0] === 0 ? pad : pos[0] === 1 ? '50%' : `calc(100% - ${pad})`,
+                  left: pos[1] === 0 ? pad : pos[1] === 1 ? '50%' : `calc(100% - ${pad})`,
+                  transform: 'translate(-50%, -50%)'
                 }}
               />
             ))}
@@ -694,11 +987,15 @@
       };
 
       const DominoTile = ({ tile, playable, onClick }) => (
-        <div onClick={onClick} className={'inline-flex flex-col border-2 rounded-lg bg-amber-50 cursor-pointer w-11 h-22 shadow ' + (playable ? 'border-green-500 shadow-lg ring-2 ring-green-400' : 'border-gray-600 opacity-70')}>
-          <div className="flex-1 flex items-center justify-center border-b border-gray-400 p-0.5">
+        <div
+          onClick={onClick}
+          className={'domino-tile inline-flex flex-col ' + (playable ? 'playable' : 'unplayable')}
+          style={{ width: 48, height: 88 }}
+        >
+          <div className="flex-1 flex items-center justify-center" style={{ borderBottom: '1.5px solid #c8b898' }}>
             <DominoDots value={tile.left} />
           </div>
-          <div className="flex-1 flex items-center justify-center p-0.5">
+          <div className="flex-1 flex items-center justify-center">
             <DominoDots value={tile.right} />
           </div>
         </div>
@@ -708,14 +1005,20 @@
         const isVertical = orientation === 'vertical';
         const val1 = (flipped && !isVertical) ? tile.right : tile.left;
         const val2 = (flipped && !isVertical) ? tile.left : tile.right;
+        const dividerStyle = isVertical
+          ? { borderBottom: '1px solid #b8a888', width: '100%' }
+          : { borderRight: '1px solid #b8a888', height: '100%' };
         return (
           <div
-            className={'inline-flex border rounded shadow-sm border-gray-600 bg-amber-50 ' + (isVertical ? 'flex-col' : 'flex-row')}
-            style={isVertical ? { width: 22, height: 44 } : { width: 44, height: 22 }}
+            className="board-tile inline-flex"
+            style={isVertical
+              ? { width: 26, height: 52, flexDirection: 'column' }
+              : { width: 52, height: 26, flexDirection: 'row' }}
           >
-            <div className={'flex-1 flex items-center justify-center ' + (isVertical ? 'border-b' : 'border-r') + ' border-gray-400'}>
+            <div className="flex-1 flex items-center justify-center">
               <DominoDots value={val1} size="small" />
             </div>
+            <div style={dividerStyle}></div>
             <div className="flex-1 flex items-center justify-center">
               <DominoDots value={val2} size="small" />
             </div>
@@ -723,37 +1026,63 @@
         );
       };
 
+      // Confetti helper
+      const launchConfetti = () => {
+        const colors = ['#f59e0b','#ef4444','#22c55e','#3b82f6','#a855f7','#ec4899'];
+        for (let i = 0; i < 60; i++) {
+          const el = document.createElement('div');
+          el.className = 'confetti-piece';
+          el.style.left = Math.random() * 100 + 'vw';
+          el.style.background = colors[Math.floor(Math.random() * colors.length)];
+          el.style.animationDuration = (2 + Math.random() * 2) + 's';
+          el.style.animationDelay = Math.random() * 0.5 + 's';
+          el.style.width = (6 + Math.random() * 8) + 'px';
+          el.style.height = (6 + Math.random() * 8) + 'px';
+          document.body.appendChild(el);
+          setTimeout(() => el.remove(), 4500);
+        }
+      };
+
       // Menu Screen
       if (screen === 'menu') {
         return (
-          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-4 flex items-center justify-center">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm">
-              <h1 className="text-2xl font-bold text-green-800 text-center mb-2">Domino Pernambucano</h1>
-              <p className="text-center text-gray-600 mb-6">2v2 - Escolha o modo</p>
+          <div className="min-h-screen felt-bg p-4 flex items-center justify-center">
+            <div className="glass-card p-8 w-full max-w-sm animate-fade-in">
+              {/* Logo/title area */}
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3" style={{ background: 'linear-gradient(135deg, #166534, #15803d)' }}>
+                  <span className="text-3xl">🁣</span>
+                </div>
+                <h1 className="text-2xl font-extrabold text-gray-800">Domino Pernambucano</h1>
+                <p className="text-gray-500 text-sm mt-1">Jogo de domino 2v2</p>
+              </div>
 
               <input
                 type="text"
                 placeholder="Seu nome"
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
-                className="w-full p-3 border-2 border-gray-300 rounded-lg mb-4 text-lg"
+                className="input-field mb-4"
                 maxLength={15}
               />
 
-              <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Jogadores humanos:</label>
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-gray-600 mb-2">Jogadores humanos</label>
                 <div className="flex gap-2">
                   {[1, 2, 3, 4].map(n => (
                     <button
                       key={n}
                       onClick={() => setHumanCount(n)}
-                      className={'flex-1 py-2 rounded-lg font-bold text-sm border-2 ' + (humanCount === n ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-300')}
+                      className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-200"
+                      style={humanCount === n
+                        ? { background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: 'white', boxShadow: '0 4px 12px rgba(22,163,74,0.3)' }
+                        : { background: '#f3f4f6', color: '#4b5563' }}
                     >
                       {n}
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-gray-500 mt-1 text-center">
+                <p className="text-xs text-gray-400 mt-2 text-center">
                   {humanCount === 1 && '1 humano + 3 bots (solo)'}
                   {humanCount === 2 && '2 humanos (parceiros) + 2 bots'}
                   {humanCount === 3 && '3 humanos + 1 bot'}
@@ -761,26 +1090,34 @@
                 </p>
               </div>
 
-              <button onClick={createRoom} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold text-lg mb-3">
+              <button onClick={createRoom} className="btn-primary w-full mb-3 text-lg">
                 Criar Sala
               </button>
 
-              <div className="text-center text-gray-500 my-3">ou</div>
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-gray-200"></div>
+                <span className="text-gray-400 text-sm font-semibold">OU</span>
+                <div className="flex-1 h-px bg-gray-200"></div>
+              </div>
 
               <input
                 type="text"
                 placeholder="Codigo da sala"
                 value={inputCode}
                 onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                className="w-full p-3 border-2 border-gray-300 rounded-lg mb-3 text-lg text-center tracking-widest"
+                className="input-field mb-3 text-center tracking-widest font-bold"
                 maxLength={5}
               />
 
-              <button onClick={joinRoom} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-lg">
+              <button onClick={joinRoom} className="btn-secondary w-full text-lg">
                 Entrar na Sala
               </button>
 
-              {error && <p className="text-red-500 text-center mt-3">{error}</p>}
+              {error && (
+                <div className="mt-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-center text-sm font-semibold animate-slide-down">
+                  {error}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -793,41 +1130,49 @@
         const allHumansJoined = cfg.humanSlots.every(s => players[s] !== null && players[s] !== undefined);
         const slotLabels = { 0: 'Jogador 1', 1: 'Jogador 2', 2: 'Jogador 3', 3: 'Jogador 4' };
         const teamSlots = { 0: [0, 2], 1: [1, 3] };
+        const teamColors = { 0: { bg: '#dbeafe', border: '#93c5fd', text: '#1e40af', label: '#3b82f6' }, 1: { bg: '#fde8e8', border: '#fca5a5', text: '#991b1b', label: '#ef4444' } };
 
         return (
-          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-4">
-            <div className="max-w-sm mx-auto">
-              <div className="bg-white rounded-lg shadow-xl p-6 mb-4">
-                <h2 className="text-xl font-bold text-center text-gray-800 mb-2">Sala</h2>
-                <div className="text-4xl font-bold text-center text-green-600 tracking-widest mb-4">{roomCode}</div>
+          <div className="min-h-screen felt-bg p-4 flex items-start justify-center pt-8">
+            <div className="max-w-sm w-full animate-fade-in">
+              {/* Room code card */}
+              <div className="glass-card p-6 mb-4 text-center">
+                <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Codigo da Sala</p>
+                <div className="text-4xl font-extrabold tracking-[0.3em] mb-2" style={{ color: '#16a34a' }}>{roomCode}</div>
                 {cfg.humanCount > 1 && (
-                  <p className="text-center text-gray-600 text-sm">Envie este codigo para os outros jogadores!</p>
+                  <p className="text-gray-500 text-sm">Envie este codigo para os outros jogadores!</p>
                 )}
-                <p className="text-center text-gray-500 text-xs mt-1">{cfg.humanCount} humano(s) + {4 - cfg.humanCount} bot(s)</p>
+                <div className="mt-2 inline-block px-3 py-1 rounded-full text-xs font-bold" style={{ background: '#f0fdf4', color: '#166534' }}>
+                  {cfg.humanCount} humano(s) + {4 - cfg.humanCount} bot(s)
+                </div>
               </div>
 
-              <div className="bg-white rounded-lg shadow-xl p-4 mb-4">
+              {/* Teams card */}
+              <div className="glass-card p-5 mb-4">
                 {[0, 1].map(team => (
-                  <div key={team} className={team === 1 ? 'mt-4' : ''}>
-                    <h3 className="font-bold text-gray-800 mb-3">Time {team + 1}</h3>
+                  <div key={team} className={team === 1 ? 'mt-5 pt-5 border-t border-gray-200' : ''}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-3 h-3 rounded-full" style={{ background: teamColors[team].label }}></div>
+                      <h3 className="font-bold text-gray-800">Time {team + 1}</h3>
+                    </div>
                     <div className="space-y-2">
                       {teamSlots[team].map(slot => {
                         const player = players[slot];
                         const isHumanSlot = cfg.humanSlots.includes(slot);
-                        const bgColor = isHumanSlot ? 'bg-blue-100' : 'bg-red-100';
-                        const textColor = isHumanSlot ? 'text-blue-800' : 'text-red-800';
+                        const tc = teamColors[team];
                         return (
-                          <div key={slot} className={'p-3 rounded-lg ' + bgColor}>
-                            <div className="flex items-center justify-between">
-                              <span className={'font-semibold ' + textColor}>{slotLabels[slot]}</span>
-                              {player ? (
-                                <span className={(player.isHuman ? 'text-green-600' : 'text-red-600') + ' font-bold'}>
-                                  {player.name} {!player.isHuman && '🤖'}
-                                </span>
-                              ) : (
-                                <span className="text-gray-400">Aguardando...</span>
-                              )}
-                            </div>
+                          <div key={slot} className="flex items-center justify-between p-3 rounded-xl transition-all duration-300" style={{ background: tc.bg, border: '1px solid ' + tc.border }}>
+                            <span className="font-semibold text-sm" style={{ color: tc.text }}>{slotLabels[slot]}</span>
+                            {player ? (
+                              <span className="font-bold text-sm animate-bounce-in" style={{ color: player.isHuman ? '#16a34a' : tc.text }}>
+                                {player.name} {!player.isHuman && <span className="ml-1 opacity-70">BOT</span>}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-sm flex items-center gap-1">
+                                <span className="inline-block w-2 h-2 rounded-full bg-gray-300" style={{ animation: 'pulse-glow 1.5s infinite' }}></span>
+                                Aguardando...
+                              </span>
+                            )}
                           </div>
                         );
                       })}
@@ -840,17 +1185,24 @@
                 <button
                   onClick={startGame}
                   disabled={!allHumansJoined}
-                  className={'w-full py-3 rounded-lg font-bold text-lg ' + (!allHumansJoined ? 'bg-gray-400 text-gray-200' : 'bg-green-600 text-white')}
+                  className={'w-full text-lg ' + (allHumansJoined ? 'btn-primary' : '')}
+                  style={!allHumansJoined ? { background: '#9ca3af', color: '#e5e7eb', padding: '14px 24px', borderRadius: '12px', fontWeight: 700, fontSize: '1rem', cursor: 'default', border: 'none' } : {}}
                 >
                   {!allHumansJoined ? 'Aguardando jogadores...' : 'Comecar Jogo!'}
                 </button>
               )}
 
               {playerSlot !== 0 && (
-                <p className="text-center text-white">Aguardando o host iniciar o jogo...</p>
+                <div className="text-center p-4">
+                  <p className="text-green-200 font-semibold">Aguardando o host iniciar o jogo...</p>
+                </div>
               )}
 
-              {error && <p className="text-red-200 text-center mt-3">{error}</p>}
+              {error && (
+                <div className="mt-4 p-3 rounded-xl bg-red-500/20 border border-red-400/30 text-red-200 text-center text-sm font-semibold animate-slide-down">
+                  {error}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -864,28 +1216,78 @@
         const rightSlot = (playerSlot + 3) % 4;
         const isMyTurn = gameState.currentPlayer === playerSlot;
         const isBot = (slot) => gameState.players?.[slot] && !gameState.players[slot].isHuman;
+        const isPartner = (slot) => slot === topSlot;
+        const score0 = gameState.teamScores?.[0] || 0;
+        const score1 = gameState.teamScores?.[1] || 0;
+        const mt = gameState.matchTarget || 6;
+
+        // Trigger confetti on game end
+        if (gameState.gameEnded && !window._confettiFired) {
+          window._confettiFired = true;
+          setTimeout(launchConfetti, 200);
+        }
+        if (!gameState.gameEnded) window._confettiFired = false;
+
+        // Opponent tile back renderer
+        const TileBack = ({ count, vertical, partner }) => {
+          const cls = 'tile-back' + (partner ? ' partner' : '');
+          if (vertical) {
+            return (
+              <div className="flex flex-col gap-0.5 items-center">
+                {Array.from({ length: count }).map((_, i) => (
+                  <div key={i} className={cls} style={{ width: 10, height: 20 }}></div>
+                ))}
+              </div>
+            );
+          }
+          return (
+            <div className="flex gap-0.5 justify-center flex-wrap">
+              {Array.from({ length: count }).map((_, i) => (
+                <div key={i} className={cls} style={{ width: 16, height: 28 }}></div>
+              ))}
+            </div>
+          );
+        };
+
+        // Score pips renderer
+        const ScorePips = ({ score, total, color }) => (
+          <div className="flex gap-1.5 items-center">
+            {Array.from({ length: total }).map((_, i) => (
+              <div
+                key={i}
+                className={'score-pip' + (i < score ? ' filled' : '')}
+                style={{
+                  borderColor: color,
+                  background: i < score ? color : 'transparent',
+                  boxShadow: i < score ? '0 0 6px ' + color + '80' : 'none'
+                }}
+              />
+            ))}
+          </div>
+        );
 
         return (
-          <div className="min-h-screen bg-gradient-to-br from-green-800 to-green-600 p-2">
+          <div className="min-h-screen felt-bg p-2 animate-fade-in">
             <div className="max-w-2xl mx-auto">
-              {/* Scores - compact */}
-              <div className="bg-white rounded-lg shadow-lg p-2 mb-2">
-                <div className="flex justify-between items-center">
-                  <div className="text-center flex-1">
-                    <div className="font-bold text-blue-800 text-xs">Time 1</div>
-                    <div className="text-lg font-bold text-blue-700">{gameState.teamScores?.[0] || 0}/{gameState.matchTarget}</div>
-                  </div>
-                  <div className="text-gray-400 text-xs">vs</div>
-                  <div className="text-center flex-1">
-                    <div className="font-bold text-red-800 text-xs">Time 2</div>
-                    <div className="text-lg font-bold text-red-700">{gameState.teamScores?.[1] || 0}/{gameState.matchTarget}</div>
-                  </div>
+
+              {/* Score bar */}
+              <div className="score-bar p-3 mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="text-xs font-bold uppercase tracking-wider" style={{ color: '#93c5fd' }}>Time 1</div>
+                  <ScorePips score={score0} total={mt} color="#3b82f6" />
+                  <div className="text-lg font-extrabold" style={{ color: '#93c5fd' }}>{score0}</div>
+                </div>
+                <div className="text-xs font-bold text-gray-500 px-2">VS</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-lg font-extrabold" style={{ color: '#fca5a5' }}>{score1}</div>
+                  <ScorePips score={score1} total={mt} color="#ef4444" />
+                  <div className="text-xs font-bold uppercase tracking-wider" style={{ color: '#fca5a5' }}>Time 2</div>
                 </div>
               </div>
 
-              {/* Message */}
+              {/* Message toast */}
               {gameState.message && (
-                <div className="bg-blue-100 border-l-4 border-blue-500 p-2 mb-2 rounded text-blue-800 text-xs font-semibold">
+                <div className="msg-toast p-3 mb-2 text-center text-sm font-semibold animate-slide-down">
                   {gameState.message}
                 </div>
               )}
@@ -899,82 +1301,80 @@
                 if (!isHumanOnWinTeam) return null;
                 const partnerOnTeam = winSlots.find(s => s !== playerSlot);
                 return (
-                  <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 mb-2 shadow-lg text-center">
-                    <p className="font-bold mb-1 text-sm">Quem comeca a proxima rodada?</p>
-                    <p className="text-xs text-gray-500 mb-3">Veja suas pecas abaixo e escolha. Qualquer parceiro pode decidir.</p>
+                  <div className="glass-card p-5 mb-2 text-center animate-bounce-in">
+                    <p className="font-bold mb-1 text-gray-800">Quem comeca a proxima rodada?</p>
+                    <p className="text-xs text-gray-500 mb-3">Veja suas pecas abaixo e escolha.</p>
                     {starterCountdown !== null && (
-                      <p className={'text-xs font-bold mb-2 ' + (starterCountdown <= 10 ? 'text-red-600' : 'text-gray-600')}>
-                        Tempo: {starterCountdown}s
-                      </p>
+                      <div className="mb-3">
+                        <span className={'inline-block px-3 py-1 rounded-full text-xs font-bold ' + (starterCountdown <= 10 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600')}>
+                          {starterCountdown}s
+                        </span>
+                      </div>
                     )}
-                    <div className="flex gap-2 justify-center">
-                      <button onClick={() => startGameWithStarter(playerSlot)} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold">
-                        Eu comeco
-                      </button>
-                      <button onClick={() => startGameWithStarter(partnerOnTeam)} className="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold">
-                        {gameState.players[partnerOnTeam]?.name} comeca
-                      </button>
+                    <div className="flex gap-3 justify-center">
+                      <button onClick={() => startGameWithStarter(playerSlot)} className="side-btn right">Eu comeco</button>
+                      <button onClick={() => startGameWithStarter(partnerOnTeam)} className="side-btn left">{gameState.players[partnerOnTeam]?.name} comeca</button>
                     </div>
                   </div>
                 );
               })()}
 
-              {/* Choice modal */}
+              {/* Side choice modal */}
               {choosingTile && (
-                <div className="bg-white rounded-lg p-3 mb-2 shadow-lg text-center">
-                  <p className="font-bold mb-2 text-sm">Jogar {choosingTile.left}-{choosingTile.right} onde?</p>
-                  <div className="flex gap-2 justify-center">
-                    <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="bg-blue-500 text-white px-3 py-2 rounded-lg text-sm">Esq ({gameState.leftEnd})</button>
-                    <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="bg-green-500 text-white px-3 py-2 rounded-lg text-sm">Dir ({gameState.rightEnd})</button>
+                <div className="glass-card p-4 mb-2 text-center animate-bounce-in">
+                  <p className="font-bold mb-3 text-gray-800">Jogar {choosingTile.left}-{choosingTile.right} em qual lado?</p>
+                  <div className="flex gap-3 justify-center">
+                    <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="side-btn left">Esquerda ({gameState.leftEnd})</button>
+                    <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="side-btn right">Direita ({gameState.rightEnd})</button>
                   </div>
-                  <button onClick={() => setChoosingTile(null)} className="mt-2 text-gray-500 text-xs">Cancelar</button>
+                  <button onClick={() => setChoosingTile(null)} className="mt-3 text-gray-400 text-xs hover:text-gray-600 transition-colors">Cancelar</button>
                 </div>
               )}
 
-              {/* Game Table Layout */}
-              <div className="bg-green-700 rounded-xl shadow-lg p-2 mb-2 relative">
-                
+              {/* Game Table */}
+              <div className="felt-bg rounded-2xl p-3 mb-2 relative" style={{ border: '2px solid rgba(255,255,255,0.08)' }}>
+
                 {/* Partner (top) */}
-                <div className={'rounded-lg p-2 mb-2 mx-10 ' + (gameState.currentPlayer === topSlot ? 'bg-green-500' : 'bg-green-600')}>
-                  <div className="text-xs font-semibold text-white text-center mb-1">
-                    {gameState.players?.[topSlot]?.name} {isBot(topSlot) ? '🤖' : '(Parceiro)'}
-                    {gameState.currentPlayer === topSlot && <span className="ml-1">🎯</span>}
+                <div className={'player-panel p-3 mb-2 mx-12 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')}>
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <span className="text-xs font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
+                    {isBot(topSlot)
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
+                      : <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/30 text-green-200 font-bold">PARCEIRO</span>
+                    }
+                    {gameState.currentPlayer === topSlot && <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</span>}
                   </div>
-                  <div className="flex gap-0.5 justify-center">
-                    {(gameState.hands?.[topSlot] || []).map((_, idx) => (
-                      <div key={idx} className={'w-5 h-8 rounded border shadow-inner ' + (isBot(topSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
-                    ))}
-                  </div>
+                  <TileBack count={(gameState.hands?.[topSlot] || []).length} vertical={false} partner={!isBot(topSlot)} />
                 </div>
 
-                {/* Middle row: Left opponent - Board (center) - Right opponent */}
-                <div className="flex items-stretch mb-2">
+                {/* Middle row */}
+                <div className="flex items-stretch mb-2 gap-2">
 
                   {/* Left opponent */}
-                  <div className={'rounded-lg p-1 flex-shrink-0 w-10 flex flex-col ' + (gameState.currentPlayer === leftSlot ? 'bg-green-500' : 'bg-green-600')}>
-                    <div className="text-xs font-semibold text-white text-center mb-1">
-                      {isBot(leftSlot) ? '🤖' : '👤'} {gameState.currentPlayer === leftSlot && '🎯'}
+                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48 }}>
+                    <div className="mb-2 text-center">
+                      {isBot(leftSlot)
+                        ? <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
+                        : <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/30 text-blue-200 font-bold">P</span>
+                      }
+                      {gameState.currentPlayer === leftSlot && <div className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-1">VEZ</div>}
                     </div>
-                    <div className="flex flex-col gap-0 items-center flex-1 justify-center">
-                      {(gameState.hands?.[leftSlot] || []).map((_, idx) => (
-                        <div key={idx} className={'w-8 h-2 rounded-sm border shadow-inner ' + (isBot(leftSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
-                      ))}
-                    </div>
+                    <TileBack count={(gameState.hands?.[leftSlot] || []).length} vertical={true} partner={false} />
+                    <div className="text-[9px] text-white/50 mt-1 text-center truncate" style={{ maxWidth: 44 }}>{gameState.players?.[leftSlot]?.name}</div>
                   </div>
 
-                  {/* Board (center) */}
-                  <div ref={boardRef} className="flex-1 bg-green-900 rounded-lg p-2 mx-1 min-h-44 border-4 border-green-950 overflow-auto flex flex-col items-center">
+                  {/* Board */}
+                  <div ref={boardRef} className="board-area flex-1 p-3 min-h-48 overflow-auto flex flex-col items-center justify-center">
                     {(!gameState.board || gameState.board.length === 0) ? (
                       <div className="flex-1 flex items-center justify-center">
-                        <p className="text-green-600 text-sm">Mesa vazia</p>
+                        <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
                       </div>
                     ) : (() => {
                       const board = gameState.board;
-                      const HW = 44, VW = 22, GAP = 2;
+                      const HW = 52, VW = 26, GAP = 3;
                       const el = boardRef.current;
-                      const MAX_W = el ? el.clientWidth - 24 : 250;
+                      const MAX_W = el ? el.clientWidth - 28 : 280;
 
-                      // Build rows by fitting tiles, respecting max width
                       const rows = [];
                       let cur = [], w = 0;
                       for (let i = 0; i < board.length; i++) {
@@ -1015,29 +1415,32 @@
                           })}
                         </div>
                       );
-                    })()}</div>
+                    })()}
+                  </div>
 
                   {/* Right opponent */}
-                  <div className={'rounded-lg p-1 flex-shrink-0 w-10 flex flex-col ' + (gameState.currentPlayer === rightSlot ? 'bg-green-500' : 'bg-green-600')}>
-                    <div className="text-xs font-semibold text-white text-center mb-1">
-                      {isBot(rightSlot) ? '🤖' : '👤'} {gameState.currentPlayer === rightSlot && '🎯'}
+                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48 }}>
+                    <div className="mb-2 text-center">
+                      {isBot(rightSlot)
+                        ? <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
+                        : <span className="text-[9px] px-1 py-0.5 rounded bg-blue-500/30 text-blue-200 font-bold">P</span>
+                      }
+                      {gameState.currentPlayer === rightSlot && <div className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-1">VEZ</div>}
                     </div>
-                    <div className="flex flex-col gap-0 items-center flex-1 justify-center">
-                      {(gameState.hands?.[rightSlot] || []).map((_, idx) => (
-                        <div key={idx} className={'w-8 h-2 rounded-sm border shadow-inner ' + (isBot(rightSlot) ? 'bg-red-100 border-red-300' : 'bg-blue-100 border-blue-300')}></div>
-                      ))}
-                    </div>
+                    <TileBack count={(gameState.hands?.[rightSlot] || []).length} vertical={true} partner={false} />
+                    <div className="text-[9px] text-white/50 mt-1 text-center truncate" style={{ maxWidth: 44 }}>{gameState.players?.[rightSlot]?.name}</div>
                   </div>
                 </div>
 
-                {/* My Hand (bottom) */}
-                <div className={'rounded-lg p-2 mx-10 ' + (isMyTurn ? 'bg-green-500 ring-2 ring-yellow-400' : 'bg-green-600')}>
-                  <div className="text-xs font-semibold text-white text-center mb-1">
-                    Voce ({myHand.length} pecas)
-                    {isMyTurn && <span className="ml-1">🎯 Sua vez!</span>}
+                {/* My Hand */}
+                <div className={'my-hand p-3 mx-4 ' + (isMyTurn ? 'my-turn' : '')}>
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <span className="text-xs font-bold text-white/80">Voce</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-bold">{myHand.length} pecas</span>
+                    {isMyTurn && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                   </div>
-                  
-                  <div className="flex flex-wrap gap-1 justify-center mb-2">
+
+                  <div className="flex flex-wrap gap-2 justify-center mb-2">
                     {myHand.map(tile => (
                       <DominoTile
                         key={tile.id}
@@ -1055,27 +1458,31 @@
                     ))}
                   </div>
                   {isMyTurn && (
-                    <button onClick={pass} className="w-full bg-orange-500 text-white py-1 rounded text-xs">
+                    <button onClick={pass} className="btn-pass w-full">
                       Passar
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* New round button */}
+              {/* Action buttons */}
               {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
-                <button onClick={newRound} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">
+                <button onClick={newRound} className="btn-primary w-full text-lg animate-bounce-in">
                   Proxima Rodada
                 </button>
               )}
 
               {gameState.gameEnded && playerSlot === 0 && (
-                <button onClick={startGame} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold">
+                <button onClick={startGame} className="btn-primary w-full text-lg animate-celebrate">
                   Nova Partida
                 </button>
               )}
 
-              {error && <p className="text-red-200 text-center mt-2 text-sm">{error}</p>}
+              {error && (
+                <div className="mt-2 p-3 rounded-xl bg-red-500/20 border border-red-400/30 text-red-200 text-center text-sm font-semibold animate-slide-down">
+                  {error}
+                </div>
+              )}
             </div>
           </div>
         );
