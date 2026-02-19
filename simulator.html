@@ -1157,8 +1157,9 @@
         }));
 
         // Create game by replaying
-        const result = simulateFullRound(allHands, deal.autoPlayedBy, deal.autoTile ?
-          ALL_TILES.find(t => t.left === deal.autoTile.left && t.right === deal.autoTile.right) : null);
+        const autoTile = deal.autoTile ? ALL_TILES.find(t => t.left === deal.autoTile.left && t.right === deal.autoTile.right) : null;
+        const result = simulateFullRound(allHands, deal.autoPlayedBy,
+          autoTile ? [autoTile] : [], autoTile ? autoTile.left : null, autoTile ? autoTile.right : null, deal.autoPlayedBy);
 
         currentGame = result;
         currentStep = 0;
@@ -1206,7 +1207,8 @@
           if (opener >= 0) break;
         }
 
-        const game = simulateFullRound(hands, opener, openerTile);
+        const game = simulateFullRound(hands, opener, openerTile ? [openerTile] : [],
+          openerTile ? openerTile.left : null, openerTile ? openerTile.right : null, opener);
         const snaps = game.snapshots;
         const lastSnap = snaps[snaps.length - 1];
         const wTeam = lastSnap.winnerTeam ?? -1;
