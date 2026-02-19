@@ -424,6 +424,294 @@
       }
     }
 
+    // ========== DEDUCTION NOTEBOOK ==========
+    class DeductionNotebook {
+      constructor() {
+        this.players = [0, 1, 2, 3].map(() => ({
+          cannotHaveNumbers: new Set(),
+          voidSince: {},
+          avoidanceEvidence: {},
+          passEvents: [],
+          playEvents: []
+        }));
+        this.bullets = [];
+        this.remainingByNumber = [7, 7, 7, 7, 7, 7, 7];
+        this.playedTiles = new Set();
+        this.turn = 0;
+      }
+
+      recordPass(player, turn, leftEnd, rightEnd) {
+        this.turn = turn;
+        const p = this.players[player];
+        const newVoids = [];
+        for (const n of [leftEnd, rightEnd]) {
+          if (!p.cannotHaveNumbers.has(n)) {
+            p.cannotHaveNumbers.add(n);
+            p.voidSince[n] = turn;
+            newVoids.push(n);
+          }
+        }
+        p.passEvents.push({ turn, ends: [leftEnd, rightEnd] });
+        if (newVoids.length > 0) {
+          this.bullets.push({
+            turn, player, certainty: 'CERTAIN',
+            evidence: `${pn(player)} PASSED when ends were ${leftEnd}/${rightEnd}`,
+            implication: `${pn(player)} has no ${newVoids.map(n => n + 's').join(' and no ')}`,
+            strategy: this._passStrategy(player, newVoids),
+            icon: '\u{1F6AB}'
+          });
+        }
+      }
+
+      recordPlay(player, turn, tile, side, leftEnd, rightEnd) {
+        this.turn = turn;
+        const p = this.players[player];
+        this.playedTiles.add(tile.id);
+        this.remainingByNumber[tile.left]--;
+        if (tile.left !== tile.right) this.remainingByNumber[tile.right]--;
+        p.playEvents.push({ turn, tile, side });
+
+        // Track avoidance
+        if (leftEnd !== undefined) {
+          for (const n of [leftEnd, rightEnd]) {
+            if (n !== undefined && tile.left !== n && tile.right !== n) {
+              if (!p.avoidanceEvidence[n]) p.avoidanceEvidence[n] = { count: 0, turns: [] };
+              p.avoidanceEvidence[n].count++;
+              p.avoidanceEvidence[n].turns.push(turn);
+            }
+          }
+        }
+
+        // Double played — track scarcity
+        if (tile.left === tile.right) {
+          const rem = this.remainingByNumber[tile.left];
+          if (rem <= 2) {
+            this.bullets.push({
+              turn, player, certainty: 'CERTAIN',
+              evidence: `${pn(player)} played double [${tile.left}|${tile.left}]`,
+              implication: `Remaining ${tile.left}s: ${rem}`,
+              strategy: rem <= 1
+                ? `${tile.left}s nearly EXHAUSTED \u2014 avoid opening ${tile.left}-end`
+                : `${tile.left}s are SCARCE \u2014 controlling the ${tile.left}-end is valuable`,
+              icon: '\u{1F3B2}'
+            });
+          }
+        }
+
+        // Avoidance patterns (2+ times avoided)
+        if (leftEnd !== undefined) {
+          for (const n of [leftEnd, rightEnd]) {
+            if (n === undefined) continue;
+            const avoid = p.avoidanceEvidence[n];
+            if (avoid && avoid.count === 2 && !p.cannotHaveNumbers.has(n)) {
+              this.bullets.push({
+                turn, player, certainty: 'LIKELY',
+                evidence: `${pn(player)} avoided playing ${n}s ${avoid.count} times (turns ${avoid.turns.join(', ')})`,
+                implication: `${pn(player)} is likely LOW on ${n}s (not void, but weak)`,
+                strategy: player % 2 === 0
+                  ? `Partner may need help with ${n}s \u2014 keep ${n}-end open`
+                  : `Opponent weak in ${n} \u2014 keeping ${n} on board pressures them`,
+                icon: '\u{1F50D}'
+              });
+            }
+          }
+        }
+
+        // Scarcity alerts
+        for (let n = 0; n <= 6; n++) {
+          if (this.remainingByNumber[n] === 1 &&
+              this.remainingByNumber[n] + (tile.left === n || tile.right === n ? 1 : 0) === 2) {
+            this.bullets.push({
+              turn, player: -1, certainty: 'CERTAIN',
+              evidence: `Only 1 tile left with number ${n}`,
+              implication: `${n} is nearly EXHAUSTED \u2014 opening a ${n}-end risks stalling`,
+              strategy: `Avoid placing ${n} as an end unless you hold the last ${n}-tile`,
+              icon: '\u26A0\uFE0F'
+            });
+          }
+        }
+      }
+
+      _passStrategy(player, voidNumbers) {
+        const isOpp = player % 2 === 1;
+        if (isOpp) {
+          return `KEEP ${voidNumbers.join(' and ')} on the board to force ${pn(player)} to pass again`;
+        } else if (player === 2) {
+          return `AVOID leaving ${voidNumbers.join(' or ')} as the only end for partner`;
+        }
+        return '';
+      }
+
+      getPlayerCard(player) {
+        const p = this.players[player];
+        return {
+          name: pn(player),
+          team: player % 2 === 0 ? 'Your team' : 'Opponents',
+          hardConstraints: [...p.cannotHaveNumbers].sort(),
+          voidSince: { ...p.voidSince },
+          avoidance: Object.entries(p.avoidanceEvidence)
+            .filter(([n, e]) => e.count >= 2)
+            .map(([n, e]) => ({ number: parseInt(n), count: e.count, turns: e.turns })),
+          tilesPlayed: p.playEvents.length,
+          estimatedHand: Math.max(0, 6 - p.playEvents.length),
+          riskFlags: this._getRiskFlags(player)
+        };
+      }
+
+      _getRiskFlags(player) {
+        const flags = [];
+        const p = this.players[player];
+        if (player % 2 === 1) {
+          for (let n = 0; n <= 6; n++) {
+            if (p.cannotHaveNumbers.has(n)) continue;
+            const played = p.playEvents.filter(e => e.tile.left === n || e.tile.right === n).length;
+            if (played >= 2 && this.remainingByNumber[n] >= 2) {
+              flags.push({
+                type: 'danger',
+                text: `Do NOT open ${n}: ${pn(player)} played ${played}x ${n}s \u2014 likely strong`,
+                certainty: 'LIKELY'
+              });
+            }
+          }
+        }
+        return flags;
+      }
+
+      getThinkChecklist(snap, playerIdx) {
+        const lE = snap.leftEnd, rE = snap.rightEnd;
+        const items = [];
+        items.push({ category: 'Board', text: `Ends: ${lE} / ${rE}`, certainty: null });
+
+        // Who is void on each end?
+        for (const n of new Set([lE, rE])) {
+          const voidP = [];
+          for (let p = 0; p < 4; p++) {
+            if (p === playerIdx) continue;
+            if (this.players[p].cannotHaveNumbers.has(n)) voidP.push(pn(p));
+          }
+          if (voidP.length > 0) {
+            items.push({
+              category: 'Void',
+              text: `${n}-end: ${voidP.join(', ')} void`,
+              certainty: 'CERTAIN'
+            });
+          }
+        }
+
+        // Suit exhaustion on ends
+        for (const n of new Set([lE, rE])) {
+          if (this.remainingByNumber[n] <= 2) {
+            items.push({
+              category: 'Count',
+              text: `Only ${this.remainingByNumber[n]} tile(s) left with ${n}`,
+              certainty: 'CERTAIN'
+            });
+          }
+        }
+
+        // Partner close to winning
+        const partnerHand = Math.max(0, 6 - this.players[2].playEvents.length);
+        if (partnerHand <= 2 && partnerHand > 0) {
+          items.push({
+            category: 'Partner',
+            text: `Partner has ~${partnerHand} tile(s) left \u2014 feed them!`,
+            certainty: 'CERTAIN'
+          });
+        }
+
+        // Opponent risk flags
+        for (const opp of [1, 3]) {
+          for (const f of this._getRiskFlags(opp)) {
+            items.push({ category: 'Risk', text: f.text, certainty: f.certainty });
+          }
+        }
+
+        return items;
+      }
+
+      getMissedDeductions(userTile, userSide, bestTile, bestSide, snap) {
+        const missed = [];
+        const uEnds = computeNewEnds(userTile, userSide, snap.leftEnd, snap.rightEnd);
+        const bEnds = computeNewEnds(bestTile, bestSide, snap.leftEnd, snap.rightEnd);
+        if (!uEnds || !bEnds) return missed;
+
+        // Did user fail to block a void opponent?
+        for (const opp of [1, 3]) {
+          const dead = this.players[opp].cannotHaveNumbers;
+          if (dead.size === 0) continue;
+          const bestBlocks = dead.has(bEnds.newLeft) && dead.has(bEnds.newRight);
+          const userBlocks = dead.has(uEnds.newLeft) && dead.has(uEnds.newRight);
+          if (bestBlocks && !userBlocks) {
+            missed.push({
+              type: 'inference_error',
+              text: `${pn(opp)} is void in {${[...dead].join(',')}} \u2014 best move blocks them, yours doesn\'t`,
+              evidence: this.players[opp].passEvents.map(e =>
+                `Turn ${e.turn}: passed at ${e.ends[0]}/${e.ends[1]}`
+              )
+            });
+          }
+        }
+
+        // Did user block their own partner?
+        const partnerDead = this.players[2].cannotHaveNumbers;
+        if (partnerDead.size > 0) {
+          const userBlocksPartner = partnerDead.has(uEnds.newLeft) && partnerDead.has(uEnds.newRight);
+          const bestBlocksPartner = partnerDead.has(bEnds.newLeft) && partnerDead.has(bEnds.newRight);
+          if (userBlocksPartner && !bestBlocksPartner) {
+            missed.push({
+              type: 'partner_error',
+              text: `Partner is void in {${[...partnerDead].join(',')}} \u2014 your move blocks partner!`,
+              evidence: this.players[2].passEvents.map(e =>
+                `Turn ${e.turn}: partner passed at ${e.ends[0]}/${e.ends[1]}`
+              )
+            });
+          }
+        }
+
+        // Counting error: opened a scarce number
+        for (const n of new Set([uEnds.newLeft, uEnds.newRight])) {
+          if (this.remainingByNumber[n] <= 1 && n !== bEnds.newLeft && n !== bEnds.newRight) {
+            missed.push({
+              type: 'counting_error',
+              text: `Only ${this.remainingByNumber[n]} tile(s) left with ${n} \u2014 opening ${n} risks stalling`,
+              evidence: [`${7 - this.remainingByNumber[n]} of 7 tiles with ${n} already played`]
+            });
+          }
+        }
+
+        return missed;
+      }
+
+      getRecentBullets(maxCount = 10) {
+        const certOrder = { CERTAIN: 0, LIKELY: 1, POSSIBLE: 2, UNCLEAR: 3 };
+        return [...this.bullets].sort((a, b) => {
+          const ca = certOrder[a.certainty] ?? 3;
+          const cb = certOrder[b.certainty] ?? 3;
+          if (ca !== cb) return ca - cb;
+          return b.turn - a.turn;
+        }).slice(0, maxCount);
+      }
+
+      clone() {
+        const nb = new DeductionNotebook();
+        nb.players = this.players.map(p => ({
+          cannotHaveNumbers: new Set(p.cannotHaveNumbers),
+          voidSince: { ...p.voidSince },
+          avoidanceEvidence: JSON.parse(JSON.stringify(p.avoidanceEvidence)),
+          passEvents: [...p.passEvents],
+          playEvents: p.playEvents.map(e => ({ ...e, tile: { ...e.tile } }))
+        }));
+        nb.bullets = this.bullets.map(b => ({ ...b }));
+        nb.remainingByNumber = [...this.remainingByNumber];
+        nb.playedTiles = new Set(this.playedTiles);
+        nb.turn = this.turn;
+        return nb;
+      }
+    }
+
+    // Global notebook — instantiated per game
+    let notebook = null;
+
     function shuffleDeck(deck) {
       const s = [...deck];
       const rng = getRng();
@@ -693,15 +981,19 @@
       let board = [...initBoard], lE = initLeft, rE = initRight;
       let cur = startPlayer, passCount = 0;
       const knowledge = new Knowledge();
+      const nb = new DeductionNotebook();
       // Record auto-played opening tile with actual player for hand-size estimation
-      for (const t of initBoard) knowledge.recordPlay(autoPlayer != null ? autoPlayer : -1, t);
+      for (const t of initBoard) {
+        knowledge.recordPlay(autoPlayer != null ? autoPlayer : -1, t);
+        nb.recordPlay(autoPlayer != null ? autoPlayer : -1, 0, t, null, undefined, undefined);
+      }
 
       const snapshots = [];
       snapshots.push({
         move: 0, player: -1, action: 'start', tile: null, side: null, reasons: ['Game begins'],
         hands: hands.map(h => h.map(t => ({...t}))),
         board: [...board], leftEnd: lE, rightEnd: rE, currentPlayer: cur,
-        knowledge: knowledge.clone()
+        knowledge: knowledge.clone(), notebook: nb.clone()
       });
 
       let moveNum = 0;
@@ -747,6 +1039,7 @@
           const playedTile = {...tile};
           hands[cur] = hands[cur].filter(t => t.id !== tile.id);
           knowledge.recordPlay(cur, tile);
+          nb.recordPlay(cur, moveNum, tile, side, lE, rE);
 
           const pL = lE, pR = rE;
 
@@ -782,7 +1075,7 @@
             hands: hands.map(h => h.map(t => ({...t}))),
             board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
-            knowledge: knowledge.clone(),
+            knowledge: knowledge.clone(), notebook: nb.clone(),
             outcome
           });
 
@@ -792,6 +1085,7 @@
         } else {
           passCount++;
           knowledge.recordPass(cur, lE, rE);
+          nb.recordPass(cur, moveNum, lE, rE);
 
           let outcome = null;
           if (passCount >= 4) {
@@ -812,7 +1106,7 @@
             hands: hands.map(h => h.map(t => ({...t}))),
             board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
-            knowledge: knowledge.clone(),
+            knowledge: knowledge.clone(), notebook: nb.clone(),
             outcome
           });
 
@@ -1492,6 +1786,14 @@
       const meNow = getMatchEquity(matchScore[0], matchScore[1]);
       const meShift = equityLossSource === 'mc' ? roundToMatchEquity(equityLoss, matchScore[0], matchScore[1]) : null;
 
+      // Missed deductions from Coach notebook
+      let missedDeductions = [];
+      if (grade !== 'perfect' && snap.notebook) {
+        try {
+          missedDeductions = snap.notebook.getMissedDeductions(userTile, userSide, aiTile, aiSide, snap);
+        } catch (e) { console.warn('getMissedDeductions error:', e); }
+      }
+
       quizResult = {
         userTile, userSide, aiTile, aiSide, grade, scoreDiff, userScore, aiScore,
         allOptions: allOpts, detail, aiNewEnds, userNewEnds,
@@ -1501,7 +1803,8 @@
         equityLoss: Math.round(equityLoss * 1000) / 1000,
         equityLossSource,
         matchEquity: meNow,
-        matchEquityShift: meShift
+        matchEquityShift: meShift,
+        missedDeductions
       };
       quizWaiting = false;
       quizShowingResult = true;
@@ -1824,9 +2127,10 @@
             <div class="col-span-4">
               <div class="bg-slate-800 rounded-xl p-3 h-full flex flex-col">
                 <!-- Tabs -->
-                <div class="flex gap-1 mb-2">
+                <div class="flex gap-1 mb-2 flex-wrap">
                   <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">Reasoning</div>
                   <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
+                  <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">Coach</div>
                   <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
@@ -1834,6 +2138,7 @@
 
                 ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
+                  rightPanelTab === 'coach' ? renderCoachPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'analysis' ? renderAnalysisPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
@@ -2124,6 +2429,24 @@
           <div class="text-xs text-blue-400 font-bold mb-1">Monte Carlo verdict:</div>
           <div class="text-xs text-blue-300">Best: [${r.mcResults[0].tile.left}|${r.mcResults[0].tile.right}] E[pts]: ${fmtEP(r.mcResults[0].expectedPoints)} | Win: ${(r.mcResults[0].winRate*100).toFixed(0)}%</div>
           ${r.mcResults[0].tile.id !== r.aiTile.id ? '<div class="text-xs text-yellow-400">MC disagrees with heuristic — simulation sees deeper!</div>' : '<div class="text-xs text-emerald-400">MC confirms the heuristic choice</div>'}
+        </div>` : ''}
+
+        ${r.missedDeductions && r.missedDeductions.length > 0 ? `
+        <div class="border-t border-orange-800 pt-1.5 mt-1.5">
+          <div class="text-xs text-orange-400 font-bold mb-1">&#128161; What you missed:</div>
+          ${r.missedDeductions.map(d => `
+            <div class="text-xs mb-1.5">
+              <div class="flex items-start gap-1.5">
+                <span class="mt-0.5 flex-shrink-0 ${d.type === 'partner_error' ? 'text-blue-400' : d.type === 'counting_error' ? 'text-amber-400' : 'text-red-400'}">${
+                  d.type === 'partner_error' ? '&#9829;' : d.type === 'counting_error' ? '&#35;' : '&#9888;'
+                }</span>
+                <span class="text-orange-200">${d.text}</span>
+              </div>
+              ${d.evidence && d.evidence.length > 0 ? `
+                <div class="ml-5 mt-0.5 text-slate-500 italic">${d.evidence.join(' | ')}</div>
+              ` : ''}
+            </div>
+          `).join('')}
         </div>` : ''}
 
         <div class="text-center mt-2">
@@ -2713,6 +3036,96 @@
       `;
     }
 
+    function renderCoachPanel(snap, pNames, teamColors) {
+      const nb = snap && snap.notebook ? snap.notebook : (notebook || new DeductionNotebook());
+      const bullets = nb.getRecentBullets(8);
+      const isQuizTurn = quizWaiting && snap && snap.player === 0;
+
+      // "Think This Way" checklist (shown during quiz)
+      let thinkHtml = '';
+      if (isQuizTurn && snap) {
+        const items = nb.getThinkChecklist(snap, 0);
+        if (items.length > 0) {
+          thinkHtml = `
+            <div class="bg-emerald-950/30 border border-emerald-800 rounded-lg p-2 mb-2">
+              <div class="text-xs font-bold text-emerald-400 mb-1">\u{1F914} Before You Pick \u2014 Think About:</div>
+              ${items.map(item => `
+                <div class="flex items-start gap-1.5 text-xs mb-1">
+                  <span class="text-slate-500 w-14 flex-shrink-0 font-semibold">${item.category}</span>
+                  <span class="text-slate-200 flex-1">${item.text}</span>
+                  ${item.certainty ? `<span class="px-1 rounded text-xs flex-shrink-0 ${
+                    item.certainty === 'CERTAIN' ? 'bg-red-900 text-red-300' : 'bg-amber-900 text-amber-300'
+                  }">${item.certainty}</span>` : ''}
+                </div>
+              `).join('')}
+            </div>`;
+        }
+      }
+
+      // Bullet list
+      let bulletsHtml = '';
+      if (bullets.length > 0) {
+        bulletsHtml = bullets.map(b => `
+          <div class="flex gap-2 items-start text-xs ${
+            b.certainty === 'CERTAIN' ? 'bg-red-950/30 border-l-2 border-red-500' :
+            b.certainty === 'LIKELY' ? 'bg-amber-950/30 border-l-2 border-amber-500' :
+            'bg-slate-800 border-l-2 border-slate-600'
+          } p-1.5 rounded-r">
+            <span class="flex-shrink-0">${b.icon || ''}</span>
+            <div class="min-w-0">
+              <div class="text-slate-300">
+                <span class="font-semibold text-slate-500">[T${b.turn}]</span> ${b.evidence}
+              </div>
+              <div class="text-slate-400 mt-0.5">\u2192 ${b.implication}</div>
+              ${b.strategy ? `<div class="text-emerald-400 mt-0.5 italic text-xs">\u{1F4A1} ${b.strategy}</div>` : ''}
+              <span class="text-xs px-1 rounded ${
+                b.certainty === 'CERTAIN' ? 'bg-red-900 text-red-300' :
+                b.certainty === 'LIKELY' ? 'bg-amber-900 text-amber-300' :
+                'bg-slate-700 text-slate-400'
+              }">${b.certainty}</span>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        bulletsHtml = '<div class="text-xs text-slate-500 italic p-2">No deductions yet \u2014 play some moves first</div>';
+      }
+
+      // Per-player deduction cards
+      const cards = [1, 2, 3].map(p => {
+        const card = nb.getPlayerCard(p);
+        const teamColor = teamColors[p % 2];
+        return `
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold mb-1" style="color:${teamColor}">
+              ${card.name} <span class="text-slate-500 font-normal">(~${card.estimatedHand} tiles)</span>
+            </div>
+            ${card.hardConstraints.length > 0 ?
+              `<div class="text-xs text-red-400">\u{1F6AB} Void: {${card.hardConstraints.join(', ')}}</div>` : ''}
+            ${card.avoidance.map(a =>
+              `<div class="text-xs text-amber-400">\u{1F50D} Weak in ${a.number}s (avoided ${a.count}x)</div>`
+            ).join('')}
+            ${card.riskFlags.map(f =>
+              `<div class="text-xs text-red-300 font-semibold">\u26A0\uFE0F ${f.text}</div>`
+            ).join('')}
+            ${card.hardConstraints.length === 0 && card.avoidance.length === 0 && card.riskFlags.length === 0 ?
+              '<div class="text-xs text-slate-600 italic">No deductions yet</div>' : ''}
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="space-y-2 flex-1 overflow-y-auto">
+          ${thinkHtml}
+          <div class="bg-slate-900 rounded-lg p-2 space-y-1.5">
+            <div class="text-xs font-bold text-emerald-400 mb-1">\u{1F9E0} What You Should Remember</div>
+            ${bulletsHtml}
+          </div>
+          <div class="space-y-1.5">
+            <div class="text-xs font-bold text-slate-400 mb-1">Player Cards</div>
+            ${cards}
+          </div>
+        </div>`;
+    }
+
     function renderGuidePanel() {
       return `
         <div class="space-y-2 flex-1 overflow-y-auto text-xs">
@@ -3171,6 +3584,7 @@
       // Seed new PRNG for this game
       newSeed();
       belief = new BeliefModel();
+      notebook = new DeductionNotebook();
 
       // Dobrada (after tied/locked game): highest double rule, like first game
       if (scoreMultiplier > 1) {
