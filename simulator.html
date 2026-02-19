@@ -114,12 +114,320 @@
 
     const ALL_TILES = createDeck(); // shared immutable deck — never mutate
 
+    // ========== SEEDABLE PRNG (SplitMix64) ==========
+    class SplitMix64 {
+      constructor(seed) {
+        // Store as two 32-bit halves to avoid BigInt overhead
+        this.s0 = seed >>> 0;
+        this.s1 = (seed / 0x100000000) >>> 0;
+      }
+      // 64-bit addition via 32-bit halves
+      _add64(aLo, aHi, bLo, bHi) {
+        const lo = (aLo + bLo) >>> 0;
+        const hi = (aHi + bHi + (lo < aLo ? 1 : 0)) >>> 0;
+        return [lo, hi];
+      }
+      _xorshift(lo, hi, bits) {
+        if (bits < 32) {
+          const rLo = ((lo >>> bits) | (hi << (32 - bits))) >>> 0;
+          const rHi = (hi >>> bits) >>> 0;
+          return [(lo ^ rLo) >>> 0, (hi ^ rHi) >>> 0];
+        }
+        const b = bits - 32;
+        return [(lo ^ (hi >>> b)) >>> 0, hi];
+      }
+      _mul64(aLo, aHi, bLo, bHi) {
+        // 64-bit multiply via 32-bit parts (we only need lower 64 bits)
+        const al = aLo & 0xFFFF, ah = aLo >>> 16;
+        const bl = bLo & 0xFFFF, bh = bLo >>> 16;
+        let lo = al * bl;
+        let mid = ah * bl + (lo >>> 16);
+        mid += al * bh;
+        let hi = (mid >>> 16) + ah * bh;
+        lo = ((mid & 0xFFFF) << 16) | (lo & 0xFFFF);
+        hi = (hi + aLo * bHi + aHi * bLo) >>> 0;
+        return [lo >>> 0, hi >>> 0];
+      }
+      next() {
+        // state += 0x9e3779b97f4a7c15
+        const [lo, hi] = this._add64(this.s0, this.s1, 0x7f4a7c15, 0x9e3779b9);
+        this.s0 = lo; this.s1 = hi;
+        let [zLo, zHi] = [lo, hi];
+        // z ^= z >> 30
+        [zLo, zHi] = this._xorshift(zLo, zHi, 30);
+        // z *= 0xbf58476d1ce4e5b9
+        [zLo, zHi] = this._mul64(zLo, zHi, 0x1ce4e5b9, 0xbf58476d);
+        // z ^= z >> 27
+        [zLo, zHi] = this._xorshift(zLo, zHi, 27);
+        // z *= 0x94d049bb133111eb
+        [zLo, zHi] = this._mul64(zLo, zHi, 0x133111eb, 0x94d049bb);
+        // z ^= z >> 31
+        [zLo, zHi] = this._xorshift(zLo, zHi, 31);
+        return [zLo, zHi];
+      }
+      random() {
+        const [lo] = this.next();
+        return (lo >>> 0) / 0x100000000;
+      }
+      randomInt(max) {
+        return Math.floor(this.random() * max);
+      }
+      shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = this.randomInt(i + 1);
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+      }
+    }
+
+    // Global RNG — re-seeded per game for determinism, fallback to Math.random
+    let solverRng = null;
+    let currentSeed = null;
+    function newSeed() {
+      currentSeed = Math.floor(Math.random() * 0xFFFFFFFF);
+      solverRng = new SplitMix64(currentSeed);
+      return currentSeed;
+    }
+    function getRng() { return solverRng || { random: Math.random, randomInt: n => Math.floor(Math.random() * n), shuffle: arr => { for (let i = arr.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; } }; }
+
+    // ========== LRU CACHE ==========
+    class LRUCache {
+      constructor(maxSize = 500) {
+        this.max = maxSize;
+        this.map = new Map();
+      }
+      get(key) {
+        if (!this.map.has(key)) return null;
+        const val = this.map.get(key);
+        this.map.delete(key);
+        this.map.set(key, val);
+        return val;
+      }
+      set(key, val) {
+        if (this.map.has(key)) this.map.delete(key);
+        this.map.set(key, val);
+        if (this.map.size > this.max) {
+          const first = this.map.keys().next().value;
+          this.map.delete(first);
+        }
+      }
+      has(key) { return this.map.has(key); }
+      clear() { this.map.clear(); }
+    }
+
+    const mcCache = new LRUCache(300);
+
+    // ========== BELIEF MODEL ==========
+    class BeliefModel {
+      constructor() {
+        this.impossible = [new Set(), new Set(), new Set(), new Set()];
+        this.played = new Set();
+        this.marginals = [{}, {}, {}, {}];
+        this.avoidanceCount = [
+          [0,0,0,0,0,0,0], [0,0,0,0,0,0,0],
+          [0,0,0,0,0,0,0], [0,0,0,0,0,0,0]
+        ];
+        this.events = [];
+      }
+      canHold(p, tile) {
+        if (this.played.has(tile.id)) return false;
+        if (this.impossible[p].has(tile.id)) return false;
+        if (tile.left === tile.right) return !this._numberImpossible(p, tile.left);
+        return !this._numberImpossible(p, tile.left) || !this._numberImpossible(p, tile.right);
+      }
+      _numberImpossible(p, n) {
+        for (const t of ALL_TILES) {
+          if (this.played.has(t.id)) continue;
+          if (t.left !== n && t.right !== n) continue;
+          if (!this.impossible[p].has(t.id)) return false;
+        }
+        return true;
+      }
+      recordPass(p, turn, leftEnd, rightEnd) {
+        for (const t of ALL_TILES) {
+          if (this.played.has(t.id)) continue;
+          if (t.left === leftEnd || t.right === leftEnd ||
+              t.left === rightEnd || t.right === rightEnd) {
+            this.impossible[p].add(t.id);
+          }
+        }
+        this.events.push({
+          type: 'pass', player: p, turn,
+          ends: [leftEnd, rightEnd], certainty: 'CERTAIN'
+        });
+      }
+      recordPlay(p, turn, tile, side, leftEnd, rightEnd) {
+        this.played.add(tile.id);
+        for (let q = 0; q < 4; q++) this.impossible[q].add(tile.id);
+        if (leftEnd !== undefined) {
+          for (const n of [leftEnd, rightEnd]) {
+            if (tile.left !== n && tile.right !== n) {
+              this.avoidanceCount[p][n]++;
+            }
+          }
+        }
+        this.events.push({
+          type: 'play', player: p, turn, tile, certainty: 'CERTAIN'
+        });
+      }
+      getTileMarginal(p, tileId) {
+        return this.marginals[p][tileId] || 0;
+      }
+      getNumberStrength(p, n) {
+        let probNone = 1.0;
+        for (const t of ALL_TILES) {
+          if (this.played.has(t.id)) continue;
+          if (t.left !== n && t.right !== n) continue;
+          const m = this.marginals[p][t.id] || 0;
+          probNone *= (1 - m);
+        }
+        return 1 - probNone;
+      }
+      getEntropy(p) {
+        let H = 0;
+        for (const t of ALL_TILES) {
+          if (this.played.has(t.id)) continue;
+          const m = this.marginals[p][t.id] || 0;
+          if (m > 0 && m < 1) {
+            H -= m * Math.log2(m) + (1 - m) * Math.log2(1 - m);
+          }
+        }
+        return H;
+      }
+      updateMarginals(deals, weights, myIdx) {
+        for (let p = 0; p < 4; p++) {
+          if (p === myIdx) continue;
+          this.marginals[p] = {};
+        }
+        for (let k = 0; k < deals.length; k++) {
+          const w = weights[k];
+          for (let p = 0; p < 4; p++) {
+            if (p === myIdx) continue;
+            for (const t of deals[k][p]) {
+              this.marginals[p][t.id] = (this.marginals[p][t.id] || 0) + w;
+            }
+          }
+        }
+      }
+      // Sync from Knowledge (bridge for backward compat)
+      syncFromKnowledge(knowledge, turnCounter) {
+        this.played = new Set(knowledge.played);
+        for (let p = 0; p < 4; p++) {
+          this.impossible[p] = new Set();
+          // Map number-based cantHave to tile-based impossible
+          // A tile is impossible if ANY of its numbers is in cantHave (player is void in that number)
+          for (const t of ALL_TILES) {
+            if (this.played.has(t.id)) { this.impossible[p].add(t.id); continue; }
+            const dead = knowledge.cantHave[p];
+            if (dead.has(t.left) || dead.has(t.right)) this.impossible[p].add(t.id);
+          }
+        }
+      }
+      clone() {
+        const b = new BeliefModel();
+        b.impossible = this.impossible.map(s => new Set(s));
+        b.played = new Set(this.played);
+        b.marginals = this.marginals.map(m => ({...m}));
+        b.avoidanceCount = this.avoidanceCount.map(a => [...a]);
+        b.events = [...this.events];
+        return b;
+      }
+    }
+
+    // Global belief model — instantiated per game alongside Knowledge
+    let belief = null;
+
+    // ========== BELIEF SAMPLER ==========
+    function logCombination(n, k) {
+      if (k > n || k < 0) return -Infinity;
+      if (k === 0 || k === n) return 0;
+      let log = 0;
+      for (let i = 0; i < k; i++) {
+        log += Math.log(n - i) - Math.log(i + 1);
+      }
+      return log;
+    }
+
+    class BeliefSampler {
+      constructor(rng) {
+        this.rng = rng;
+      }
+      sampleDeals(myHand, handSizes, beliefModel, myIdx, K = 100) {
+        const myIds = new Set(myHand.map(t => t.id));
+        const pool = ALL_TILES.filter(t => !beliefModel.played.has(t.id) && !myIds.has(t.id));
+        const players = [0, 1, 2, 3].filter(p => p !== myIdx);
+        const deals = [];
+        const weights = [];
+        for (let k = 0; k < K * 2 && deals.length < K; k++) {
+          const result = this._sampleOneDeal(pool, players, handSizes, beliefModel, myHand, myIdx);
+          if (result) {
+            deals.push(result.hands);
+            weights.push(result.weight);
+          }
+        }
+        // Normalize weights
+        const wSum = weights.reduce((s, w) => s + w, 0);
+        if (wSum > 0) {
+          for (let i = 0; i < weights.length; i++) weights[i] /= wSum;
+        }
+        return { deals, weights };
+      }
+      _sampleOneDeal(pool, players, handSizes, beliefModel, myHand, myIdx) {
+        const hands = [[], [], [], []];
+        hands[myIdx] = [...myHand];
+        const assigned = new Set();
+        let logWeight = 0;
+        const order = [...players];
+        this.rng.shuffle(order);
+        for (const p of order) {
+          const need = handSizes[p];
+          if (need <= 0) continue;
+          const eligible = pool.filter(t => !assigned.has(t.id) && beliefModel.canHold(p, t));
+          if (eligible.length < need) return null;
+          const selected = this._weightedSampleWithout(eligible, need, t => {
+            const m = beliefModel.getTileMarginal(p, t.id);
+            return m > 0 ? m : (1.0 / eligible.length);
+          });
+          if (!selected) return null;
+          for (const t of selected.tiles) {
+            hands[p].push(t);
+            assigned.add(t.id);
+          }
+          logWeight += selected.logWeight;
+        }
+        return { hands, weight: Math.exp(Math.max(-20, Math.min(20, logWeight))) };
+      }
+      _weightedSampleWithout(items, k, weightFn) {
+        const remaining = [...items];
+        const selected = [];
+        let logW = 0;
+        for (let i = 0; i < k; i++) {
+          if (remaining.length === 0) return null;
+          const weights = remaining.map(weightFn);
+          const wSum = weights.reduce((s, w) => s + w, 0);
+          if (wSum <= 0) return null;
+          let r = this.rng.random() * wSum;
+          let idx = 0;
+          for (; idx < weights.length - 1; idx++) {
+            r -= weights[idx];
+            if (r <= 0) break;
+          }
+          selected.push(remaining[idx]);
+          logW += Math.log(weights[idx] / wSum);
+          remaining.splice(idx, 1);
+        }
+        const n = items.length;
+        const logUniform = -logCombination(n, k);
+        logW = logUniform - logW;
+        return { tiles: selected, logWeight: logW };
+      }
+    }
+
     function shuffleDeck(deck) {
       const s = [...deck];
-      for (let i = s.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [s[i], s[j]] = [s[j], s[i]];
-      }
+      const rng = getRng();
+      rng.shuffle(s);
       return s;
     }
 
@@ -191,8 +499,8 @@
         const possible = [];
         for (const t of ALL_TILES) {
           if (this.played.has(t.id)) continue;
-          if (this.cantHave[p].has(t.left) && this.cantHave[p].has(t.right)) continue;
-          if (t.left === t.right && this.cantHave[p].has(t.left)) continue;
+          // A tile is impossible if ANY of its numbers is in cantHave
+          if (this.cantHave[p].has(t.left) || this.cantHave[p].has(t.right)) continue;
           possible.push(t);
         }
         return possible;
@@ -567,21 +875,33 @@
     // ========== MONTE CARLO LOOKAHEAD ==========
 
     // Check if player p can hold tile t given knowledge constraints
+    // cantHave[p] = set of numbers where player p is VOID (has no tiles with that number)
+    // A tile is impossible if ANY of its numbers is in cantHave
     function canPlayerHold(p, t, knowledge) {
-      if (t.left === t.right) return !knowledge.cantHave[p].has(t.left);
-      return !(knowledge.cantHave[p].has(t.left) && knowledge.cantHave[p].has(t.right));
+      if (knowledge.cantHave[p].has(t.left)) return false;
+      if (knowledge.cantHave[p].has(t.right)) return false;
+      return true;
     }
 
-    // Generate a random deal using rejection sampling (unbiased) with backtracking fallback
+    // Generate a belief-consistent deal (Phase 1 upgrade)
+    // Uses BeliefSampler when belief model available, else rejection + backtracking (no greedy fallback)
     function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
+      // If we have belief model + seedable RNG, use importance-weighted sampler
+      if (belief && solverRng) {
+        const sampler = new BeliefSampler(solverRng);
+        belief.syncFromKnowledge(knowledge);
+        const { deals } = sampler.sampleDeals(myHand, handSizes, belief, myIdx, 1);
+        if (deals.length > 0) return deals[0];
+        // Fall through to rejection sampling if sampler fails
+      }
+
       const myIds = new Set(myHand.map(t => t.id));
       const pool = [];
       for (const t of ALL_TILES) {
         if (knowledge.played.has(t.id) || myIds.has(t.id)) continue;
         pool.push(t);
       }
-
-      // Pre-compute eligible tiles per player (hard constraint filter)
+      const rng = getRng();
       const players = [0, 1, 2, 3].filter(p => p !== myIdx);
       const eligible = {};
       for (const p of players) {
@@ -590,13 +910,8 @@
 
       // Try rejection sampling first (unbiased, fast when constraints are loose)
       for (let attempt = 0; attempt < 200; attempt++) {
-        // Shuffle pool
         const shuffled = [...pool];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        // Cut into hands
+        rng.shuffle(shuffled);
         const hands = [[], [], [], []];
         hands[myIdx] = [...myHand];
         let idx = 0, valid = true;
@@ -606,7 +921,6 @@
             hands[p].push(shuffled[idx++]);
           }
           if (!valid) break;
-          // Validate constraints
           for (const t of hands[p]) {
             if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
           }
@@ -615,40 +929,25 @@
         if (valid) return hands;
       }
 
-      // Fallback: randomized backtracking (handles tight constraints)
+      // Fallback: randomized backtracking (handles tight constraints, no greedy)
       const hands = [[], [], [], []];
       hands[myIdx] = [...myHand];
       const assigned = new Set();
-
-      // Shuffle player order each call to avoid systematic bias
       const shuffledPlayers = [...players];
-      for (let i = shuffledPlayers.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffledPlayers[i], shuffledPlayers[j]] = [shuffledPlayers[j], shuffledPlayers[i]];
-      }
+      rng.shuffle(shuffledPlayers);
 
       function backtrack(pIdx) {
         if (pIdx >= shuffledPlayers.length) return true;
         const p = shuffledPlayers[pIdx];
         const available = eligible[p].filter(t => !assigned.has(t.id));
-        // Shuffle available for randomness
-        for (let i = available.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [available[i], available[j]] = [available[j], available[i]];
-        }
+        rng.shuffle(available);
         if (available.length < handSizes[p]) return false;
-        // Pick first handSizes[p] tiles
         const chosen = available.slice(0, handSizes[p]);
         for (const t of chosen) { hands[p].push(t); assigned.add(t.id); }
         if (backtrack(pIdx + 1)) return true;
-        // Backtrack
         for (const t of chosen) { hands[p].pop(); assigned.delete(t.id); }
-        // Try different random subset (up to 3 retries)
-        for (let retry = 0; retry < 3; retry++) {
-          for (let i = available.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [available[i], available[j]] = [available[j], available[i]];
-          }
+        for (let retry = 0; retry < 5; retry++) {
+          rng.shuffle(available);
           const chosen2 = available.slice(0, handSizes[p]);
           for (const t of chosen2) { hands[p].push(t); assigned.add(t.id); }
           if (backtrack(pIdx + 1)) return true;
@@ -659,22 +958,29 @@
 
       if (backtrack(0)) return hands;
 
-      // Last resort: greedy (old method) — at least returns something
-      for (const p of players) {
-        for (const t of eligible[p]) {
-          if (assigned.has(t.id) || hands[p].length >= handSizes[p]) continue;
-          hands[p].push(t);
-          assigned.add(t.id);
-        }
-        // Fill remaining with anything
-        if (hands[p].length < handSizes[p]) {
-          for (const t of pool) {
-            if (assigned.has(t.id) || hands[p].length >= handSizes[p]) continue;
-            hands[p].push(t);
-            assigned.add(t.id);
+      // Emergency: rejection with relaxed attempt count (still no greedy — correctness first)
+      for (let attempt = 0; attempt < 500; attempt++) {
+        const shuffled = [...pool];
+        rng.shuffle(shuffled);
+        const h2 = [[], [], [], []];
+        h2[myIdx] = [...myHand];
+        let idx = 0, valid = true;
+        for (const p of players) {
+          for (let i = 0; i < handSizes[p]; i++) {
+            if (idx >= shuffled.length) { valid = false; break; }
+            h2[p].push(shuffled[idx++]);
           }
+          if (!valid) break;
+          for (const t of h2[p]) {
+            if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
+          }
+          if (!valid) break;
         }
+        if (valid) return h2;
       }
+
+      // Absolute last resort: return hands from backtracking even if incomplete
+      // (better than greedy which violates constraints)
       return hands;
     }
 
@@ -773,8 +1079,15 @@
       if (playable.length === 0) return [];
       if (playable.length === 1) {
         return [{ tile: playable[0], winRate: 0.5, expectedPoints: 0, sims: 0, side: null,
-                  blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 } }];
+                  blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+                  variance: 0, stdDev: 0, ci95: 0, cvar5: 0 }];
       }
+
+      // Check cache
+      const cacheKey = [lE, rE, hand.map(t=>t.id).sort().join(','),
+        snap.hands.map(h=>h.length).join(','),
+        [...knowledge.played].sort().join(',')].join('::');
+      if (mcCache.has(cacheKey)) return mcCache.get(cacheKey);
 
       const handSizes = snap.hands.map(h => h.length);
       const myTeam = player % 2;
@@ -790,12 +1103,12 @@
           if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
         }
 
-        let bestEP = -99, bestWR = 0, bestSide = sides[0];
-        let bestOutcomes = null, bestBlockRate = 0;
+        let bestResult = null;
 
         for (const side of sides) {
-          let wins = 0, totalPts = 0, blocks = 0;
+          let wins = 0, totalPts = 0, sumPtsSq = 0, blocks = 0, ties = 0;
           const outcomes = { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 };
+          const ptsArray = []; // for CVaR computation
 
           let newLE = lE, newRE = rE;
           const newBLen = board.length + 1;
@@ -818,10 +1131,12 @@
             if (isD && wasBoth) { pts = 4; type = 'cruzada'; }
             else if (isD) { pts = 2; type = 'carroca'; }
             else if (wasBoth) { pts = 3; type = 'laelo'; }
-            bestEP = pts; bestWR = 1.0; bestSide = side;
-            bestOutcomes = { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 };
-            bestOutcomes[type] = numSims;
-            bestBlockRate = 0;
+            bestResult = {
+              tile, side,
+              winRate: 1.0, expectedPoints: pts,
+              blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0, [type]: numSims },
+              sims: numSims, variance: 0, stdDev: 0, ci95: 0, cvar5: pts
+            };
             break;
           }
 
@@ -832,40 +1147,52 @@
           for (let sim = 0; sim < numSims; sim++) {
             const simHands = generateConsistentDeal(myNewHand, newHandSizes, newKnowledge, player);
             const result = simulateFromPosition(simHands, null, newLE, newRE, (player + 1) % 4, newKnowledge, newBLen);
-            if (result.winnerTeam === myTeam) {
-              wins++;
-              totalPts += result.points;
-            } else if (result.winnerTeam >= 0) {
-              totalPts -= result.points;
-            }
+
+            const signedPts = result.winnerTeam === myTeam ? result.points :
+                              result.winnerTeam >= 0 ? -result.points : 0;
+
+            if (result.winnerTeam === myTeam) wins++;
+            totalPts += signedPts;
+            sumPtsSq += signedPts * signedPts;
+            ptsArray.push(signedPts);
             if (result.type === 'blocked' || result.type === 'tie') blocks++;
-            if (outcomes[result.type] !== undefined) {
-              // Attribute outcome to winning/losing team
-              outcomes[result.type]++;
-            }
+            if (result.type === 'tie') ties++;
+            if (outcomes[result.type] !== undefined) outcomes[result.type]++;
           }
 
           const ep = numSims > 0 ? totalPts / numSims : 0;
           const wr = numSims > 0 ? wins / numSims : 0.5;
-          if (ep > bestEP) {
-            bestEP = ep; bestWR = wr; bestSide = side;
-            bestOutcomes = { ...outcomes };
-            bestBlockRate = blocks / numSims;
+          const variance = numSims > 1 ? (sumPtsSq / numSims) - ep * ep : 0;
+          const stdDev = Math.sqrt(Math.max(0, variance));
+          const ci95 = numSims > 1 ? 1.96 * stdDev / Math.sqrt(numSims) : 0;
+
+          // CVaR 5%: expected value of worst 5% of outcomes
+          ptsArray.sort((a, b) => a - b);
+          const cvarCount = Math.max(1, Math.ceil(numSims * 0.05));
+          let cvarSum = 0;
+          for (let i = 0; i < cvarCount; i++) cvarSum += ptsArray[i];
+          const cvar5 = cvarSum / cvarCount;
+
+          const thisResult = {
+            tile, side,
+            winRate: wr, expectedPoints: ep,
+            blockRate: blocks / numSims,
+            outcomes,
+            sims: numSims,
+            variance, stdDev, ci95, cvar5
+          };
+
+          if (!bestResult || ep > bestResult.expectedPoints) {
+            bestResult = thisResult;
           }
         }
 
-        results.push({
-          tile, side: bestSide,
-          winRate: bestWR,
-          expectedPoints: bestEP,
-          blockRate: bestBlockRate,
-          outcomes: bestOutcomes || { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
-          sims: numSims
-        });
+        if (bestResult) results.push(bestResult);
       }
 
-      // Sort by expected points (primary), then winRate (tiebreaker)
-      return results.sort((a, b) => b.expectedPoints - a.expectedPoints || b.winRate - a.winRate);
+      results.sort((a, b) => b.expectedPoints - a.expectedPoints || b.winRate - a.winRate);
+      mcCache.set(cacheKey, results);
+      return results;
     }
 
     // ========== STATE ==========
@@ -880,9 +1207,8 @@
     let lastWinTeam = null;   // null = first game of match, 0 or 1 = team that won last
     let starterChoicePending = false; // true when waiting for user to pick starter
 
-    // ========== MATCH EQUITY TABLE ==========
-    // ME[s1][s2] = P(team1 wins match | score s1 vs s2), match to 6 pts
-    // Point distribution when winning a round: 70% 1pt, 16% 2pt, 10% 3pt, 4% 4pt
+    // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
+    // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
     const MATCH_TARGET = 6;
     const POINT_DIST = [
       { pts: 1, prob: 0.70 },  // normal + blocked
@@ -890,54 +1216,99 @@
       { pts: 3, prob: 0.10 },  // la-e-lo
       { pts: 4, prob: 0.04 }   // cruzada
     ];
+    const DOB_VALUES = [1, 2, 4, 8]; // dobrada multiplier levels
 
-    // Pre-compute match equity table using DP
-    const ME = (() => {
-      const tbl = Array.from({length: MATCH_TARGET + 5}, () =>
-        new Float64Array(MATCH_TARGET + 5)
+    const ME3D = (() => {
+      const T = MATCH_TARGET;
+      const S = T + 5;
+      // me[s1][s2][dobIdx]
+      const me = Array.from({length: S}, () =>
+        Array.from({length: S}, () => new Float64Array(DOB_VALUES.length))
       );
       // Base cases
-      for (let s2 = 0; s2 <= MATCH_TARGET + 4; s2++) {
-        for (let s1 = MATCH_TARGET; s1 <= MATCH_TARGET + 4; s1++) {
-          tbl[s1][s2] = s2 >= MATCH_TARGET ? 0.5 : 1.0; // both >= target: 50/50
+      for (let d = 0; d < DOB_VALUES.length; d++) {
+        for (let s2 = 0; s2 < S; s2++) {
+          for (let s1 = T; s1 < S; s1++) {
+            me[s1][s2][d] = s2 >= T ? 0.5 : 1.0;
+          }
         }
-      }
-      for (let s1 = 0; s1 < MATCH_TARGET; s1++) {
-        for (let s2 = MATCH_TARGET; s2 <= MATCH_TARGET + 4; s2++) {
-          tbl[s1][s2] = 0.0;
+        for (let s1 = 0; s1 < T; s1++) {
+          for (let s2 = T; s2 < S; s2++) {
+            me[s1][s2][d] = 0.0;
+          }
         }
       }
       // Fill bottom-up
-      for (let s1 = MATCH_TARGET - 1; s1 >= 0; s1--) {
-        for (let s2 = MATCH_TARGET - 1; s2 >= 0; s2--) {
-          let val = 0;
-          for (const { pts, prob } of POINT_DIST) {
-            const s1w = Math.min(s1 + pts, MATCH_TARGET + 4);
-            const s2w = Math.min(s2 + pts, MATCH_TARGET + 4);
-            // 50% we win with these pts, 50% they win with these pts
-            val += 0.5 * prob * tbl[s1w][s2] + 0.5 * prob * tbl[s1][s2w];
+      const TIE_PROB = 0.03; // ~3% of rounds are ties
+      // Iterate d from highest to lowest so tie term references already-computed values
+      for (let s1 = T - 1; s1 >= 0; s1--) {
+        for (let s2 = T - 1; s2 >= 0; s2--) {
+          for (let d = DOB_VALUES.length - 1; d >= 0; d--) {
+            const dob = DOB_VALUES[d];
+            let decisive = 0;
+            for (const { pts: basePts, prob } of POINT_DIST) {
+              const pts = basePts * dob;
+              const s1w = Math.min(s1 + pts, T + 4);
+              const s2w = Math.min(s2 + pts, T + 4);
+              decisive += 0.5 * prob * me[s1w][s2][0] + 0.5 * prob * me[s1][s2w][0];
+            }
+            const nextDobIdx = Math.min(d + 1, DOB_VALUES.length - 1);
+            if (d === DOB_VALUES.length - 1) {
+              // Max dobrada: tie maps to self → solve: val = decisive*(1-t) + t*val
+              // → val*(1-t) = decisive*(1-t) → val = decisive
+              me[s1][s2][d] = decisive;
+            } else {
+              me[s1][s2][d] = decisive * (1 - TIE_PROB) + TIE_PROB * me[s1][s2][nextDobIdx];
+            }
           }
-          tbl[s1][s2] = val;
         }
       }
+      return me;
+    })();
+
+    // Backward-compat 2D ME wrapper (dob=1)
+    const ME = (() => {
+      const T = MATCH_TARGET;
+      const S = T + 5;
+      const tbl = Array.from({length: S}, () => new Float64Array(S));
+      for (let s1 = 0; s1 < S; s1++)
+        for (let s2 = 0; s2 < S; s2++)
+          tbl[s1][s2] = ME3D[s1][s2][0];
       return tbl;
     })();
 
-    // Get match equity given current scores
     function getMatchEquity(s1, s2) {
       const c1 = Math.min(s1, MATCH_TARGET + 4);
       const c2 = Math.min(s2, MATCH_TARGET + 4);
       return ME[c1][c2];
     }
 
-    // Convert round E[pts] to match equity change
-    // epts = signed expected points for our team this round (+ours, -theirs)
-    function roundToMatchEquity(epts, myTeamScore, oppTeamScore) {
-      const currentME = getMatchEquity(myTeamScore, oppTeamScore);
-      // Approximate: weight outcomes by point distribution
-      // epts already accounts for scoring type, so we need to map to match equity shift
-      // Simple linear approximation: each point changes ME by (ME(s+1,o) - ME(s,o)) on average
-      const mePerPt = getMatchEquity(Math.min(myTeamScore + 1, MATCH_TARGET), oppTeamScore) - currentME;
+    function getMatchEquity3D(s1, s2, dobMultiplier) {
+      const dIdx = DOB_VALUES.indexOf(dobMultiplier);
+      const d = dIdx >= 0 ? dIdx : 0;
+      return ME3D[Math.min(s1, MATCH_TARGET + 4)][Math.min(s2, MATCH_TARGET + 4)][d];
+    }
+
+    // Convert round E[pts] to match equity change (dobrada-aware)
+    function roundToMatchEquity(epts, myTeamScore, oppTeamScore, dob) {
+      const d = dob || scoreMultiplier || 1;
+      const currentME = getMatchEquity3D(myTeamScore, oppTeamScore, d);
+      // Improved: weight by actual point distribution × dobrada
+      let meAfter = 0;
+      for (const { pts: basePts, prob } of POINT_DIST) {
+        const pts = basePts * d;
+        if (epts >= 0) {
+          // Positive: probability of us winning with these pts
+          const frac = prob; // weight this outcome type
+          meAfter += frac * getMatchEquity3D(
+            Math.min(myTeamScore + pts, MATCH_TARGET + 4), oppTeamScore, 1);
+        } else {
+          meAfter += prob * getMatchEquity3D(
+            myTeamScore, Math.min(oppTeamScore + pts, MATCH_TARGET + 4), 1);
+        }
+      }
+      // Scale by magnitude of epts (epts is signed expected pts)
+      const mePerPt = getMatchEquity3D(Math.min(myTeamScore + d, MATCH_TARGET + 4), oppTeamScore, 1) - currentME;
       return epts * mePerPt;
     }
 
@@ -2795,6 +3166,11 @@
       quizSidePick = null;
       mcResults = null;
       analysisRunning = false;
+      mcCache.clear(); // clear MC cache between games
+
+      // Seed new PRNG for this game
+      newSeed();
+      belief = new BeliefModel();
 
       // Dobrada (after tied/locked game): highest double rule, like first game
       if (scoreMultiplier > 1) {
@@ -2810,8 +3186,8 @@
           render();
           return;
         } else {
-          // AI team won — auto-pick random from team 1
-          const aiStarter = Math.random() < 0.5 ? 1 : 3;
+          // AI team won — auto-pick using seeded RNG
+          const aiStarter = solverRng.random() < 0.5 ? 1 : 3;
           launchGame(aiStarter, true);
           return;
         }
