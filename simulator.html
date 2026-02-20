@@ -26,7 +26,8 @@
     .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; }
     .board-tile-v { flex-direction: column; width: 28px; height: 52px; }
     .board-tile-h { flex-direction: row; width: 52px; height: 28px; }
-    .board-tile .tile-half:first-child { border-color: #94a3b8; }
+    .board-tile-v .tile-half:first-child { border-bottom: 1px solid #94a3b8; }
+    .board-tile-h .tile-half:first-child { border-right: 1px solid #94a3b8; }
     .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 10px rgba(34,197,94,0.6); position: relative; z-index: 2; }
     .board-snake { min-height: 100%; display: flex; flex-direction: column; justify-content: center; }
     .log-entry { transition: background 0.2s; }
@@ -94,7 +95,7 @@
       const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
       const clickAttr = onClick ? `onclick="${onClick}"` : '';
       const halfContent = v => isBoard
-        ? `<div class="tile-half" style="font-size:14px;font-weight:800;color:#1e293b;user-select:none">${v}</div>`
+        ? `<div class="tile-half">${renderDots(v, true)}</div>`
         : `<div class="tile-half">${renderDots(v, false)}</div>`;
       return `<div class="${base} ${dirB} ${extraCls}" title="${tile.left}-${tile.right}" ${clickAttr}>
         ${halfContent(tile.left)}
@@ -1714,10 +1715,15 @@
       })[0];
     }
 
-    function generateGame(forcedStarter = null, freeChoice = false) {
-      const deck = shuffleDeck(ALL_TILES);
-      const hands = [[],[],[],[]];
-      for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
+    function generateGame(forcedStarter = null, freeChoice = false, predealtHands = null) {
+      let hands;
+      if (predealtHands) {
+        hands = predealtHands.map(h => h.map(t => ({...t})));
+      } else {
+        const deck = shuffleDeck(ALL_TILES);
+        hands = [[],[],[],[]];
+        for (let i = 0; i < 24; i++) hands[i%4].push(deck[i]);
+      }
 
       let hp, ht;
       if (forcedStarter !== null && freeChoice) {
@@ -2079,6 +2085,7 @@
     let matchScore = [0, 0];  // team0 vs team1 score, first to 6 wins match
     let lastWinTeam = null;   // null = first game of match, 0 or 1 = team that won last
     let starterChoicePending = false; // true when waiting for user to pick starter
+    let pendingHands = null; // pre-dealt hands shown during starter choice
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -2758,7 +2765,7 @@
       return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
         <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-emerald-500 shadow-xl">
           <div class="text-lg font-bold text-emerald-400 mb-1">Your team won!</div>
-          <div class="text-sm text-slate-300 mb-4">Choose who starts the next game:</div>
+          <div class="text-sm text-slate-300 mb-2">Look at your new hand below, then choose who opens:</div>
           <div class="flex gap-3 justify-center">
             <button class="btn btn-green px-5 py-2" onclick="chooseStarter(0)">You (P0)</button>
             <button class="btn btn-blue px-5 py-2" onclick="chooseStarter(2)">Partner (P2)</button>
@@ -4249,7 +4256,23 @@
       // Winning team chooses starter with free tile choice
       if (lastWinTeam !== null) {
         if (lastWinTeam === 0) {
-          // User's team won — show starter choice UI
+          // User's team won — pre-deal hands so user can see their tiles, then ask
+          const deck = shuffleDeck(ALL_TILES);
+          pendingHands = [[],[],[],[]];
+          for (let i = 0; i < 24; i++) pendingHands[i%4].push(deck[i]);
+          // Create a preview game state showing the new hand + empty board
+          const k = new Knowledge();
+          currentGame = {
+            snapshots: [{
+              hands: pendingHands.map(h => [...h]),
+              board: [], leftEnd: null, rightEnd: null,
+              currentPlayer: -1, action: 'deal', player: -1, move: 0,
+              knowledge: k, tile: null, side: null,
+              allOptions: [], reasons: [], score: 0
+            }],
+            outcome: null
+          };
+          currentStep = 0;
           starterChoicePending = true;
           render();
           return;
@@ -4265,13 +4288,15 @@
 
     function chooseStarter(player) {
       starterChoicePending = false;
-      launchGame(player, true); // free choice of opening tile
+      const hands = pendingHands;
+      pendingHands = null;
+      launchGame(player, true, hands); // free choice of opening tile with pre-dealt hands
     }
 
-    function launchGame(forcedStarter, freeChoice = false) {
+    function launchGame(forcedStarter, freeChoice = false, predealtHands = null) {
       stats.games++;
       saveStats();
-      currentGame = generateGame(forcedStarter, freeChoice);
+      currentGame = generateGame(forcedStarter, freeChoice, predealtHands);
       // Apply dobrada multiplier to outcome points
       const o = currentGame.outcome;
       if (o && o.points) {
