@@ -23,10 +23,9 @@
     .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
     .dot { width: 6px; height: 6px; background: #1e293b; border-radius: 50%; position: absolute; }
     .dot-sm { width: 4px; height: 4px; }
-    .dot-board { width: 3.5px; height: 3.5px; }
-    .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; }
-    .board-tile-v { flex-direction: column; width: 24px; height: 44px; }
-    .board-tile-h { flex-direction: row; width: 44px; height: 24px; }
+    .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; flex-shrink: 0; }
+    .board-tile-v { flex-direction: column; width: 26px; height: 52px; }
+    .board-tile-h { flex-direction: row; width: 52px; height: 26px; }
     .board-tile-v .tile-half:first-child { border-bottom: 1px solid #94a3b8; }
     .board-tile-h .tile-half:first-child { border-right: 1px solid #94a3b8; }
     .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 10px rgba(34,197,94,0.6); position: relative; z-index: 2; }
@@ -85,7 +84,7 @@
 
     function renderDots(value, size) {
       // size: 'normal' (hand), 'board' (board tiles)
-      const cls = size === 'board' ? 'dot dot-board' : 'dot';
+      const cls = size === 'board' ? 'dot dot-sm' : 'dot';
       return (DOT_POS[value] || []).map(([t,l]) =>
         `<div class="${cls}" style="top:${t}%;left:${l}%;transform:translate(-50%,-50%)"></div>`
       ).join('');
@@ -2655,7 +2654,7 @@
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
-                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[160px] relative overflow-hidden" id="board-area">
+                <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[160px] relative overflow-auto" id="board-area">
                   <div class="board-snake" id="board-snake">
                     ${renderBoard(snap)}
                   </div>
@@ -3089,69 +3088,81 @@
       if (!snap.board || snap.board.length === 0)
         return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
 
-      const TW = 44, DW = 24; // must match CSS board-tile-h width / board-tile-v width
+      // Tile dimensions must match CSS: board-tile-h = 52x26, board-tile-v = 26x52
+      const HW = 52, VW = 26, GAP = 3;
 
-      const makeTile = t => {
-        const isD = t.left === t.right;
-        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
-        return `<div style="flex-shrink:0;margin-left:-1.5px">${tileHTML(t, 'board', isD ? 'v' : 'h', isNew ? 'board-tile-new' : '')}</div>`;
-      };
+      const boardEl = document.getElementById('board-area');
+      const MAX_W = boardEl ? boardEl.clientWidth - 28 : 280;
+
+      // Row-breaking: same proven logic as index.html
+      const rows = [];
+      let cur = [], w = 0;
+      for (let i = 0; i < snap.board.length; i++) {
+        const isD = snap.board[i].left === snap.board[i].right;
+        const tw = isD ? VW : HW;
+        const need = cur.length > 0 ? tw + GAP : tw;
+        if (w + need > MAX_W && cur.length > 0) {
+          rows.push(cur);
+          cur = [i]; w = tw;
+        } else {
+          cur.push(i); w += need;
+        }
+      }
+      if (cur.length > 0) rows.push(cur);
 
       const endBadge = num =>
         `<div style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;
           border-radius:10px;background:#14532d;border:2px solid #4ade80;color:#86efac;font-weight:700;font-size:11px;flex-shrink:0">${num}</div>`;
 
-      const boardEl = document.getElementById('board-area');
-      const rawW = boardEl ? boardEl.clientWidth : 0;
-      const maxW = (rawW > 100 ? rawW : 500) - 56; // fallback 500 if DOM not ready
-
-      // Split tiles into rows based on available width
-      const rows = [[]];
-      let rowW = 0;
-      for (const t of snap.board) {
-        const w = (t.left === t.right ? DW : TW) - 1; // -1 for border overlap
-        if (rowW + w > maxW && rows[rows.length - 1].length > 0) {
-          rows.push([]);
-          rowW = 0;
-        }
-        rows[rows.length - 1].push(t);
-        rowW += w;
-      }
-
       const LB = endBadge(snap.leftEnd);
       const RB = endBadge(snap.rightEnd);
 
+      const makeTile = (idx, forceVertical, flipped) => {
+        const t = snap.board[idx];
+        const isD = t.left === t.right;
+        const orient = (isD || forceVertical) ? 'v' : 'h';
+        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
+        // In reversed (odd) rows, flip horizontal tiles so chain reads correctly
+        const tile = (flipped && orient === 'h') ? {left: t.right, right: t.left, id: t.id} : t;
+        return tileHTML(tile, 'board', orient, isNew ? 'board-tile-new' : '');
+      };
+
       // Single row — centered with end badges
       if (rows.length === 1) {
-        return `<div style="display:flex;align-items:center;justify-content:center;gap:6px">
-          ${LB}<div style="display:flex;align-items:center">${rows[0].map(makeTile).join('')}</div>${RB}
+        const tiles = rows[0].map(idx => makeTile(idx, false, false)).join('');
+        return `<div style="display:flex;align-items:center;justify-content:center;gap:${GAP}px">
+          ${LB}${tiles}${RB}
         </div>`;
       }
 
-      // Multi-row snake layout
-      // Even rows (0,2,...): left-to-right.  Odd rows (1,3,...): right-to-left.
-      // Turn connectors link the end of one row to the start of the next.
+      // Multi-row snake layout (matches index.html proven logic)
+      // Row 0: left-to-right, right-aligned (chain starts, pushed to right edge)
+      // Odd rows: row-reverse, right-aligned (chain turns back, connects at right edge)
+      // Even rows >0: left-to-right, left-aligned (chain turns forward, connects at left edge)
+      // First tile of each row after row 0 is rendered VERTICAL (turn connector)
       let html = '';
-      for (let ri = 0; ri < rows.length; ri++) {
-        const ltr = ri % 2 === 0;
-        const dir = ltr ? 'row' : 'row-reverse';
-        const tiles = `<div style="display:flex;align-items:center;flex-direction:${dir}">${rows[ri].map(makeTile).join('')}</div>`;
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const row = rows[rIdx];
+        const isOdd = rIdx % 2 === 1;
+        let flexDir = 'row';
+        let justify = 'center';
+        if (rIdx === 0) { justify = 'flex-end'; }
+        else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
+        else { justify = 'flex-start'; }
 
-        // End badges: LB at start of chain (row 0), RB at end of chain (last row)
-        const parts = [];
-        if (ri === 0) parts.push(LB);
-        parts.push(tiles);
-        if (ri === rows.length - 1) parts.push(RB);
+        const tiles = row.map((idx, posInRow) => {
+          const isTurn = posInRow === 0 && rIdx > 0;
+          return makeTile(idx, isTurn, isOdd);
+        }).join('');
 
-        html += `<div style="display:flex;align-items:center;flex-direction:${dir};gap:6px">${parts.join('')}</div>`;
+        let rowHTML = '';
+        if (rIdx === 0) rowHTML = LB + tiles;
+        else if (rIdx === rows.length - 1) rowHTML = tiles + RB;
+        else rowHTML = tiles;
 
-        // Turn connector between rows
-        if (ri < rows.length - 1) {
-          const side = ltr ? 'flex-end' : 'flex-start';
-          html += `<div style="display:flex;justify-content:${side};padding:0 8px">
-            <svg width="10" height="14" style="display:block"><line x1="5" y1="0" x2="5" y2="14" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round"/></svg>
-          </div>`;
-        }
+        html += `<div style="display:flex;flex-direction:${flexDir};justify-content:${justify};align-items:center;gap:${GAP}px;${rIdx < rows.length - 1 ? 'margin-bottom:'+GAP+'px' : ''}">
+          ${rowHTML}
+        </div>`;
       }
       return html;
     }
