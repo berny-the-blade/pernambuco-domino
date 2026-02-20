@@ -21,11 +21,12 @@
     .tile-wrong { border-color: #ef4444 !important; box-shadow: 0 0 12px rgba(239,68,68,0.6); }
     .tile-optimal { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
     .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
-    .dot { width: 5px; height: 5px; background: #1e293b; border-radius: 50%; position: absolute; }
+    .dot { width: 6px; height: 6px; background: #1e293b; border-radius: 50%; position: absolute; }
     .dot-sm { width: 4px; height: 4px; }
+    .dot-board { width: 3.5px; height: 3.5px; }
     .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; }
-    .board-tile-v { flex-direction: column; width: 28px; height: 52px; }
-    .board-tile-h { flex-direction: row; width: 52px; height: 28px; }
+    .board-tile-v { flex-direction: column; width: 24px; height: 44px; }
+    .board-tile-h { flex-direction: row; width: 44px; height: 24px; }
     .board-tile-v .tile-half:first-child { border-bottom: 1px solid #94a3b8; }
     .board-tile-h .tile-half:first-child { border-right: 1px solid #94a3b8; }
     .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 10px rgba(34,197,94,0.6); position: relative; z-index: 2; }
@@ -82,8 +83,9 @@
       6: [[20,20],[20,80],[50,20],[50,80],[80,20],[80,80]]
     };
 
-    function renderDots(value, small) {
-      const cls = small ? 'dot dot-sm' : 'dot';
+    function renderDots(value, size) {
+      // size: 'normal' (hand), 'board' (board tiles)
+      const cls = size === 'board' ? 'dot dot-board' : 'dot';
       return (DOT_POS[value] || []).map(([t,l]) =>
         `<div class="${cls}" style="top:${t}%;left:${l}%;transform:translate(-50%,-50%)"></div>`
       ).join('');
@@ -95,8 +97,8 @@
       const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
       const clickAttr = onClick ? `onclick="${onClick}"` : '';
       const halfContent = v => isBoard
-        ? `<div class="tile-half">${renderDots(v, true)}</div>`
-        : `<div class="tile-half">${renderDots(v, false)}</div>`;
+        ? `<div class="tile-half">${renderDots(v, 'board')}</div>`
+        : `<div class="tile-half">${renderDots(v, 'normal')}</div>`;
       return `<div class="${base} ${dirB} ${extraCls}" title="${tile.left}-${tile.right}" ${clickAttr}>
         ${halfContent(tile.left)}
         ${halfContent(tile.right)}
@@ -3087,7 +3089,7 @@
       if (!snap.board || snap.board.length === 0)
         return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
 
-      const TW = 52, DW = 28; // must match CSS board-tile-h width / board-tile-v width
+      const TW = 44, DW = 24; // must match CSS board-tile-h width / board-tile-v width
 
       const makeTile = t => {
         const isD = t.left === t.right;
@@ -3100,7 +3102,8 @@
           border-radius:10px;background:#14532d;border:2px solid #4ade80;color:#86efac;font-weight:700;font-size:11px;flex-shrink:0">${num}</div>`;
 
       const boardEl = document.getElementById('board-area');
-      const maxW = boardEl ? boardEl.clientWidth - 56 : 430;
+      const rawW = boardEl ? boardEl.clientWidth : 0;
+      const maxW = (rawW > 100 ? rawW : 500) - 56; // fallback 500 if DOM not ready
 
       // Split tiles into rows based on available width
       const rows = [[]];
