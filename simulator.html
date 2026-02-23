@@ -90,15 +90,17 @@
       ).join('');
     }
 
-    function tileHTML(tile, cls = '', orient = 'v', extraCls = '', onClick = '') {
+    function tileHTML(tile, cls = '', orient = 'v', extraCls = '', onClick = '', inlineStyle = '', titleOverride = '') {
       const isBoard = cls.includes('board');
       const base = isBoard ? 'board-tile' : 'tile';
       const dirB = orient === 'v' ? `${base}-v` : `${base}-h`;
       const clickAttr = onClick ? `onclick="${onClick}"` : '';
+      const styleAttr = inlineStyle ? `style="${inlineStyle}"` : '';
+      const titleText = titleOverride || `${tile.left}-${tile.right}`;
       const halfContent = v => isBoard
         ? `<div class="tile-half">${renderDots(v, 'board')}</div>`
         : `<div class="tile-half">${renderDots(v, 'normal')}</div>`;
-      return `<div class="${base} ${dirB} ${extraCls}" title="${tile.left}-${tile.right}" ${clickAttr}>
+      return `<div class="${base} ${dirB} ${extraCls}" title="${titleText}" ${styleAttr} ${clickAttr}>
         ${halfContent(tile.left)}
         ${halfContent(tile.right)}
       </div>`;
@@ -792,8 +794,8 @@
       // ===== FEEDING PARTNER =====
       {
         id: 'feed-01', title: "Partner's Suit", difficulty: 2, category: 'feeding',
-        description: 'Partner (P2) has played three 5s and still holds more. Keep 5 on the board.',
-        hint: 'Play [1-5] on right to make both ends 5 — partner dominance!',
+        description: 'Partner has played three 5-tiles on the board. Suit 5 is clearly their strength.',
+        hint: 'If partner loves 5s, what happens when BOTH ends are 5?',
         myHand: ['1-5', '0-1', '4-5', '1-4'],
         board: ['5-5', '3-5', '3-6', '2-6', '1-2'],
         leftEnd: 5, rightEnd: 1,
@@ -801,12 +803,12 @@
         voids: {},
         passHistory: [],
         correctTile: '1-5', correctSide: 'right',
-        explanation: '<b>[1|5] RIGHT makes both ends 5.</b> Partner has played three 5-tiles and still holds [0|5], [2|5], [5|6] — they dominate suit 5. With both ends at 5, partner is guaranteed to play next no matter what. [4|5] left removes a 5-end, weakening partner. <em>Rule: when partner dominates a suit, make both ends that number to guarantee they can always play.</em>'
+        explanation: '<b>[1|5] RIGHT makes both ends 5.</b> Partner played [5|5], [3|5], and another 5-tile — they clearly dominate suit 5. With both ends at 5, partner is very likely to play next. [4|5] left removes a 5-end, weakening their position. <em>Rule: when partner has played 3+ tiles of a suit, they likely hold more. Make both ends that number to feed them.</em>'
       },
       {
         id: 'feed-02', title: 'The Sacrifice', difficulty: 3, category: 'feeding',
-        description: 'Partner has [5|5] as their last tile. Set up both ends as 5 for a cruzada (4pts)!',
-        hint: 'A cruzada = going out with a double matching both ends = 4 points.',
+        description: 'Partner has 1 tile left. 15 board tiles + your 4 + opponents\' visible count = you can deduce it.',
+        hint: 'What tile could partner hold? If it\'s a double, can you set up a cruzada (both ends match)?',
         myHand: ['2-5', '0-2', '4-5', '1-2'],
         board: ['2-2', '2-3', '3-4', '4-6', '3-6', '1-3', '1-6', '6-6', '0-6', '0-4', '4-4', '1-4', '1-1', '1-5', '5-6'],
         leftEnd: 2, rightEnd: 5,
@@ -814,7 +816,7 @@
         voids: {},
         passHistory: [],
         correctTile: '2-5', correctSide: 'left',
-        explanation: '<b>[2|5] LEFT makes ends 5/5.</b> Partner holds [5|5] as their LAST tile. A double that matches both open ends = CRUZADA (4 points!). Playing [0|2] left gives ends 0/5 — partner goes out with [5|5] on the right, but that\'s only a carroca (2 pts). <em>Rule: always check if you can set up a cruzada (double matching both ends) for partner\'s last tile — it\'s worth 4x a normal win.</em>'
+        explanation: '<b>[2|5] LEFT makes ends 5/5.</b> With 15 tiles on the board + your 4 hand tiles, partner has 1 tile. Count what\'s missing: [5|5] is the only unaccounted tile — partner must hold it. Ends 5/5 + double [5|5] = CRUZADA (4 points!). Playing [0|2] left → ends 0/5, partner plays [5|5] right for just a carroca (2 pts). <em>Rule: when partner is down to 1 tile, count the board to deduce it. If it\'s a double, set up a cruzada.</em>'
       },
 
       // ===== CLEARING DOUBLES =====
@@ -889,8 +891,8 @@
       },
       {
         id: 'read-02', title: 'Pressure the Weakness', difficulty: 4, category: 'reading',
-        description: 'Opp Left (P1) has no tiles with 2. Keep 2 on the board to pressure them.',
-        hint: 'Play on the LEFT end (5) to keep 2 as the right end. P1 struggles with 2.',
+        description: 'P1 passed when 2 was on the board — they\'re void in 2. Exploit their weakness.',
+        hint: 'Play on the LEFT end to keep 2 alive on the right. P1 can\'t touch it.',
         myHand: ['2-6', '0-5', '4-5', '1-2'],
         board: ['5-5', '3-5', '3-6', '6-6', '0-6', '0-2'],
         leftEnd: 5, rightEnd: 2,
@@ -898,7 +900,7 @@
         voids: { 1: [2] },
         passHistory: [],
         correctTile: '4-5', correctSide: 'left',
-        explanation: '<b>[4|5] LEFT makes ends 4/2.</b> P1 is void in 2 (they passed), so keeping 2 on the board pressures them. Meanwhile, 4 is great for partner who holds [0|4], [2|4], [4|4] — three tiles with 4. Playing [2|6] or [1|2] on the right removes the 2-end, releasing P1 from pressure. <em>Rule: keep opponent-void numbers as board ends to pressure them, while creating ends that help your partner.</em>'
+        explanation: '<b>[4|5] LEFT makes ends 4/2.</b> P1 is void in 2 (passed on a 2-end), so keeping 2 on the board pressures them — they can\'t play the right side. Meanwhile, creating a 4-end on the left opens options for your team. Playing [2|6] or [1|2] on the right removes the 2-end, releasing P1 from pressure. <em>Rule: keep opponent-void numbers as board ends to pressure them. Don\'t remove an end that hurts your opponent.</em>'
       },
 
       // ===== TEMPO & CONTROL =====
@@ -926,7 +928,7 @@
         voids: {},
         passHistory: [],
         correctTile: '0-6', correctSide: 'right',
-        explanation: '<b>[0|6] RIGHT makes ends 3/6.</b> You still have [0|3], [3|5], [3|6] — three tiles match end 3. Plus end 6 gives opponents options too, keeping the game open. The TRAP is [0|3] right → ends 3/3. Seems good (you have 3s!) but it\'s too narrow: ONLY 3-tiles can play, reducing total options. Two different ends = more tiles playable for everyone. <em>Rule: board "width" matters. Two different end-numbers let more tiles play than one repeated number, even if you dominate that suit.</em>'
+        explanation: '<b>[0|6] RIGHT makes ends 3/6.</b> You still have [0|3], [3|5], [3|6] — three tiles match end 3. Plus end 6 keeps the game flowing. The TRAP is [0|3] right → ends 3/3. Seems good (you have 3s!) but it\'s too narrow: ONLY 3-tiles can play, increasing pass risk for everyone including your partner. <em>Rule: board "width" matters. Two different end-numbers let more tiles play than one repeated number, even if you dominate that suit.</em>'
       },
     ];
 
@@ -3449,6 +3451,10 @@
                   <div class="board-snake" id="board-snake">
                     ${renderBoard(snap)}
                   </div>
+                  ${snap.board && snap.board.length > 0 ? `<div style="display:flex;justify-content:center;gap:12px;margin-top:4px;opacity:0.7">
+                    <span style="font-size:10px;color:#93c5fd"><span style="display:inline-block;width:8px;height:8px;border:2px solid #3b82f6;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Your team</span>
+                    <span style="font-size:10px;color:#fca5a5"><span style="display:inline-block;width:8px;height:8px;border:2px solid #ef4444;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Opponents</span>
+                  </div>` : ''}
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                   ${starterChoicePending ? renderStarterChoice() : ''}
                 </div>
@@ -3923,6 +3929,22 @@
       if (!snap.board || snap.board.length === 0)
         return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
 
+      // Build tile→player map from snapshot history
+      const tilePlayerMap = {};
+      if (currentGame) {
+        // Opening tile
+        if (currentGame.autoTile && currentGame.autoPlayedBy !== undefined) {
+          tilePlayerMap[currentGame.autoTile.id] = currentGame.autoPlayedBy;
+        }
+        // All played moves up to current step
+        for (let s = 0; s <= currentStep && s < currentGame.snapshots.length; s++) {
+          const sn = currentGame.snapshots[s];
+          if (sn.action === 'play' && sn.tile && sn.player >= 0) {
+            tilePlayerMap[sn.tile.id] = sn.player;
+          }
+        }
+      }
+
       // Tile dimensions must match CSS: board-tile-h = 52x26, board-tile-v = 26x52
       const HW = 52, VW = 26, GAP = 3;
 
@@ -3952,14 +3974,22 @@
       const LB = endBadge(snap.leftEnd);
       const RB = endBadge(snap.rightEnd);
 
+      const PLAYER_BORDER_COLORS = ['#3b82f6', '#ef4444', '#3b82f6', '#ef4444']; // T1 blue, T2 red
+      const PLAYER_BORDER_LABELS = ['P0', 'P1', 'P2', 'P3'];
+
       const makeTile = (idx, forceVertical, flipped) => {
         const t = snap.board[idx];
         const isD = t.left === t.right;
         const orient = (isD || forceVertical) ? 'v' : 'h';
         const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
-        // In reversed (odd) rows, flip horizontal tiles so chain reads correctly
         const tile = (flipped && orient === 'h') ? {left: t.right, right: t.left, id: t.id} : t;
-        return tileHTML(tile, 'board', orient, isNew ? 'board-tile-new' : '');
+        const player = tilePlayerMap[t.id];
+        const borderStyle = player !== undefined
+          ? `border:2px solid ${PLAYER_BORDER_COLORS[player]};box-shadow:0 0 4px ${PLAYER_BORDER_COLORS[player]}40`
+          : '';
+        const cls = isNew ? 'board-tile-new' : '';
+        const titleAttr = player !== undefined ? `${t.left}-${t.right} (${PLAYER_BORDER_LABELS[player]})` : `${t.left}-${t.right}`;
+        return tileHTML(tile, 'board', orient, cls, '', borderStyle, titleAttr);
       };
 
       // Single row — centered with end badges
