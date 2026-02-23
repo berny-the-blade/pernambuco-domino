@@ -722,11 +722,24 @@
       return ALL_TILES.find(t => t.id === `${lo}-${hi}`);
     }
 
-    // Board tiles need exact orientation preserved for visual chain
-    function parseBoardTile(str) {
-      const [a, b] = str.split('-').map(Number);
-      const lo = Math.min(a, b), hi = Math.max(a, b);
-      return { left: a, right: b, id: `${lo}-${hi}` };
+    // Build a properly oriented board chain from canonical tile IDs
+    // Each tile is flipped so board[i].right === board[i+1].left
+    function buildChain(tileIds, leftEnd) {
+      const chain = [];
+      let cur = leftEnd;
+      for (const str of tileIds) {
+        const [a, b] = str.split('-').map(Number);
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const id = `${lo}-${hi}`;
+        if (a === cur) {
+          chain.push({ left: a, right: b, id });
+          cur = b;
+        } else {
+          chain.push({ left: b, right: a, id });
+          cur = a;
+        }
+      }
+      return chain;
     }
 
     let puzzleMode = false;
@@ -944,7 +957,7 @@
         2: (def.otherHands[2] || []).map(parseTileId),
         3: (def.otherHands[3] || []).map(parseTileId)
       };
-      const boardTiles = def.board.map(parseBoardTile);
+      const boardTiles = buildChain(def.board, def.leftEnd);
       const hands = [myHand, otherHands[1], otherHands[2], otherHands[3]];
 
       // Build Knowledge
