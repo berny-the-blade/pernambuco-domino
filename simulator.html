@@ -3672,12 +3672,15 @@
               }).join('');
             })()}
           </div>` : ''}
-        </div>` : `
+        </div>` : currentGame.autoTile ? `
         <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-slate-600">
           <div class="text-xs text-slate-400">
             ${pn(currentGame.autoPlayedBy)} auto-plays [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (highest double — first round rule).
           </div>
-        </div>`}
+        </div>` : puzzleMode ? `
+        <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-amber-600">
+          <div class="text-xs text-amber-400 font-bold">Pick the best tile from your hand.</div>
+        </div>` : ''}
 
         <!-- Monte Carlo Analysis -->
         ${renderMCPanel()}
