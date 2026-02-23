@@ -946,11 +946,14 @@
         for (const n of nums) knowledge.cantHave[+p].add(n);
       }
 
-      // Build DeductionNotebook
+      // Build DeductionNotebook — track board tiles without a player
       const nb = new DeductionNotebook();
       let turn = 1;
       for (const t of boardTiles) {
-        nb.recordPlay(-1, turn++, t, null, null, null);
+        nb.playedTiles.add(t.id);
+        nb.remainingByNumber[t.left]--;
+        if (t.left !== t.right) nb.remainingByNumber[t.right]--;
+        nb.turn = turn++;
       }
       for (const ph of (def.passHistory || [])) {
         nb.recordPass(ph.player, turn++, ph.leftEnd, ph.rightEnd);
