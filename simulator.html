@@ -2701,7 +2701,7 @@
       // Run Monte Carlo for equity loss computation
       let quizMC = null;
       if (deepAnalysis) {
-        quizMC = monteCarloEval(snap, 0, MC_SIMS_QUIZ);
+        quizMC = monteCarloEval(snap, 0, puzzleMode ? MC_SIMS_PUZZLE : MC_SIMS_QUIZ);
       }
 
       // Compute equity loss from MC (primary) or heuristic (fallback)
@@ -3401,7 +3401,7 @@
         <div class="border-t border-slate-700 pt-1.5 mt-1.5">
           <div class="text-xs text-slate-500 mb-1 flex items-center gap-3">
             <span>Tile ranking:</span>
-            <span class="text-slate-600 font-mono">H = heuristic${r.mcResults ? '  E[pts] = MC expected points' : ''}</span>
+            <span class="text-slate-600 font-mono">H = heuristic${r.mcResults ? `  E[pts] = MC (${r.mcResults[0]?.sims || '?'} sims)` : ''}</span>
           </div>
           ${(() => {
             // Merge heuristic and MC data, sort by MC E[pts] if available
@@ -4671,6 +4671,7 @@
 
     const MC_SIMS_WATCH = 120;  // sims per tile in watch mode
     const MC_SIMS_QUIZ = 100;   // sims per tile in quiz mode
+    const MC_SIMS_PUZZLE = 500; // sims per tile in puzzle mode (high confidence for curated positions)
     const MC_SIMS_ANALYSIS = 60; // sims per tile in analysis tab (per-move, many moves)
 
     function runMCForCurrentStep() {
