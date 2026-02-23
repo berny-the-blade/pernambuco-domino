@@ -4877,9 +4877,16 @@
         else if (eqLoss < 0.15) grade = 'good';
         else if (eqLoss < 0.40) grade = 'ok';
         else grade = 'bad';
+        // Get AI reasoning from the snapshot's allOptions (heuristic reasons)
+        const bestReasons = best && s.allOptions ? (() => {
+          const opt = s.allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                   || s.allOptions.find(o => o.tile.id === best.tile.id);
+          return opt ? opt.reasons.slice(0, 3) : [];
+        })() : [];
         game._analysisPartial.push({
           move: s.move, tile: s.tile, side: s.side,
           bestTile: best ? best.tile : null, bestSide: best ? best.side : null,
+          bestReasons,
           bestEP: best ? best.expectedPoints : 0,
           playedEP: played ? played.expectedPoints : 0,
           eqLoss, grade, stepIdx: i
@@ -4955,16 +4962,20 @@
           <div class="bg-slate-900 rounded-lg p-2">
             <div class="text-xs font-bold text-slate-400 mb-1">Move-by-Move (Your decisions)</div>
             ${analysis.length === 0 ? '<div class="text-xs text-slate-500">Run a full game to see analysis</div>' : ''}
-            <div class="space-y-1 max-h-[180px] overflow-y-auto">
+            <div class="space-y-0.5 max-h-[300px] overflow-y-auto">
               ${analysis.map(a => {
                 const gradeLabel = { perfect: 'OK', good: 'INACC', ok: 'MSTK', bad: 'BLNDR' }[a.grade];
                 const gradeColor = { perfect: 'text-emerald-400', good: 'text-green-300', ok: 'text-yellow-400', bad: 'text-red-400' }[a.grade];
-                return `<div class="flex items-center gap-2 text-xs cursor-pointer hover:bg-slate-800 rounded px-1" onclick="goTo(${a.stepIdx})">
-                  <span class="font-mono text-slate-500 w-4">#${a.move}</span>
-                  <span class="${gradeColor} font-bold w-10">${gradeLabel}</span>
-                  <span class="text-slate-400">[${a.tile.left}|${a.tile.right}]</span>
-                  ${a.grade !== 'perfect' && a.bestTile ? `<span class="text-slate-600">&rarr; [${a.bestTile.left}|${a.bestTile.right}]</span>` : ''}
-                  <span class="font-mono ml-auto ${a.eqLoss > 0.01 ? 'text-red-400' : 'text-emerald-400'}">${a.eqLoss > 0.01 ? `-${a.eqLoss.toFixed(2)}` : '0.00'}</span>
+                const showExplain = a.grade !== 'perfect' && a.bestTile && a.bestReasons && a.bestReasons.length > 0;
+                return `<div class="cursor-pointer hover:bg-slate-800 rounded px-1 py-0.5" onclick="goTo(${a.stepIdx})">
+                  <div class="flex items-center gap-2 text-xs">
+                    <span class="font-mono text-slate-500 w-4">#${a.move}</span>
+                    <span class="${gradeColor} font-bold w-10">${gradeLabel}</span>
+                    <span class="text-slate-400">[${a.tile.left}|${a.tile.right}] ${a.side || ''}</span>
+                    ${a.grade !== 'perfect' && a.bestTile ? `<span class="text-slate-600">&rarr; [${a.bestTile.left}|${a.bestTile.right}] ${a.bestSide || ''}</span>` : ''}
+                    <span class="font-mono ml-auto ${a.eqLoss > 0.01 ? 'text-red-400' : 'text-emerald-400'}">${a.eqLoss > 0.01 ? `-${a.eqLoss.toFixed(2)}` : '0.00'}</span>
+                  </div>
+                  ${showExplain ? `<div class="ml-14 mt-0.5 text-xs text-slate-500 leading-tight">${a.bestReasons.map(r => '<span class="text-slate-600">- </span>' + r).join('<br>')}</div>` : ''}
                 </div>`;
               }).join('')}
             </div>
