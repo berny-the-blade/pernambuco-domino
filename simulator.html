@@ -2196,10 +2196,10 @@
       newSeed();
       belief = new BeliefModel();
 
-      // Deal hands
+      // Deal hands (Pernambuco rule: 24 tiles dealt, 4 removed from game)
       const deck = shuffleDeck(ALL_TILES);
       liveHands = [[], [], [], []];
-      for (let i = 0; i < 28; i++) liveHands[i % 4].push(deck[i]);
+      for (let i = 0; i < 24; i++) liveHands[i % 4].push(deck[i]);
 
       // Find highest double opener
       let hp = -1, ht = null, hd = -1;
