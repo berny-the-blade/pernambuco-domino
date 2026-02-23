@@ -1904,6 +1904,32 @@
       return scored[0] || null;
     }
 
+    // ========== DIFFICULTY-BASED MOVE SELECTION ==========
+    function selectMoveByDifficulty(allOptions, difficulty) {
+      if (!allOptions || allOptions.length === 0) return null;
+      if (allOptions.length === 1) return allOptions[0];
+      if (difficulty >= 1.0) return allOptions[0]; // expert: always best
+
+      // Softmax with temperature: lower difficulty = higher temperature = more random
+      const temperature = Math.max(0.05, (1 - difficulty) * 2.5);
+      const maxScore = allOptions[0].score;
+      const weights = allOptions.map(o => Math.exp((o.score - maxScore) / (temperature * 25 + 1)));
+      const totalWeight = weights.reduce((s, w) => s + w, 0);
+
+      let r = Math.random() * totalWeight;
+      for (let i = 0; i < weights.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return allOptions[i];
+      }
+      return allOptions[allOptions.length - 1];
+    }
+
+    function getDifficultyForPlayer(player) {
+      if (player === 0) return 1.0;
+      if (player === 2) return playDifficulty.partner;
+      return playDifficulty.opponents;
+    }
+
     // Hand strength evaluation
     function evaluateHandStrength(hand, lE, rE, bLen, player, knowledge) {
       const metrics = {};
@@ -2143,6 +2169,324 @@
         autoTile,
         ...simulateFullRound(hands, starter, [autoTile], autoTile.left, autoTile.right, hp)
       };
+    }
+
+    // ========== LIVE PLAY ENGINE ==========
+
+    function startPlayGame() {
+      stopPlayAI();
+      playWaiting = false;
+      playSidePick = null;
+      mcResults = null;
+      quizWaiting = false;
+      quizResult = null;
+      quizShowingResult = false;
+      puzzleMode = false;
+      puzzleDef = null;
+
+      newSeed();
+      belief = new BeliefModel();
+
+      // Deal hands
+      const deck = shuffleDeck(ALL_TILES);
+      liveHands = [[], [], [], []];
+      for (let i = 0; i < 28; i++) liveHands[i % 4].push(deck[i]);
+
+      // Find highest double opener
+      let hp = -1, ht = null, hd = -1;
+      for (let p = 0; p < 4; p++)
+        for (const t of liveHands[p])
+          if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+
+      if (hp < 0) { // no doubles — redeal
+        startPlayGame();
+        return;
+      }
+
+      // Auto-play the opening tile
+      const autoTile = { ...ht };
+      liveHands[hp] = liveHands[hp].filter(t => t.id !== ht.id);
+      liveBoard = [autoTile];
+      liveLeftEnd = autoTile.left;
+      liveRightEnd = autoTile.right;
+      liveCurrentPlayer = (hp + 1) % 4;
+      livePassCount = 0;
+      liveMoveNum = 0;
+      liveKnowledge = new Knowledge();
+      liveNotebook = new DeductionNotebook();
+      liveKnowledge.recordPlay(hp, autoTile);
+      liveNotebook.recordPlay(hp, 0, autoTile, null, undefined, undefined);
+
+      currentGame = {
+        originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+        autoPlayedBy: hp,
+        autoTile,
+        snapshots: [{
+          move: 0, player: -1, action: 'start', tile: null, side: null,
+          reasons: ['Game begins'],
+          hands: liveHands.map(h => h.map(t => ({ ...t }))),
+          board: liveBoard.map(t => ({ ...t })),
+          leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
+          currentPlayer: liveCurrentPlayer,
+          knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
+        }],
+        outcome: null
+      };
+      currentStep = 0;
+      gameMode = 'play';
+      stats.games++;
+      saveStats();
+
+      render();
+      scheduleNextMove();
+    }
+
+    function scheduleNextMove() {
+      if (currentGame && currentGame.outcome) return;
+      if (liveCurrentPlayer === 0) {
+        playWaiting = true;
+        playSidePick = null;
+        render();
+        return;
+      }
+      playAITimer = setTimeout(() => {
+        playAITimer = null;
+        executeAIMove();
+      }, PLAY_AI_DELAY);
+    }
+
+    function executeAIMove() {
+      if (!liveHands || currentGame.outcome) return;
+      const player = liveCurrentPlayer;
+      const hand = liveHands[player];
+      const allOptions = smartAI(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, true);
+
+      const difficulty = getDifficultyForPlayer(player);
+      const decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
+
+      if (decision) {
+        recordLivePlay(player, decision.tile, decision.side, decision.reasons, decision.score, allOptions);
+      } else {
+        recordLivePass(player);
+      }
+
+      render();
+      scheduleNextMove();
+    }
+
+    function recordLivePlay(player, tile, prefSide, reasons, score, allOptions) {
+      liveMoveNum++;
+      let side = prefSide;
+      if (liveBoard.length > 0 && !side) {
+        side = (tile.left === liveLeftEnd || tile.right === liveLeftEnd) ? 'left' : 'right';
+      }
+
+      const playedTile = { ...tile };
+      liveHands[player] = liveHands[player].filter(t => t.id !== tile.id);
+      liveKnowledge.recordPlay(player, tile);
+      liveNotebook.recordPlay(player, liveMoveNum, tile, side, liveLeftEnd, liveRightEnd);
+      livePassCount = 0;
+
+      const pL = liveLeftEnd, pR = liveRightEnd;
+
+      if (liveBoard.length === 0) {
+        liveBoard = [playedTile];
+        liveLeftEnd = tile.left;
+        liveRightEnd = tile.right;
+      } else {
+        let placed = { ...tile };
+        if (side === 'left') {
+          if (tile.left === liveLeftEnd) placed = { left: tile.right, right: tile.left, id: tile.id };
+          liveBoard.unshift(placed);
+          liveLeftEnd = placed.left;
+        } else {
+          if (tile.right === liveRightEnd) placed = { left: tile.right, right: tile.left, id: tile.id };
+          liveBoard.push(placed);
+          liveRightEnd = placed.right;
+        }
+      }
+
+      let outcome = null;
+      if (liveHands[player].length === 0) {
+        const isD = tile.left === tile.right;
+        const wasBoth = couldPlayBothEnds(tile, pL, pR);
+        let pts, type;
+        if (isD && wasBoth) { pts = 4; type = 'CRUZADA'; }
+        else if (isD) { pts = 2; type = 'CARROCA'; }
+        else if (wasBoth) { pts = 3; type = 'LA E LO'; }
+        else { pts = 1; type = 'NORMAL'; }
+        outcome = { type: 'win', winner: player, team: player % 2, points: pts, winType: type };
+      }
+
+      liveCurrentPlayer = outcome ? -1 : (player + 1) % 4;
+
+      currentGame.snapshots.push({
+        move: liveMoveNum, player, action: 'play', tile: playedTile, side: side || 'first',
+        reasons: reasons || [], score: score || 0,
+        allOptions: (allOptions || []).map(o => ({ tile: { ...o.tile }, score: o.score, side: o.side, reasons: [...o.reasons] })),
+        hands: liveHands.map(h => h.map(t => ({ ...t }))),
+        board: liveBoard.map(t => ({ ...t })),
+        leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
+        currentPlayer: liveCurrentPlayer,
+        knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone(),
+        outcome
+      });
+
+      currentStep = currentGame.snapshots.length - 1;
+
+      if (outcome) {
+        currentGame.outcome = outcome;
+        finishPlayGame(outcome);
+      }
+    }
+
+    function recordLivePass(player) {
+      liveMoveNum++;
+      livePassCount++;
+      liveKnowledge.recordPass(player, liveLeftEnd, liveRightEnd);
+      liveNotebook.recordPass(player, liveMoveNum, liveLeftEnd, liveRightEnd);
+
+      let outcome = null;
+      if (livePassCount >= 4) {
+        const hv = liveHands.map((h, i) => ({ player: i, team: i % 2, points: h.reduce((s, t) => s + t.left + t.right, 0) }));
+        const min = Math.min(...hv.map(v => v.points));
+        const winners = hv.filter(v => v.points === min);
+        if (winners.length > 1 && winners.some(w => w.team === 0) && winners.some(w => w.team === 1)) {
+          outcome = { type: 'tie', points: 0 };
+        } else {
+          outcome = { type: 'blocked', winner: winners[0].player, team: winners[0].team, points: 1, handValues: hv };
+        }
+      }
+
+      liveCurrentPlayer = outcome ? -1 : (player + 1) % 4;
+
+      currentGame.snapshots.push({
+        move: liveMoveNum, player, action: 'pass', tile: null, side: null,
+        reasons: [`No tiles matching ${liveLeftEnd} or ${liveRightEnd}`],
+        allOptions: [],
+        hands: liveHands.map(h => h.map(t => ({ ...t }))),
+        board: liveBoard.map(t => ({ ...t })),
+        leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
+        currentPlayer: liveCurrentPlayer,
+        knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone(),
+        outcome
+      });
+
+      currentStep = currentGame.snapshots.length - 1;
+
+      if (outcome) {
+        currentGame.outcome = outcome;
+        finishPlayGame(outcome);
+      }
+    }
+
+    function finishPlayGame(outcome) {
+      stopPlayAI();
+      playWaiting = false;
+      playSidePick = null;
+
+      // Apply dobrada multiplier
+      outcome.basePoints = outcome.points || 0;
+      outcome.points = (outcome.points || 0) * scoreMultiplier;
+      outcome.multiplier = scoreMultiplier;
+
+      const lastSnap = currentGame.snapshots[currentGame.snapshots.length - 1];
+      if (lastSnap) lastSnap.outcome = outcome;
+
+      if (outcome.winner !== undefined && outcome.points) {
+        const winTeam = outcome.winner % 2;
+        matchScore[winTeam] += outcome.points;
+        lastWinTeam = winTeam;
+        if (matchScore[0] >= MATCH_TARGET || matchScore[1] >= MATCH_TARGET) {
+          matchScore = [0, 0];
+          scoreMultiplier = 1;
+          lastWinTeam = null;
+        }
+      }
+
+      if (outcome.type === 'tie') {
+        scoreMultiplier *= 2;
+      } else {
+        scoreMultiplier = 1;
+      }
+
+      render();
+    }
+
+    function stopPlayAI() {
+      if (playAITimer) { clearTimeout(playAITimer); playAITimer = null; }
+    }
+
+    // ========== PLAY MODE HUMAN INPUT ==========
+
+    function playPickTile(tileId) {
+      if (!playWaiting || playSidePick) return;
+      const hand = liveHands[0];
+      const tile = hand.find(t => t.id === tileId);
+      if (!tile) return;
+      if (!canPlay(tile, liveLeftEnd, liveRightEnd, liveBoard.length)) return;
+
+      const canLeft = canPlayOnSide(tile, liveLeftEnd);
+      const canRight = canPlayOnSide(tile, liveRightEnd);
+
+      if (liveLeftEnd === liveRightEnd) {
+        finishPlayPick(tile, 'left');
+        return;
+      }
+
+      if (canLeft && canRight) {
+        playSidePick = { tile, canLeft, canRight };
+        render();
+        return;
+      }
+
+      if (canLeft) finishPlayPick(tile, 'left');
+      else if (canRight) finishPlayPick(tile, 'right');
+    }
+
+    function playPickSide(side) {
+      if (!playSidePick) return;
+      const tile = playSidePick.tile;
+      playSidePick = null;
+      finishPlayPick(tile, side);
+    }
+
+    function finishPlayPick(tile, side) {
+      playWaiting = false;
+      playSidePick = null;
+
+      const allOptions = smartAI(liveHands[0], liveLeftEnd, liveRightEnd, liveBoard.length, 0, liveKnowledge, true);
+      const chosen = allOptions.find(o => o.tile.id === tile.id && o.side === side)
+                  || allOptions.find(o => o.tile.id === tile.id);
+      const reasons = chosen ? chosen.reasons : ['Player choice'];
+      const score = chosen ? chosen.score : 0;
+
+      recordLivePlay(0, tile, side, reasons, score, allOptions);
+      render();
+      scheduleNextMove();
+    }
+
+    function playPass() {
+      if (!playWaiting) return;
+      const hand = liveHands[0];
+      if (hand.some(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard.length))) return;
+
+      playWaiting = false;
+      playSidePick = null;
+      recordLivePass(0);
+      render();
+      scheduleNextMove();
+    }
+
+    function renderPlaySidePickOverlay() {
+      const t = playSidePick.tile;
+      return `<div class="text-center mt-2 bg-slate-900 rounded-lg p-2 border border-yellow-500">
+        <div class="text-xs text-yellow-300 mb-1">[${t.left}|${t.right}] can play on both ends. Which side?</div>
+        <div class="flex justify-center gap-3">
+          <button class="side-pick-btn bg-blue-600 text-white" onclick="playPickSide('left')">Left End (${liveLeftEnd})</button>
+          <button class="side-pick-btn bg-red-600 text-white" onclick="playPickSide('right')">Right End (${liveRightEnd})</button>
+        </div>
+      </div>`;
     }
 
     // ========== MONTE CARLO LOOKAHEAD ==========
@@ -2474,12 +2818,30 @@
     let currentStep = 0;
     let autoPlayTimer = null;
     let autoPlaySpeed = 1500;
-    let gameMode = 'watch'; // 'watch' | 'quiz'
+    let gameMode = 'watch'; // 'watch' | 'quiz' | 'play'
     let scoreMultiplier = 1; // dobrada: doubles after tied block
     let matchScore = [0, 0];  // team0 vs team1 score, first to 6 wins match
     let lastWinTeam = null;   // null = first game of match, 0 or 1 = team that won last
     let starterChoicePending = false; // true when waiting for user to pick starter
     let pendingHands = null; // pre-dealt hands shown during starter choice
+
+    // ========== PLAY MODE STATE ==========
+    let playWaiting = false;        // true when waiting for human to pick tile
+    let playSidePick = null;        // {tile, canLeft, canRight} — waiting for side choice
+    let playAITimer = null;         // setTimeout handle for AI move delays
+    let playDifficulty = { opponents: 0.75, partner: 0.75 };
+    const DIFFICULTY_PRESETS = {
+      beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
+      intermediate: { value: 0.50, label: 'Intermediate',  desc: 'Decent, makes mistakes', color: '#eab308' },
+      advanced:     { value: 0.75, label: 'Advanced',      desc: 'Strong, rare errors',  color: '#f97316' },
+      expert:       { value: 1.00, label: 'Expert',        desc: 'Always optimal',   color: '#ef4444' }
+    };
+    const PLAY_AI_DELAY = 600;
+    let playShowingDiffPicker = false;
+    // Live game mutable state (play mode only)
+    let liveHands = null, liveBoard = null, liveLeftEnd = null, liveRightEnd = null;
+    let liveCurrentPlayer = null, livePassCount = 0, liveMoveNum = 0;
+    let liveKnowledge = null, liveNotebook = null;
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -3020,6 +3382,10 @@
         app.innerHTML = renderPuzzleBrowser();
         return;
       }
+      if (playShowingDiffPicker) {
+        app.innerHTML = renderDifficultyPicker();
+        return;
+      }
       if (!currentGame) {
         app.innerHTML = renderStartScreen();
         return;
@@ -3047,11 +3413,12 @@
             </h1>
             <div class="flex gap-2 items-center">
               <div class="flex gap-1 mr-2">
-                <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch Mode</button>
-                <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">Quiz Mode</button>
-                <button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>
+                <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch</button>
+                <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">Quiz</button>
+                <button class="btn text-xs ${gameMode === 'play' ? '' : 'btn-gray'}" style="${gameMode === 'play' ? 'background:#eab308;color:#0f172a' : ''}" onclick="showDifficultyPicker()">Play</button>
+                ${gameMode !== 'play' ? `<button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>` : ''}
               </div>
-              <button class="btn btn-yellow text-sm" onclick="newGame()">${scoreMultiplier > 1 ? `New Game (x${scoreMultiplier})` : 'New Game'}</button>
+              <button class="btn btn-yellow text-sm" onclick="${gameMode === 'play' ? 'startPlayGame()' : 'newGame()'}">${scoreMultiplier > 1 ? `New Game (x${scoreMultiplier})` : 'New Game'}</button>
               <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export game as JSONL">Export</button>
               <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL game">Import<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
               ${!puzzleMode ? `<button class="btn text-xs" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Puzzles</button>` : ''}
@@ -3100,6 +3467,19 @@
               <div class="bg-slate-800 rounded-xl p-3 mt-2 flex items-center gap-3 flex-wrap">
                 ${puzzleMode ? `
                 <span class="text-xs text-amber-400 font-bold pulse">PUZZLE — Pick the best tile to play</span>
+                ` : gameMode === 'play' ? `
+                ${currentGame.outcome ? `
+                <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
+                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
+                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1?'disabled':''}>Next &rsaquo;</button>
+                <button class="btn btn-gray text-sm" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>&raquo;</button>
+                <div class="mx-1 text-slate-600">|</div>
+                <button class="btn text-sm" style="background:#eab308;color:#0f172a" onclick="startPlayGame()">Play Again</button>
+                <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">Difficulty</button>
+                ` : `
+                <span class="text-xs text-yellow-400 font-bold ${playWaiting ? 'pulse' : ''}">${playWaiting ? 'YOUR TURN — Pick a tile to play' : 'AI thinking...'}</span>
+                <div class="ml-2 text-xs text-slate-500">Opp: ${Object.entries(DIFFICULTY_PRESETS).find(([_,p])=>p.value===playDifficulty.opponents)?.[1]?.label || '?'} &middot; Partner: ${Object.entries(DIFFICULTY_PRESETS).find(([_,p])=>p.value===playDifficulty.partner)?.[1]?.label || '?'}</div>
+                `}
                 ` : `
                 <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
                 <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
@@ -3180,12 +3560,22 @@
       const mult = o.multiplier || 1;
       const dobradaTag = mult > 1 ? `<div class="text-xs text-orange-400 mt-1">DOBRADA x${mult} applied!</div>` : '';
       const nextDobrada = o.type === 'tie' ? `<div class="text-xs text-orange-300 mt-1">Next game is DOBRADA (x${scoreMultiplier} points)!</div>` : '';
+      const isMyTeamWin = o.winner !== undefined && o.winner % 2 === 0;
+      const playButtons = gameMode === 'play' ? `
+        <div class="mt-3 flex gap-2 justify-center flex-wrap">
+          <button class="btn text-sm" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="startPlayGame()">Play Again</button>
+          <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">Change Difficulty</button>
+          <button class="btn btn-gray text-sm" onclick="gameMode='watch';currentGame=null;render();">Menu</button>
+        </div>
+      ` : '';
       return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
         <div class="text-center">
-          <div class="text-3xl font-bold text-emerald-400 mb-1">${o.winType || o.type.toUpperCase()}</div>
+          <div class="text-3xl font-bold ${isMyTeamWin ? 'text-emerald-400' : o.type === 'tie' ? 'text-yellow-400' : 'text-red-400'} mb-1">${gameMode === 'play' ? (isMyTeamWin ? 'YOU WIN!' : o.type === 'tie' ? 'TIED!' : 'YOU LOSE!') : (o.winType || o.type.toUpperCase())}</div>
+          <div class="text-sm text-slate-300 mb-1">${o.winType || o.type.toUpperCase()}</div>
           ${o.winner !== undefined ?
             `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
             `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
+          ${playButtons}
         </div>
       </div>`;
     }
@@ -3238,7 +3628,7 @@
           if (t.id === quizResult.userTile.id && quizResult.grade === 'bad') return 'tile-wrong';
           if (t.id === quizResult.userTile.id) return 'tile-good';
         }
-        if (quizWaiting && isActive) {
+        if ((quizWaiting && isActive) || (playWaiting && gameMode === 'play')) {
           if (canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) return 'tile-playable';
         }
         return '';
@@ -3247,6 +3637,9 @@
       const getTileClick = (t) => {
         if (quizWaiting && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
           return `quizPickTile('${t.id}')`;
+        }
+        if (playWaiting && gameMode === 'play' && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
+          return `playPickTile('${t.id}')`;
         }
         return '';
       };
@@ -3270,7 +3663,14 @@
               ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">Click a tile to play it</span></div>`
               : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
           })() : ''}
+          ${playWaiting && gameMode === 'play' && !playSidePick ? (() => {
+            const hasPlayable = hand.some(t => canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length));
+            return hasPlayable
+              ? `<div class="text-center mt-1"><span class="text-xs text-yellow-400 pulse font-bold">Click a tile to play it</span></div>`
+              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="playPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
+          })() : ''}
           ${quizSidePick ? renderSidePickOverlay() : ''}
+          ${playSidePick ? renderPlaySidePickOverlay() : ''}
           ${quizShowingResult ? renderQuizResultBadge() : ''}
         </div>`;
     }
@@ -4599,6 +4999,81 @@
       `;
     }
 
+    // ========== DIFFICULTY PICKER ==========
+
+    function renderDifficultyPicker() {
+      const presets = Object.entries(DIFFICULTY_PRESETS);
+      const currentOpp = presets.find(([_, p]) => p.value === playDifficulty.opponents)?.[0] || '';
+      const currentPart = presets.find(([_, p]) => p.value === playDifficulty.partner)?.[0] || '';
+
+      return `
+        <div class="flex items-center justify-center min-h-screen">
+          <div class="text-center max-w-lg">
+            <h1 class="text-3xl font-bold text-yellow-400 mb-2">Play vs AI</h1>
+            <p class="text-slate-400 mb-1">You (P0) + AI Partner (P2) vs AI Opponents (P1 & P3)</p>
+            <p class="text-slate-500 text-xs mb-6">Your moves shape the game. Test your real skill.</p>
+
+            <div class="bg-slate-800 rounded-xl p-5 mb-4 text-left">
+              <div class="text-sm font-bold text-red-400 mb-2">Opponent Strength (P1 & P3)</div>
+              <div class="flex gap-2 mb-4">
+                ${presets.map(([key, p]) => `
+                  <button class="btn text-xs flex-1 ${currentOpp === key ? 'font-bold ring-2 ring-white' : 'btn-gray'}"
+                          style="${currentOpp === key ? 'background:' + p.color + ';color:#0f172a' : ''}"
+                          onclick="setPlayDifficulty('opponents', ${p.value})">
+                    ${p.label}
+                  </button>
+                `).join('')}
+              </div>
+
+              <div class="text-sm font-bold text-blue-400 mb-2">Partner Strength (P2)</div>
+              <div class="flex gap-2 mb-3">
+                ${presets.map(([key, p]) => `
+                  <button class="btn text-xs flex-1 ${currentPart === key ? 'font-bold ring-2 ring-white' : 'btn-gray'}"
+                          style="${currentPart === key ? 'background:' + p.color + ';color:#0f172a' : ''}"
+                          onclick="setPlayDifficulty('partner', ${p.value})">
+                    ${p.label}
+                  </button>
+                `).join('')}
+              </div>
+
+              <div class="text-xs text-slate-500 mt-2">
+                <strong>Beginner</strong>: Nearly random &middot;
+                <strong>Intermediate</strong>: Decent, mistakes &middot;
+                <strong>Advanced</strong>: Strong, rare errors &middot;
+                <strong>Expert</strong>: Always optimal
+              </div>
+            </div>
+
+            <div class="flex gap-3 justify-center">
+              <button class="btn text-lg px-8 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="confirmStartPlay()">Start Game</button>
+              <button class="btn btn-gray text-lg px-6 py-3" onclick="cancelDiffPicker()">Back</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function setPlayDifficulty(target, value) {
+      playDifficulty[target] = value;
+      render();
+    }
+
+    function showDifficultyPicker() {
+      stopPlayAI();
+      playShowingDiffPicker = true;
+      currentGame = null;
+      render();
+    }
+
+    function cancelDiffPicker() {
+      playShowingDiffPicker = false;
+      render();
+    }
+
+    function confirmStartPlay() {
+      playShowingDiffPicker = false;
+      startPlayGame();
+    }
+
     function renderStartScreen() {
       const hasStats = stats.totalMoves > 0;
       return `
@@ -4607,27 +5082,32 @@
             <h1 class="text-4xl font-bold text-emerald-400 mb-3">Domino Pernambucano</h1>
             <p class="text-slate-400 mb-1">Strategy Trainer & Simulator</p>
             <p class="text-sm text-slate-500 mb-6">Learn optimal play through AI reasoning, quizzes, and card tracking</p>
-            <div class="flex gap-4 justify-center mb-6">
+            <div class="flex gap-4 justify-center flex-wrap mb-6">
               <button class="btn btn-green text-lg px-6 py-3" onclick="setMode('watch'); newGame();">Watch AI Play</button>
               <button class="btn btn-purple text-lg px-6 py-3" onclick="setMode('quiz'); newGame();">Quiz Mode</button>
+              <button class="btn text-lg px-6 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="showDifficultyPicker();">Play vs AI</button>
               <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Strategy Puzzles</button>
             </div>
-            <div class="grid grid-cols-4 gap-3 text-left mb-6">
+            <div class="grid grid-cols-5 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
-                <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move. See why each tile was chosen.</div>
+                <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-purple-400 font-bold text-sm mb-1">Quiz Mode</div>
-                <div class="text-xs text-slate-400">At your turns, pick the tile YOU would play. Get graded against the AI's optimal choice.</div>
+                <div class="text-xs text-slate-400">Pick tiles at your turns. Get graded against the AI's optimal choice.</div>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-yellow-400 font-bold text-sm mb-1">Play vs AI</div>
+                <div class="text-xs text-slate-400">Play real games against AI opponents with configurable difficulty levels.</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-amber-400 font-bold text-sm mb-1">Strategy Puzzles</div>
-                <div class="text-xs text-slate-400">Curated positions where many tiles look good but only one is perfect. Like chess tactics.</div>
+                <div class="text-xs text-slate-400">Curated positions where many tiles look good but only one is perfect.</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-blue-400 font-bold text-sm mb-1">Card Tracker</div>
-                <div class="text-xs text-slate-400">Visual grid showing which tiles each opponent could hold. Practice counting cards.</div>
+                <div class="text-xs text-slate-400">Visual grid showing which tiles each opponent could hold.</div>
               </div>
             </div>
             ${hasStats ? `
@@ -4646,6 +5126,10 @@
     function setMode(m) {
       gameMode = m;
       stopAutoPlay();
+      stopPlayAI();
+      playWaiting = false;
+      playSidePick = null;
+      playShowingDiffPicker = false;
       quizWaiting = false;
       quizResult = null;
       quizShowingResult = false;
@@ -4691,7 +5175,9 @@
     }
 
     function newGame() {
+      if (gameMode === 'play') { startPlayGame(); return; }
       stopAutoPlay();
+      stopPlayAI();
       quizWaiting = false;
       quizResult = null;
       quizShowingResult = false;
@@ -4875,6 +5361,15 @@
 
     // Keyboard controls
     document.addEventListener('keydown', e => {
+      if (gameMode === 'play') {
+        if (e.key === 'n') startPlayGame();
+        // Arrow keys only for post-game review
+        if (currentGame && currentGame.outcome) {
+          if (e.key === 'ArrowRight') { e.preventDefault(); if (currentStep < currentGame.snapshots.length - 1) { currentStep++; render(); } }
+          if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentStep > 0) { currentStep--; render(); } }
+        }
+        return;
+      }
       if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); handleNext(); }
       else if (e.key === 'ArrowLeft') { e.preventDefault(); stepBack(); }
       else if (e.key === 'n') newGame();
