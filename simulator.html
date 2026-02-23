@@ -1023,6 +1023,23 @@
       render();
     }
 
+    function closePuzzleBrowser() {
+      showingPuzzleBrowser = false;
+      currentGame = null;
+      render();
+    }
+
+    function startPuzzle(id) {
+      const p = PUZZLES.find(x => x.id === id);
+      if (p) loadPuzzle(p);
+    }
+
+    function exitPuzzle() {
+      puzzleMode = false;
+      puzzleDef = null;
+      showPuzzleBrowser();
+    }
+
     function showPuzzleHint() {
       puzzleHintShown = true;
       render();
@@ -1068,7 +1085,7 @@
                 const badge = comp === 'perfect' ? '<span class="grade-badge grade-perfect text-xs">\u2714</span>'
                   : comp ? `<span class="grade-badge grade-${comp} text-xs">${comp.toUpperCase()}</span>` : '';
                 return `<div class="bg-slate-800 rounded-lg p-3 border-2 ${border} cursor-pointer hover:border-purple-400 transition-all"
-                  onclick="loadPuzzle(PUZZLES.find(p=>p.id==='${p.id}'))">
+                  onclick="startPuzzle('${p.id}')">
                   <div class="flex items-center justify-between mb-1">
                     <span class="text-sm font-bold text-white">${p.title}</span>${badge}
                   </div>
@@ -1079,7 +1096,7 @@
             </div>`;
           }).join('')}
           <div class="text-center mt-4">
-            <button class="btn btn-gray" onclick="showingPuzzleBrowser=false;currentGame=null;render();">Back</button>
+            <button class="btn btn-gray" onclick="closePuzzleBrowser();">Back</button>
           </div>
         </div>
       </div>`;
@@ -3042,7 +3059,7 @@
             <span class="text-amber-600 text-xs">${'★'.repeat(puzzleDef.difficulty)}${'☆'.repeat(5-puzzleDef.difficulty)}</span>
             <span class="text-slate-400 text-xs flex-1">${puzzleDef.description}</span>
             ${!puzzleHintShown ? `<button class="btn btn-gray text-xs" onclick="showPuzzleHint();">Hint</button>` : `<span class="text-yellow-300 text-xs font-bold">Hint: ${puzzleDef.hint}</span>`}
-            <button class="btn btn-gray text-xs" onclick="puzzleMode=false;puzzleDef=null;showPuzzleBrowser();">All Puzzles</button>
+            <button class="btn btn-gray text-xs" onclick="exitPuzzle();">All Puzzles</button>
           </div>` : ''}
 
           <div class="grid grid-cols-12 gap-3">
