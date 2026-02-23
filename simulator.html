@@ -772,9 +772,8 @@
         otherHands: { 1: ['0-0', '1-1', '2-3', '3-6', '5-6'], 2: ['0-5', '1-5', '2-6', '3-5'], 3: ['0-1', '0-6', '5-5', '3-3', '6-6'] },
         voids: { 3: [4, 2] },
         passHistory: [{ player: 3, leftEnd: 4, rightEnd: 2 }],
-        correctTile: '2-4', correctSide: 'right'
-        // [2-4] right → newRight=4. Ends: 4/4. P3 void 4,2 → totally blocked!
-        // Traps: [2-5] right → ends 4/5 (P3 has 5-5). [0-4] left → ends 0/2 (P3 has 0-1,0-6).
+        correctTile: '2-4', correctSide: 'right',
+        explanation: '<b>Playing [2|4] RIGHT makes ends 4/4.</b> Opp Right is void in 4 AND 2 — both ends are now numbers they cannot play. Playing LEFT makes ends 2/2, which also blocks them, but 4/4 is stronger: you still hold [0|4] as a follow-up, while on 2/2 you have more tiles but less blocking pressure since opponents may hold more 2-tiles. The key lesson: <em>when blocking, check which end-number is scarcer among opponents.</em>'
       },
       {
         id: 'block-02', title: 'Double Lock', difficulty: 4, category: 'blocking',
@@ -786,9 +785,8 @@
         otherHands: { 1: ['0-0', '0-4', '1-1', '2-4', '6-6'], 2: ['3-6', '3-5', '1-5', '0-6', '2-5'], 3: ['4-4', '2-2', '4-5', '5-5'] },
         voids: { 1: [3, 5], 3: [3, 1] },
         passHistory: [{ player: 1, leftEnd: 3, rightEnd: 5 }, { player: 3, leftEnd: 3, rightEnd: 1 }],
-        correctTile: '1-3', correctSide: 'right'
-        // [1-3] right → newRight=3. Ends: 3/3. P1 void 3 + P3 void 3 → BOTH blocked!
-        // Traps: [0-3] left → ends 0/1. Neither blocked. [2-3] left → ends 2/1. P3 void 1 but P1 can play.
+        correctTile: '1-3', correctSide: 'right',
+        explanation: '<b>[1|3] on RIGHT makes ends 3/3.</b> P1 is void in 3 (passed on 3/5) and P3 is void in 3 (passed on 3/1). With both ends at 3, BOTH opponents are locked out simultaneously. Other plays like [0|3] left (→ ends 0/1) release the pressure entirely. <em>Rule: when two opponents share a void, weaponize it by making both ends that number.</em>'
       },
 
       // ===== FEEDING PARTNER =====
@@ -802,9 +800,8 @@
         otherHands: { 1: ['0-6', '4-6', '3-4', '1-6', '2-4'], 2: ['0-5', '2-5', '5-6', '2-3', '0-4'], 3: ['1-1', '3-3', '0-0', '0-2', '1-3'] },
         voids: {},
         passHistory: [],
-        correctTile: '1-5', correctSide: 'right'
-        // [1-5] right → both ends=5. Partner has [0-5,2-5,5-6] — guaranteed plays.
-        // Traps: [4-5] left → newLeft=4, removes 5. [0-1] right → newRight=0, neutral.
+        correctTile: '1-5', correctSide: 'right',
+        explanation: '<b>[1|5] RIGHT makes both ends 5.</b> Partner has played three 5-tiles and still holds [0|5], [2|5], [5|6] — they dominate suit 5. With both ends at 5, partner is guaranteed to play next no matter what. [4|5] left removes a 5-end, weakening partner. <em>Rule: when partner dominates a suit, make both ends that number to guarantee they can always play.</em>'
       },
       {
         id: 'feed-02', title: 'The Sacrifice', difficulty: 3, category: 'feeding',
@@ -816,9 +813,8 @@
         otherHands: { 1: ['0-5', '2-6'], 2: ['5-5'], 3: ['3-3', '3-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '2-5', correctSide: 'left'
-        // [2-5] left → newLeft=5. Ends: 5/5. Partner [5-5] matches both → cruzada 4pts!
-        // Traps: [0-2] left → ends 0/5, partner goes out for 2pts (carroca). [4-5] right → ends 2/4, partner can't play.
+        correctTile: '2-5', correctSide: 'left',
+        explanation: '<b>[2|5] LEFT makes ends 5/5.</b> Partner holds [5|5] as their LAST tile. A double that matches both open ends = CRUZADA (4 points!). Playing [0|2] left gives ends 0/5 — partner goes out with [5|5] on the right, but that\'s only a carroca (2 pts). <em>Rule: always check if you can set up a cruzada (double matching both ends) for partner\'s last tile — it\'s worth 4x a normal win.</em>'
       },
 
       // ===== CLEARING DOUBLES =====
@@ -832,9 +828,8 @@
         otherHands: { 1: ['0-4', '1-6', '2-6', '3-4', '5-6'], 2: ['0-5', '2-3', '4-5', '4-6', '1-2'], 3: ['0-6', '1-1', '3-3', '5-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '6-6', correctSide: 'left'
-        // [6-6] left → plays the isolated double, dumps 12 pips. If 6-end closes, stuck forever.
-        // Traps: [1-4] right → newRight=4. Keeps [6-6] stranded. [0-1] right → newRight=0. Same.
+        correctTile: '6-6', correctSide: 'left',
+        explanation: '<b>[6|6] LEFT plays your isolated double NOW.</b> You have no other 6-tiles, so if the 6-end disappears from the board, [6|6] is stranded forever (12 dead pips). Playing [1|4] or [0|1] on the right keeps [6|6] trapped. <em>Rule: an isolated double (no support tiles with that number) MUST be played at the first opportunity — it only connects to one number, and that number may vanish.</em>'
       },
       {
         id: 'double-02', title: 'Double Timing', difficulty: 3, category: 'doubles',
@@ -846,9 +841,8 @@
         otherHands: { 1: ['0-6', '1-4', '2-6', '4-5', '5-6'], 2: ['0-1', '1-5', '2-5', '3-5'], 3: ['0-2', '1-1', '2-4', '4-4', '0-3'] },
         voids: {},
         passHistory: [],
-        correctTile: '5-5', correctSide: 'left'
-        // [5-5] left → plays isolated double (no other 5s in hand). Still has [3-3,3-4,3-6] for suit 3.
-        // Traps: [3-3] right → plays supported double, leaves [5-5] stranded (no other 5s!).
+        correctTile: '5-5', correctSide: 'left',
+        explanation: '<b>[5|5] LEFT plays the ISOLATED double first.</b> You have zero other 5-tiles, making [5|5] urgent. Meanwhile [3|3] is supported by [3|4] and [3|6] — it can wait. Playing [3|3] right leaves [5|5] stranded with no future 5-end guaranteed. <em>Rule: with two doubles, play the isolated one first (no support). The supported double has backup tiles to create opportunities later.</em>'
       },
 
       // ===== ENDGAME =====
@@ -862,10 +856,8 @@
         otherHands: { 1: ['0-0', '2-3'], 2: ['0-2', '4-5'], 3: ['2-5', '3-4'] },
         voids: {},
         passHistory: [],
-        correctTile: '3-5', correctSide: 'right'
-        // [3-5] right → newRight=3. Ends: 3/3. Then [1-3] matches both → la-e-lo 3pts!
-        // Trap: [1-3] left → newLeft=1. Ends: 1/5. Then [3-5] plays right → 1pt normal.
-        // Trap: [3-5] left → newLeft=5. Ends: 5/5. Then [1-3] can't play (no 5). STUCK!
+        correctTile: '3-5', correctSide: 'right',
+        explanation: '<b>[3|5] RIGHT makes ends 3/3.</b> Your last tile [1|3] then matches BOTH ends — la-e-lo (3 points!). Playing [1|3] left first gives ends 1/5, then [3|5] goes right for just 1 point. Worse: [3|5] LEFT makes ends 5/5 and [1|3] has no 5 — you\'re STUCK with a tile you can\'t play! <em>Rule: with 2 tiles left, calculate backwards from your final tile. If it matches both ends, that\'s la-e-lo (3 pts). Set it up.</em>'
       },
       {
         id: 'end-02', title: 'Pip Count', difficulty: 3, category: 'endgame',
@@ -877,9 +869,8 @@
         otherHands: { 1: ['1-1', '2-2'], 2: ['0-5', '1-2', '2-3'], 3: ['0-0', '0-4'] },
         voids: { 1: [6, 3], 3: [6, 3] },
         passHistory: [{ player: 1, leftEnd: 6, rightEnd: 3 }, { player: 3, leftEnd: 6, rightEnd: 3 }],
-        correctTile: '5-6', correctSide: 'left'
-        // [5-6] left → dumps 11 pips. [1-3] right → dumps 4. [0-3] right → dumps 3.
-        // With a likely block, dumping 11 pips is critical for pip count victory.
+        correctTile: '5-6', correctSide: 'left',
+        explanation: '<b>[5|6] LEFT dumps 11 pips.</b> Both opponents just passed on 6/3 — the game is about to lock. In a blocked game, the team with fewer total pips wins 1 point. [5|6] sheds 11 pips vs [0|3] which only sheds 3. That 8-pip difference could swing the result. <em>Rule: when a block is imminent (multiple passes), dump your heaviest tile immediately. Every pip counts in the final tally.</em>'
       },
 
       // ===== READING / DEDUCTION =====
@@ -893,11 +884,8 @@
         otherHands: { 1: ['1-6', '2-6', '4-5'], 2: ['1-2', '2-3', '3-5'], 3: ['1-1', '1-4', '2-2', '2-4', '5-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '2-5', correctSide: 'right'
-        // [2-5] right → ends 3/2. Keeps 3 (my suit: 4 tiles with 3). 3 follow-up tiles match.
-        // [3-6] left → ends 6/5. Only [2-5] can play next (right=5). Weak.
-        // [1-3] left → ends 1/5. Only [2-5] right. Weak.
-        // TRAP: [0-3] left → ends 0/5. 0 is DEAD (all 0-tiles accounted for). Game stalls.
+        correctTile: '2-5', correctSide: 'right',
+        explanation: '<b>[2|5] RIGHT makes ends 3/2.</b> You hold 4 tiles with 3 ([0|3], [1|3], [3|6] + this), keeping end-3 alive for your suit. The TRAP is [0|3] on left → ends 0/5. Count the 0-tiles: six are on the board + one in your hand = all seven 0-tiles accounted for! A 0-end is DEAD — nobody can play on it. <em>Rule: count tiles by number. If all 7 of a number are visible (board + your hand + known), that end is dead. Never create it.</em>'
       },
       {
         id: 'read-02', title: 'Pressure the Weakness', difficulty: 4, category: 'reading',
@@ -909,10 +897,8 @@
         otherHands: { 1: ['0-1', '1-6', '3-4', '5-6', '4-6'], 2: ['0-4', '2-4', '4-4', '3-3', '1-5'], 3: ['1-1', '1-3', '1-4', '0-3', '0-0'] },
         voids: { 1: [2] },
         passHistory: [],
-        correctTile: '4-5', correctSide: 'left'
-        // [4-5] left → ends 4/2. Keeps 2 pressuring P1 (void in 2). Opens 4 for partner (has 0-4,2-4,4-4).
-        // Traps: [2-6] right → ends 5/6, removes 2 pressure. [1-2] right → ends 5/1, removes 2.
-        // [0-5] left → ends 0/2, keeps 2 but 0 is weaker for partner than 4.
+        correctTile: '4-5', correctSide: 'left',
+        explanation: '<b>[4|5] LEFT makes ends 4/2.</b> P1 is void in 2 (they passed), so keeping 2 on the board pressures them. Meanwhile, 4 is great for partner who holds [0|4], [2|4], [4|4] — three tiles with 4. Playing [2|6] or [1|2] on the right removes the 2-end, releasing P1 from pressure. <em>Rule: keep opponent-void numbers as board ends to pressure them, while creating ends that help your partner.</em>'
       },
 
       // ===== TEMPO & CONTROL =====
@@ -926,9 +912,8 @@
         otherHands: { 1: ['5-6', '4-5', '0-1', '4-6', '1-4'], 2: ['0-5', '1-6', '0-2', '2-2', '6-6'], 3: ['1-2', '5-5', '1-5', '0-0', '2-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '2-3', correctSide: 'right'
-        // [2-3] right → both ends=3. You still have [1-3,3-5,3-6] — guaranteed 3 more plays!
-        // Traps: [1-3] left → ends 1/2, loses all 3-dominance. [3-5] left → ends 5/2.
+        correctTile: '2-3', correctSide: 'right',
+        explanation: '<b>[2|3] RIGHT makes both ends 3.</b> You hold FOUR tiles with 3 ([1|3], [2|3], [3|5], [3|6]). With both ends at 3, you\'re guaranteed to play next, and the next, and the next. Any other play scatters the ends away from your dominant suit. <em>Rule: when you dominate a suit (4+ tiles), make both ends that number. You control the board and opponents struggle.</em>'
       },
       {
         id: 'tempo-02', title: 'Board Width', difficulty: 4, category: 'tempo',
@@ -940,16 +925,12 @@
         otherHands: { 1: ['0-6', '1-4', '2-6', '4-5', '5-6'], 2: ['0-5', '1-5', '2-5', '3-5'], 3: ['1-1', '4-4', '1-3', '2-4', '0-4'] },
         voids: {},
         passHistory: [],
-        correctTile: '0-6', correctSide: 'right'
-        // [0-6] right → ends 3/6. You still have [0-3,3-5,3-6] — 3 tiles match end 3!
-        // Traps: [0-3] right → ends 3/3 (narrow — only 3-tiles play, reduces options).
-        // [3-5] left → ends 5/0. Only 1 remaining tile matches (0-3 matches 0). Weak.
-        // [3-6] left → ends 6/0. Only [0-3] matches 0, [0-6] matches 0 or 6. OK but less.
+        correctTile: '0-6', correctSide: 'right',
+        explanation: '<b>[0|6] RIGHT makes ends 3/6.</b> You still have [0|3], [3|5], [3|6] — three tiles match end 3. Plus end 6 gives opponents options too, keeping the game open. The TRAP is [0|3] right → ends 3/3. Seems good (you have 3s!) but it\'s too narrow: ONLY 3-tiles can play, reducing total options. Two different ends = more tiles playable for everyone. <em>Rule: board "width" matters. Two different end-numbers let more tiles play than one repeated number, even if you dominate that suit.</em>'
       },
     ];
 
     function loadPuzzle(def) {
-      try {
       // Parse tiles
       const myHand = def.myHand.map(parseTileId);
       const otherHands = {
@@ -1037,7 +1018,6 @@
       quizSidePick = null;
       mcResults = null;
       render();
-      } catch(e) { alert('loadPuzzle ERROR: ' + e.message + '\nLine: ' + e.stack.split('\n')[1]); }
     }
 
     function showPuzzleBrowser() {
@@ -3499,6 +3479,13 @@
               ` : ''}
             </div>
           `).join('')}
+        </div>` : ''}
+
+        ${puzzleMode && puzzleDef ? `
+        <div class="border-t border-amber-700 pt-2 mt-2 bg-amber-950/30 rounded p-2">
+          <div class="text-xs text-amber-400 font-bold mb-1">&#127891; Puzzle Lesson: ${puzzleDef.title}</div>
+          <div class="text-xs text-amber-200 mb-1">${puzzleDef.hint}</div>
+          ${puzzleDef.explanation ? `<div class="text-xs text-slate-300 mt-1">${puzzleDef.explanation}</div>` : ''}
         </div>` : ''}
 
         <div class="text-center mt-2">
