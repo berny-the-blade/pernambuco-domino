@@ -3593,6 +3593,23 @@
           <button class="btn btn-gray text-sm" onclick="gameMode='watch';currentGame=null;render();">Menu</button>
         </div>
       ` : '';
+
+      // Pip count breakdown for blocked games
+      let pipBreakdown = '';
+      if (o.type === 'blocked' || o.type === 'tie') {
+        const hv = [0,1,2,3].map(p => {
+          const h = snap.hands[p] || [];
+          return { player: p, pips: h.reduce((s, t) => s + t.left + t.right, 0), tiles: h.length };
+        });
+        const teamPips = [hv[0].pips + hv[2].pips, hv[1].pips + hv[3].pips];
+        pipBreakdown = `<div class="mt-2 text-xs">
+          <div class="flex justify-center gap-4">
+            <span class="${teamPips[0] <= teamPips[1] ? 'text-emerald-400 font-bold' : 'text-slate-400'}">T1: ${pn(0)} ${hv[0].pips}p + ${pn(2)} ${hv[2].pips}p = ${teamPips[0]}</span>
+            <span class="${teamPips[1] <= teamPips[0] ? 'text-emerald-400 font-bold' : 'text-slate-400'}">T2: ${pn(1)} ${hv[1].pips}p + ${pn(3)} ${hv[3].pips}p = ${teamPips[1]}</span>
+          </div>
+        </div>`;
+      }
+
       return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
         <div class="text-center">
           <div class="text-3xl font-bold ${isMyTeamWin ? 'text-emerald-400' : o.type === 'tie' ? 'text-yellow-400' : 'text-red-400'} mb-1">${gameMode === 'play' ? (isMyTeamWin ? 'YOU WIN!' : o.type === 'tie' ? 'TIED!' : 'YOU LOSE!') : (o.winType || o.type.toUpperCase())}</div>
@@ -3600,6 +3617,7 @@
           ${o.winner !== undefined ?
             `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
             `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
+          ${pipBreakdown}
           ${playButtons}
         </div>
       </div>`;
@@ -3625,17 +3643,21 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
+      const revealHand = !!snap.outcome;
+      const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       return `
         <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 ${justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700'} relative">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
-            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : justPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'OPENED' : justPlayed ? 'PLAYED' : isActive ? 'PLAYING' : `${hand.length} tiles`}</span>
+            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : justPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'OPENED' : justPlayed ? 'PLAYED' : isActive ? 'PLAYING' : `${hand.length} tiles`}${snap.outcome && hand.length > 0 ? ` (${pips} pips)` : ''}</span>
           </div>
           ${justPassed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-red-400 font-black text-2xl animate-pulse drop-shadow-lg" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">PASSED!</span></div>` : ''}
           ${autoPlayed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-yellow-400 font-black text-lg drop-shadow-lg" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">[${currentGame.autoTile.left}|${currentGame.autoTile.right}] OPENED</span></div>` : ''}
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[50px]">
-            ${hand.map(() => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
+            ${revealHand
+              ? hand.map(t => tileHTML(t, '', 'v', '', '')).join('')
+              : hand.map(() => `<div class="w-9 h-16 rounded-md border-2 border-slate-600 bg-slate-700 flex items-center justify-center text-slate-500 text-xs">?</div>`).join('')}
           </div>
         </div>`;
     }
@@ -3934,6 +3956,8 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
+      const revealHand = !!snap.outcome;
+      const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       const borderCls = justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700';
       const statusText = autoPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">OPENED</div>`
@@ -3944,9 +3968,11 @@
       return `
         <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${borderCls}">
           <div class="text-xs font-bold text-center mb-1" style="color:${colors[playerIdx%2]}">${names[playerIdx].split('(')[0].trim()}</div>
-          <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} - ${hand.length}</div>
+          <div class="text-xs text-center text-slate-400 mb-1">${teams[playerIdx]} - ${hand.length}${snap.outcome && hand.length > 0 ? ` (${pips}p)` : ''}</div>
           <div class="flex flex-col gap-0.5 items-center flex-1 justify-center">
-            ${hand.map(() => `<div class="w-12 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
+            ${revealHand
+              ? hand.map(t => `<div class="flex gap-px justify-center">${tileHTML(t, 'board', 'h', '', '')}</div>`).join('')
+              : hand.map(() => `<div class="w-12 h-3 rounded-sm border border-slate-600 bg-slate-700"></div>`).join('')}
           </div>
           ${statusText}
         </div>`;
