@@ -929,6 +929,7 @@
     ];
 
     function loadPuzzle(def) {
+      try {
       // Parse tiles
       const myHand = def.myHand.map(parseTileId);
       const otherHands = {
@@ -969,9 +970,9 @@
       // Compute new ends for the correct play
       const cEnds = computeNewEnds(correctTileObj, def.correctSide, def.leftEnd, def.rightEnd);
 
-      // beforeSnap: state before player 0 moves
+      // beforeSnap: state before player 0 moves (move:0 skips "current move" display)
       const beforeSnap = {
-        move: boardTiles.length, player: -1, action: 'start', tile: null, side: null,
+        move: 0, player: -1, action: 'start', tile: null, side: null,
         reasons: ['Puzzle position'], score: 0, allOptions: [],
         hands: hands.map(h => h.map(t => ({...t}))),
         board: boardTiles.map(t => ({...t})),
@@ -1016,6 +1017,7 @@
       quizSidePick = null;
       mcResults = null;
       render();
+      } catch(e) { alert('loadPuzzle ERROR: ' + e.message + '\nLine: ' + e.stack.split('\n')[1]); }
     }
 
     function showPuzzleBrowser() {
@@ -1033,8 +1035,10 @@
     }
 
     function startPuzzle(id) {
+      alert('startPuzzle called: ' + id);
       const p = PUZZLES.find(x => x.id === id);
-      if (p) loadPuzzle(p);
+      if (!p) { alert('Puzzle not found: ' + id); return; }
+      loadPuzzle(p);
     }
 
     function exitPuzzle() {
