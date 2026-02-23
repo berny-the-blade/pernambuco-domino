@@ -764,16 +764,16 @@
       // ===== BLOCKING =====
       {
         id: 'block-01', title: 'Seal the Exit', difficulty: 3, category: 'blocking',
-        description: 'Opp Right passed on 4/2. Both ends show their voids. Lock them out completely.',
-        hint: 'Make BOTH ends match numbers Opp Right cannot play.',
-        myHand: ['2-5', '2-4', '1-2', '0-4'],
-        board: ['4-4', '4-6', '1-6', '1-3', '0-3', '0-2'],
-        leftEnd: 4, rightEnd: 2,
-        otherHands: { 1: ['0-0', '1-1', '2-3', '3-6', '5-6'], 2: ['0-5', '1-5', '2-6', '3-5'], 3: ['0-1', '0-6', '5-5', '3-3', '6-6'] },
-        voids: { 3: [4, 2] },
-        passHistory: [{ player: 3, leftEnd: 4, rightEnd: 2 }],
-        correctTile: '2-4', correctSide: 'right',
-        explanation: '<b>Playing [2|4] RIGHT makes ends 4/4.</b> Opp Right is void in 4 AND 2 — both ends are now numbers they cannot play. Playing LEFT makes ends 2/2, which also blocks them, but 4/4 is stronger: you still hold [0|4] as a follow-up, while on 2/2 you have more tiles but less blocking pressure since opponents may hold more 2-tiles. The key lesson: <em>when blocking, check which end-number is scarcer among opponents.</em>'
+        description: 'Opp Right passed on 6/5 — void in both numbers. One play seals both ends.',
+        hint: 'Find the tile that makes BOTH ends numbers Opp Right cannot play.',
+        myHand: ['3-5', '2-6', '3-4', '1-6'],
+        board: ['5-6', '2-5', '0-2', '0-4', '1-4', '1-3'],
+        leftEnd: 6, rightEnd: 3,
+        otherHands: { 1: ['0-3', '0-6', '1-2', '4-4', '4-5', '6-6'], 2: ['0-5', '1-5', '2-2', '3-6', '4-6', '5-5'], 3: ['0-0', '0-1', '1-1', '2-3', '2-4', '3-3'] },
+        voids: { 3: [6, 5] },
+        passHistory: [{ player: 3, leftEnd: 6, rightEnd: 5 }],
+        correctTile: '3-5', correctSide: 'right',
+        explanation: '<b>[3|5] RIGHT makes ends 6/5.</b> Opp Right passed on 6/5 — void in BOTH 6 and 5. With ends 6/5, they\'re locked out of both sides. [3|4] RIGHT (→ 6/4) only blocks end-6; P3 holds [2|4] to escape on 4. LEFT plays ([2|6] → 2/3 or [1|6] → 1/3) remove the 6-end, and P3 has [2|3], [3|3] for 3-ends — no pressure at all. Partner holds [3|6], [4|6] and [0|5], [1|5], [5|5] so they play easily on both 6 and 5. <em>Rule: when an opponent is void in two numbers, look for the tile that puts both those numbers on the board ends — total lockout.</em>'
       },
       {
         id: 'block-02', title: 'Double Lock', difficulty: 4, category: 'blocking',
