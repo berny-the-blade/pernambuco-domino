@@ -3314,8 +3314,8 @@
     let studyCache = {};        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
     let studyRunning = false;   // is study computation in progress?
     let studyProgress = '';     // status text during computation
-    const MC_SIMS_STUDY = 150;  // sims per tile option in study mode
-    const PROB_SAMPLES_STUDY = 300; // samples for tile probability matrix
+    const MC_SIMS_STUDY = 500;  // sims per tile option in study mode
+    const PROB_SAMPLES_STUDY = 500; // samples for tile probability matrix
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -4317,7 +4317,7 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
-      const revealHand = !!snap.outcome;
+      const revealHand = !!snap.outcome || rightPanelTab === 'study';
       const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       return `
@@ -4633,7 +4633,7 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
-      const revealHand = !!snap.outcome;
+      const revealHand = !!snap.outcome || rightPanelTab === 'study';
       const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       const borderCls = justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700';
