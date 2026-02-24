@@ -3325,6 +3325,13 @@
     const MC_SIMS_STUDY = 1000;  // sims per tile option in study mode
     const PROB_SAMPLES_STUDY = 1000; // samples for tile probability matrix
 
+    // ========== PRO ANALYTICS STATE ==========
+    let proCache = {};
+    let proRunning = false;
+    let proProgress = '';
+    const PRO_MC_SIMS = 150;
+    const PRO_SAMPLES = 300;
+
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
     const MATCH_TARGET = 6;
@@ -4152,6 +4159,7 @@
                   <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">Coach</div>
                   <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
                   <div class="tab ${rightPanelTab === 'study' ? 'active' : ''}" onclick="setTab('study')" style="${rightPanelTab === 'study' ? 'border-color:#818cf8;color:#818cf8' : ''}">Study</div>
+                  <div class="tab ${rightPanelTab === 'pro' ? 'active' : ''}" onclick="setTab('pro')" style="${rightPanelTab === 'pro' ? 'border-color:#06b6d4;color:#06b6d4' : ''}">Pro</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
                   <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">History</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
@@ -4162,6 +4170,7 @@
                   rightPanelTab === 'coach' ? renderCoachPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'analysis' ? renderAnalysisPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'study' ? renderStudyPanel(snap, pNames, pTeams, teamColors) :
+                  rightPanelTab === 'pro' ? renderProPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'history' ? renderHistoryPanel() :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
@@ -4311,7 +4320,7 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
-      const revealHand = !!snap.outcome || rightPanelTab === 'study';
+      const revealHand = !!snap.outcome || rightPanelTab === 'study' || rightPanelTab === 'pro';
       const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       return `
@@ -4627,7 +4636,7 @@
       const justPlayed = snap.action === 'play' && snap.player === playerIdx;
       const autoPlayed = snap.move === 0 && currentGame && currentGame.autoPlayedBy === playerIdx;
       const highlight = autoPlayed || justPlayed;
-      const revealHand = !!snap.outcome || rightPanelTab === 'study';
+      const revealHand = !!snap.outcome || rightPanelTab === 'study' || rightPanelTab === 'pro';
       const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       const borderCls = justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700';
@@ -6136,6 +6145,548 @@
         </div>`;
     }
 
+    // ========== PRO ANALYTICS ENGINE ==========
+
+    function normalCDF(x) {
+      if (x < -6) return 0; if (x > 6) return 1;
+      const a1=0.254829592, a2=-0.284496736, a3=1.421413741, a4=-1.453152027, a5=1.061405429, p=0.3275911;
+      const sign = x < 0 ? -1 : 1;
+      const ax = Math.abs(x) / Math.sqrt(2);
+      const t = 1.0 / (1.0 + p * ax);
+      const y = 1.0 - (((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-ax*ax);
+      return 0.5 * (1.0 + sign * y);
+    }
+
+    function computeProAnalytics(snap, player, mcResults) {
+      const hand = snap.hands[player];
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const knowledge = snap.knowledge;
+      const handSizes = snap.hands.map(h => h.length);
+      const partner = (player + 2) % 4;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+
+      // Generate belief samples
+      const samples = [];
+      for (let i = 0; i < PRO_SAMPLES; i++) {
+        try { samples.push(generateConsistentDeal(hand, handSizes, knowledge, player)); }
+        catch(e) { break; }
+      }
+      const N = samples.length || 1;
+
+      // --- Suit Mass: E[tiles with suit v] per player ---
+      const suitMass = Array.from({length: 4}, () => new Array(7).fill(0));
+      for (const deal of samples) {
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          for (const t of deal[p]) {
+            suitMass[p][t.left] += 1/N;
+            if (t.left !== t.right) suitMass[p][t.right] += 1/N;
+          }
+        }
+      }
+      for (const t of hand) {
+        suitMass[player][t.left]++;
+        if (t.left !== t.right) suitMass[player][t.right]++;
+      }
+
+      // --- Void probabilities per player per suit ---
+      const voidProb = Array.from({length: 4}, () => new Array(7).fill(0));
+      for (const deal of samples) {
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          const has = new Set();
+          for (const t of deal[p]) { has.add(t.left); has.add(t.right); }
+          for (let v = 0; v <= 6; v++) {
+            if (!has.has(v)) voidProb[p][v] += 1/N;
+          }
+        }
+      }
+
+      // --- Double threats: P(player holds [v|v]) ---
+      const doubleThreats = Array.from({length: 4}, () => new Array(7).fill(0));
+      for (const deal of samples) {
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          for (const t of deal[p]) {
+            if (t.left === t.right) doubleThreats[p][t.left] += 1/N;
+          }
+        }
+      }
+      for (const t of hand) {
+        if (t.left === t.right) doubleThreats[player][t.left] = 1;
+      }
+
+      // --- Mobility index per player (avg legal moves) ---
+      const mobility = new Array(4).fill(0);
+      for (const deal of samples) {
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          const count = deal[p].filter(t =>
+            t.left === lE || t.right === lE || t.left === rE || t.right === rE
+          ).length;
+          mobility[p] += count / N;
+        }
+      }
+      mobility[player] = hand.filter(t =>
+        t.left === lE || t.right === lE || t.left === rE || t.right === rE
+      ).length;
+
+      // --- Go-out threats per player ---
+      const goOut = Array.from({length: 4}, () => ({ gop1: 0, gop2: 0 }));
+      for (const deal of samples) {
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          const h = deal[p];
+          if (h.length === 0) { goOut[p].gop1 += 1/N; goOut[p].gop2 += 1/N; continue; }
+          if (h.length === 1) {
+            const t = h[0];
+            if (t.left === lE || t.right === lE || t.left === rE || t.right === rE) {
+              goOut[p].gop1 += 1/N; goOut[p].gop2 += 1/N;
+            }
+          } else if (h.length === 2) {
+            for (let i = 0; i < 2; i++) {
+              const first = h[i], second = h[1-i];
+              if (!(first.left === lE || first.right === lE || first.left === rE || first.right === rE)) continue;
+              // Compute new ends after playing first
+              let nL = lE, nR = rE;
+              const canLeft = first.left === lE || first.right === lE;
+              const canRight = first.left === rE || first.right === rE;
+              if (canLeft) { nL = first.left === lE ? first.right : first.left; }
+              else { nR = first.right === rE ? first.left : first.right; }
+              if (second.left === nL || second.right === nL || second.left === nR || second.right === nR) {
+                goOut[p].gop2 += 1/N; break;
+              }
+            }
+          }
+        }
+      }
+      // P0's go-out from known hand
+      if (hand.length <= 2) {
+        if (hand.length === 0) { goOut[player] = { gop1: 1, gop2: 1 }; }
+        else if (hand.length === 1) {
+          const t = hand[0];
+          if (t.left === lE || t.right === lE || t.left === rE || t.right === rE) {
+            goOut[player] = { gop1: 1, gop2: 1 };
+          }
+        } else {
+          for (let i = 0; i < 2; i++) {
+            const first = hand[i], second = hand[1-i];
+            if (!(first.left === lE || first.right === lE || first.left === rE || first.right === rE)) continue;
+            let nL = lE, nR = rE;
+            if (first.left === lE || first.right === lE) { nL = first.left === lE ? first.right : first.left; }
+            else { nR = first.right === rE ? first.left : first.right; }
+            if (second.left === nL || second.right === nL || second.left === nR || second.right === nR) {
+              goOut[player].gop2 = 1; break;
+            }
+          }
+        }
+      }
+
+      // --- Per-move flow metrics (OPP / PPP / ECV / Bait) ---
+      const flowMetrics = [];
+      if (mcResults && mcResults.length > 0) {
+        for (const mc of mcResults) {
+          const { newLeft, newRight } = applyMove(snap, mc.tile, mc.side);
+          let oppCount = 0, partnerCount = 0;
+          let oppMob = 0, partnerMob = 0;
+          for (const deal of samples) {
+            const o1 = deal[opp1].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
+            const o2 = deal[opp2].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
+            const pc = deal[partner].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
+            if (o1 || o2) oppCount++;
+            if (pc) partnerCount++;
+            oppMob += deal[opp1].filter(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight).length / N;
+            partnerMob += deal[partner].filter(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight).length / N;
+          }
+          const opp = oppCount / N;
+          const ppp = partnerCount / N;
+          flowMetrics.push({
+            tile: mc.tile, side: mc.side, ep: mc.expectedPoints, winRate: mc.winRate,
+            cvar5: mc.cvar5, blockRate: mc.blockRate,
+            opp, ppp, ecv: ppp - opp, bait: opp - ppp,
+            oppMobility: oppMob, partnerMobility: partnerMob
+          });
+        }
+      }
+
+      // --- Structural Tension ---
+      let activeSuits = 0;
+      for (let v = 0; v <= 6; v++) {
+        if (knowledge.remainingWithNumber(v) > 0) activeSuits++;
+      }
+      const tension = 1 - activeSuits / 7;
+
+      // --- Block pip advantage ---
+      const myTeamPips = [player, partner].reduce((s, p) =>
+        s + snap.hands[p].reduce((a, t) => a + t.left + t.right, 0), 0);
+      let oppTeamPipsSum = 0;
+      for (const deal of samples) {
+        oppTeamPipsSum += [opp1, opp2].reduce((s, p) =>
+          s + deal[p].reduce((a, t) => a + t.left + t.right, 0), 0);
+      }
+      const oppTeamPipsEst = oppTeamPipsSum / N;
+      const blockPipAdv = oppTeamPipsEst - myTeamPips;
+
+      // --- Decision Robustness ---
+      let robustness = 1, indifferenceGap = 0;
+      if (mcResults && mcResults.length >= 2) {
+        const m1 = mcResults[0], m2 = mcResults[1];
+        indifferenceGap = m1.expectedPoints - m2.expectedPoints;
+        const varDiff = (m1.variance || 0) / Math.max(1, m1.sims) + (m2.variance || 0) / Math.max(1, m2.sims);
+        if (varDiff > 0.0001) {
+          robustness = normalCDF(indifferenceGap / Math.sqrt(varDiff));
+        } else {
+          robustness = indifferenceGap > 0.01 ? 1 : 0.5;
+        }
+      }
+
+      // --- Mistake classification ---
+      let mistakeClass = null;
+      if (snap.tile && mcResults && mcResults.length > 0) {
+        const best = mcResults[0];
+        const played = mcResults.find(m => m.tile.id === snap.tile.id);
+        if (played && best && best.tile.id !== played.tile.id) {
+          const eqLoss = best.expectedPoints - played.expectedPoints;
+          if (eqLoss > 0.05) {
+            const bestFlow = flowMetrics.find(f => f.tile.id === best.tile.id);
+            const playedFlow = flowMetrics.find(f => f.tile.id === played.tile.id);
+            if (bestFlow && playedFlow) {
+              const oppDelta = playedFlow.opp - bestFlow.opp;
+              const pppDelta = bestFlow.ppp - playedFlow.ppp;
+              const baitDelta = playedFlow.bait - bestFlow.bait;
+              const riskDelta = (bestFlow.cvar5 || 0) - (playedFlow.cvar5 || 0);
+              if (oppDelta > 0.12) mistakeClass = { type: 'feeding', label: 'Feeding Error', color: '#f87171', detail: `Opened ends opponents play ${(oppDelta*100).toFixed(0)}% more often` };
+              else if (pppDelta > 0.12) mistakeClass = { type: 'starvation', label: 'Partner Starvation', color: '#fb923c', detail: `Partner plays ${(pppDelta*100).toFixed(0)}% less often on your ends` };
+              else if (baitDelta > 0.15) mistakeClass = { type: 'trap_blind', label: 'Trap Blind', color: '#f472b6', detail: `Walked into high-bait end (bait +${(baitDelta*100).toFixed(0)}%)` };
+              else if (riskDelta > 0.3) mistakeClass = { type: 'risk_blind', label: 'Risk Blind', color: '#c084fc', detail: `Chose riskier line (CVaR ${riskDelta.toFixed(2)} worse)` };
+              else mistakeClass = { type: 'positional', label: 'Positional Error', color: '#94a3b8', detail: `Suboptimal by ${eqLoss.toFixed(2)} EP` };
+            }
+          }
+        }
+      }
+
+      return {
+        suitMass, voidProb, doubleThreats, mobility, goOut,
+        flowMetrics, tension, blockPipAdv, myTeamPips, oppTeamPipsEst,
+        robustness, indifferenceGap, mistakeClass, sampleCount: N
+      };
+    }
+
+    function runProForStep(stepIdx) {
+      if (proCache[stepIdx]) { render(); return; }
+      if (proRunning) return;
+      proRunning = true;
+      proProgress = 'Running Monte Carlo...';
+      render();
+
+      setTimeout(() => {
+        try {
+          const snap = currentGame.snapshots[stepIdx];
+          const player = snap.currentPlayer;
+
+          // Reuse MC from study cache if available
+          let mcResults;
+          if (studyCache[stepIdx] && studyCache[stepIdx].mcResults) {
+            mcResults = studyCache[stepIdx].mcResults;
+          } else {
+            mcResults = monteCarloEval(snap, player, PRO_MC_SIMS);
+          }
+
+          proProgress = 'Computing analytics...';
+          render();
+
+          setTimeout(() => {
+            try {
+              const analytics = computeProAnalytics(snap, player, mcResults);
+              proCache[stepIdx] = { mcResults, ...analytics };
+              proRunning = false;
+              proProgress = '';
+              render();
+            } catch(e) {
+              proRunning = false; proProgress = ''; render();
+            }
+          }, 10);
+        } catch(e) {
+          proRunning = false; proProgress = ''; render();
+        }
+      }, 10);
+    }
+
+    function renderProPanel(snap, pNames, pTeams, teamColors) {
+      if (!snap || !currentGame) return '<div class="text-slate-500 text-xs p-4">No game loaded.</div>';
+
+      const stepIdx = currentStep;
+      const data = proCache[stepIdx];
+
+      if (!data) {
+        if (proRunning) {
+          return `<div class="p-4 text-center">
+            <div class="animate-spin inline-block w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full mb-2"></div>
+            <div class="text-xs text-cyan-300">${proProgress || 'Computing...'}</div>
+          </div>`;
+        }
+        // Auto-trigger computation
+        setTimeout(() => runProForStep(stepIdx), 50);
+        return `<div class="p-4 text-center text-xs text-slate-500">Loading Pro Analytics...</div>`;
+      }
+
+      const player = snap.currentPlayer;
+      const partner = (player + 2) % 4;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+      const mc = data.mcResults || [];
+      const fm = data.flowMetrics || [];
+      const knowledge = snap.knowledge;
+
+      // Color helpers
+      const pctColor = (v, flip) => {
+        const x = flip ? 1-v : v;
+        return x > 0.7 ? '#22c55e' : x > 0.4 ? '#eab308' : '#ef4444';
+      };
+      const epColor = v => v > 0.3 ? '#22c55e' : v > 0 ? '#86efac' : v > -0.3 ? '#fbbf24' : '#ef4444';
+      const baitLabel = b => b > 0.2 ? '<span style="color:#ef4444">HIGH</span>' : b > 0.05 ? '<span style="color:#eab308">MED</span>' : '<span style="color:#22c55e">LOW</span>';
+
+      // ===== BLOCK 1: Decision Quality =====
+      let b1 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-cyan-400 mb-1">1. DECISION QUALITY</div>`;
+      if (mc.length >= 2) {
+        const gap = data.indifferenceGap;
+        const rob = data.robustness;
+        const robPct = (rob * 100).toFixed(0);
+        const robColor = rob > 0.9 ? '#22c55e' : rob > 0.7 ? '#eab308' : '#ef4444';
+        b1 += `<div class="grid grid-cols-2 gap-2 text-xs">
+          <div><span class="text-slate-400">Indifference Gap:</span> <span style="color:${gap > 0.2 ? '#22c55e' : gap > 0.05 ? '#eab308' : '#ef4444'}" class="font-bold">${gap.toFixed(3)} EP</span></div>
+          <div><span class="text-slate-400">Robustness:</span> <span style="color:${robColor}" class="font-bold">${robPct}%</span></div>
+        </div>
+        <div class="mt-1 bg-slate-700 rounded-full h-1.5">
+          <div class="h-1.5 rounded-full" style="width:${robPct}%;background:${robColor}"></div>
+        </div>`;
+        if (gap < 0.05) b1 += `<div class="text-xs text-slate-500 mt-1">Top moves are statistically indistinguishable — pick the one that fits your strategy.</div>`;
+      } else if (mc.length === 1) {
+        b1 += `<div class="text-xs text-slate-500">Only 1 playable tile — forced move.</div>`;
+      } else {
+        b1 += `<div class="text-xs text-slate-500">Pass — no legal moves.</div>`;
+      }
+      if (data.mistakeClass) {
+        const m = data.mistakeClass;
+        b1 += `<div class="mt-1 px-2 py-1 rounded text-xs font-bold" style="background:${m.color}22;color:${m.color};border:1px solid ${m.color}44">
+          ${m.label}: ${m.detail}
+        </div>`;
+      }
+      b1 += '</div>';
+
+      // ===== BLOCK 2: Risk & Tail =====
+      let b2 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-red-400 mb-1">2. RISK & TAIL</div>`;
+      if (mc.length > 0) {
+        const best = mc[0];
+        b2 += `<div class="grid grid-cols-3 gap-1 text-xs mb-1">
+          <div><span class="text-slate-400">CVaR 5%:</span> <span style="color:${epColor(best.cvar5)}" class="font-bold">${best.cvar5 >= 0 ? '+' : ''}${best.cvar5.toFixed(2)}</span></div>
+          <div><span class="text-slate-400">Block%:</span> <span class="font-bold text-amber-400">${(best.blockRate*100).toFixed(0)}%</span></div>
+          <div><span class="text-slate-400">Pip Edge:</span> <span style="color:${data.blockPipAdv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">${data.blockPipAdv >= 0 ? '+' : ''}${data.blockPipAdv.toFixed(1)}</span></div>
+        </div>`;
+      }
+      // Go-out threats
+      b2 += `<div class="text-xs text-slate-400 mt-1 mb-0.5 font-bold">Go-Out Threats</div>
+        <div class="grid grid-cols-4 gap-1 text-xs">
+          <div class="text-slate-500"></div><div class="text-slate-500 text-center">≤1 turn</div><div class="text-slate-500 text-center">≤2 turns</div><div class="text-slate-500 text-center">Mobility</div>`;
+      for (const p of [opp1, partner, opp2]) {
+        const g = data.goOut[p];
+        const isPartner = p === partner;
+        const nameColor = isPartner ? '#818cf8' : '#f87171';
+        const mi = data.mobility[p];
+        b2 += `<div style="color:${nameColor}" class="font-bold truncate">${pNames[p]}</div>
+          <div class="text-center" style="color:${g.gop1 > 0.2 ? '#ef4444' : g.gop1 > 0.05 ? '#eab308' : '#22c55e'}">${(g.gop1*100).toFixed(0)}%</div>
+          <div class="text-center" style="color:${g.gop2 > 0.3 ? '#ef4444' : g.gop2 > 0.1 ? '#eab308' : '#22c55e'}">${(g.gop2*100).toFixed(0)}%</div>
+          <div class="text-center" style="color:${mi > 2 ? '#22c55e' : mi > 1 ? '#eab308' : '#ef4444'}">${mi.toFixed(1)}</div>`;
+      }
+      b2 += '</div></div>';
+
+      // ===== BLOCK 3: Structural Control =====
+      let b3 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-emerald-400 mb-1">3. STRUCTURAL CONTROL</div>
+        <div class="text-xs mb-1">
+          <span class="text-slate-400">Tension:</span> <span style="color:${data.tension > 0.3 ? '#ef4444' : data.tension > 0.1 ? '#eab308' : '#22c55e'}" class="font-bold">${(data.tension*100).toFixed(0)}%</span>
+          <span class="text-slate-500 ml-2">(${data.tension > 0.3 ? 'tight — near block' : data.tension > 0.1 ? 'moderate' : 'open'})</span>
+        </div>`;
+      if (fm.length > 0) {
+        b3 += `<div class="text-xs text-slate-400 font-bold mb-0.5">Move Flow Analysis</div>
+          <table class="w-full text-xs"><tr class="text-slate-500">
+            <td>Tile</td><td class="text-center">OPP</td><td class="text-center">PPP</td><td class="text-center">ECV</td><td class="text-center">Bait</td><td class="text-center">EP</td>
+          </tr>`;
+        for (const f of fm.slice(0, 6)) {
+          const isBest = f.tile.id === mc[0]?.tile.id;
+          const isPlayed = snap.tile && f.tile.id === snap.tile.id;
+          const rowBg = isBest ? 'background:#22c55e11' : isPlayed ? 'background:#818cf811' : '';
+          const mark = isBest ? '<span class="text-emerald-400">★</span>' : isPlayed ? '<span class="text-indigo-400">▶</span>' : '';
+          b3 += `<tr style="${rowBg}">
+            <td class="font-mono">${mark}[${f.tile.left}|${f.tile.right}]${f.side ? f.side[0].toUpperCase() : ''}</td>
+            <td class="text-center" style="color:${pctColor(f.opp, true)}">${(f.opp*100).toFixed(0)}%</td>
+            <td class="text-center" style="color:${pctColor(f.ppp, false)}">${(f.ppp*100).toFixed(0)}%</td>
+            <td class="text-center" style="color:${f.ecv > 0 ? '#22c55e' : '#ef4444'}">${f.ecv >= 0 ? '+' : ''}${(f.ecv*100).toFixed(0)}%</td>
+            <td class="text-center">${baitLabel(f.bait)}</td>
+            <td class="text-center" style="color:${epColor(f.ep)}">${f.ep >= 0 ? '+' : ''}${f.ep.toFixed(2)}</td>
+          </tr>`;
+        }
+        b3 += '</table>';
+        // Best move ECV highlight
+        const bestFlow = fm[0];
+        if (bestFlow) {
+          b3 += `<div class="text-xs mt-1 text-slate-500">Best move ECV: <span style="color:${bestFlow.ecv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">${bestFlow.ecv >= 0 ? '+' : ''}${(bestFlow.ecv*100).toFixed(0)}%</span>
+            — partner plays ${(bestFlow.ppp*100).toFixed(0)}%, opponents ${(bestFlow.opp*100).toFixed(0)}%</div>`;
+        }
+      }
+      b3 += '</div>';
+
+      // ===== BLOCK 4: Probabilistic Inference =====
+      let b4 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-purple-400 mb-1">4. PROBABILISTIC INFERENCE</div>
+        <div class="text-xs text-slate-400 font-bold mb-0.5">Expected Suit Mass</div>
+        <table class="w-full text-xs mb-1"><tr class="text-slate-500">
+          <td></td>${[0,1,2,3,4,5,6].map(v => `<td class="text-center w-6">${v}</td>`).join('')}
+        </tr>`;
+      for (const p of [opp1, partner, opp2]) {
+        const isP = p === partner;
+        b4 += `<tr><td style="color:${isP ? '#818cf8' : '#f87171'}" class="font-bold truncate">${pNames[p].substring(0, 4)}</td>`;
+        for (let v = 0; v <= 6; v++) {
+          const val = data.suitMass[p][v];
+          const bg = val > 1.5 ? '#22c55e33' : val > 0.8 ? '#eab30833' : val > 0.3 ? '#64748b22' : '#ef444422';
+          b4 += `<td class="text-center" style="background:${bg}" title="${pNames[p]}: ${val.toFixed(2)} tiles with ${v}">${val.toFixed(1)}</td>`;
+        }
+        b4 += '</tr>';
+      }
+      b4 += '</table>';
+
+      // Double Threats
+      const threats = [];
+      for (let v = 0; v <= 6; v++) {
+        if (knowledge.played.has(`${v}-${v}`)) continue;
+        // Check if player already holds it
+        if (hand.some(t => t.left === v && t.right === v)) continue;
+        const oppProb = Math.min(1, data.doubleThreats[opp1][v] + data.doubleThreats[opp2][v]);
+        const partProb = data.doubleThreats[partner][v];
+        if (oppProb > 0.1 || partProb > 0.1) {
+          threats.push({ v, oppProb, partProb, onEnd: v === snap.leftEnd || v === snap.rightEnd });
+        }
+      }
+      if (threats.length > 0) {
+        b4 += `<div class="text-xs text-slate-400 font-bold mb-0.5">Double Threats</div>`;
+        for (const th of threats.sort((a,b) => b.oppProb - a.oppProb).slice(0, 4)) {
+          const icon = th.onEnd ? '🔒' : '🎲';
+          b4 += `<div class="text-xs">${icon} [${th.v}|${th.v}] — opp: <span style="color:${th.oppProb > 0.3 ? '#ef4444' : '#eab308'}">${(th.oppProb*100).toFixed(0)}%</span>`;
+          if (th.partProb > 0.05) b4 += ` partner: <span class="text-indigo-400">${(th.partProb*100).toFixed(0)}%</span>`;
+          if (th.onEnd) b4 += ` <span class="text-red-400 font-bold">ON END</span>`;
+          b4 += '</div>';
+        }
+      }
+
+      // Key void probabilities (high-confidence only)
+      const keyVoids = [];
+      for (const p of [opp1, opp2, partner]) {
+        for (let v = 0; v <= 6; v++) {
+          if (knowledge.cantHave[p].has(v)) continue; // already known
+          if (data.voidProb[p][v] > 0.6) {
+            keyVoids.push({ p, v, prob: data.voidProb[p][v] });
+          }
+        }
+      }
+      if (keyVoids.length > 0) {
+        b4 += `<div class="text-xs text-slate-400 font-bold mt-1 mb-0.5">Likely Voids (Unconfirmed)</div>`;
+        for (const kv of keyVoids.sort((a,b) => b.prob - a.prob).slice(0, 4)) {
+          b4 += `<div class="text-xs"><span style="color:${kv.p === partner ? '#818cf8' : '#f87171'}">${pNames[kv.p]}</span> void in ${kv.v}: <span class="text-amber-400 font-bold">${(kv.prob*100).toFixed(0)}%</span></div>`;
+        }
+      }
+      b4 += '</div>';
+
+      // ===== BLOCK 5: Trap Radar =====
+      let b5 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-pink-400 mb-1">5. TRAP RADAR</div>`;
+      const highBait = fm.filter(f => f.bait > 0.1).sort((a,b) => b.bait - a.bait);
+      const suitLocks = threats.filter(t => t.onEnd && t.oppProb > 0.2);
+      if (highBait.length > 0) {
+        b5 += `<div class="text-xs text-slate-400 font-bold mb-0.5">High Bait Moves (avoid)</div>`;
+        for (const hb of highBait.slice(0, 3)) {
+          b5 += `<div class="text-xs px-1 py-0.5 rounded mb-0.5" style="background:#ef444415;border-left:2px solid #ef4444">
+            [${hb.tile.left}|${hb.tile.right}]${hb.side ? hb.side[0].toUpperCase() : ''} — OPP ${(hb.opp*100).toFixed(0)}% vs PPP ${(hb.ppp*100).toFixed(0)}%
+            <span class="text-red-400 font-bold ml-1">Bait ${(hb.bait*100).toFixed(0)}%</span>
+          </div>`;
+        }
+      }
+      if (suitLocks.length > 0) {
+        b5 += `<div class="text-xs text-slate-400 font-bold mb-0.5 mt-1">Suit Lock Threats</div>`;
+        for (const sl of suitLocks) {
+          b5 += `<div class="text-xs"><span class="text-red-400">🔒</span> ${sl.v} on end — opponent holds [${sl.v}|${sl.v}] at ${(sl.oppProb*100).toFixed(0)}% chance</div>`;
+        }
+      }
+      if (highBait.length === 0 && suitLocks.length === 0) {
+        b5 += `<div class="text-xs text-slate-500">No significant traps detected. Position is clean.</div>`;
+      }
+      b5 += '</div>';
+
+      // ===== BLOCK 6: Game Performance =====
+      let b6 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
+        <div class="text-xs font-bold text-amber-400 mb-1">6. GAME PERFORMANCE</div>`;
+      // Scan all steps for mistakes in this game
+      let totalDecisions = 0, perfects = 0, goods = 0, mistakes = 0, blunders = 0;
+      let totalEL = 0;
+      const mistakeTypes = { feeding: 0, starvation: 0, trap_blind: 0, risk_blind: 0, positional: 0 };
+      for (let i = 0; i < (currentGame?.snapshots?.length || 0); i++) {
+        const s = currentGame.snapshots[i];
+        if (s.currentPlayer !== 0 || !s.tile) continue; // only P0 decisions
+        const cached = proCache[i];
+        if (!cached || !cached.mcResults || cached.mcResults.length === 0) continue;
+        totalDecisions++;
+        const best = cached.mcResults[0];
+        const played = cached.mcResults.find(m => m.tile.id === s.tile.id);
+        if (!played) continue;
+        const el = best.expectedPoints - played.expectedPoints;
+        totalEL += el;
+        if (el < 0.02) perfects++;
+        else if (el < 0.15) goods++;
+        else if (el < 0.40) mistakes++;
+        else blunders++;
+        if (cached.mistakeClass) mistakeTypes[cached.mistakeClass.type]++;
+      }
+      if (totalDecisions > 0) {
+        const avgEL = totalEL / totalDecisions;
+        const rating = avgEL < 0.05 ? 'Expert' : avgEL < 0.10 ? 'Advanced' : avgEL < 0.20 ? 'Intermediate' : 'Beginner';
+        const ratingColor = avgEL < 0.05 ? '#22c55e' : avgEL < 0.10 ? '#3b82f6' : avgEL < 0.20 ? '#eab308' : '#ef4444';
+        b6 += `<div class="grid grid-cols-2 gap-1 text-xs mb-1">
+          <div><span class="text-slate-400">Avg EL:</span> <span style="color:${ratingColor}" class="font-bold">${avgEL.toFixed(3)}</span></div>
+          <div><span class="text-slate-400">Rating:</span> <span style="color:${ratingColor}" class="font-bold">${rating}</span></div>
+          <div><span class="text-slate-400">Decisions:</span> <span class="font-bold text-slate-300">${totalDecisions}</span></div>
+          <div>
+            <span class="text-emerald-400">${perfects}★</span>
+            <span class="text-green-400 ml-1">${goods}✓</span>
+            <span class="text-yellow-400 ml-1">${mistakes}!</span>
+            <span class="text-red-400 ml-1">${blunders}✗</span>
+          </div>
+        </div>`;
+        // Mistake type breakdown
+        const typeEntries = Object.entries(mistakeTypes).filter(([,v]) => v > 0);
+        if (typeEntries.length > 0) {
+          b6 += `<div class="text-xs text-slate-400 font-bold mb-0.5">Mistake Types</div>`;
+          const typeLabels = { feeding: 'Feeding', starvation: 'Partner Starve', trap_blind: 'Trap Blind', risk_blind: 'Risk Blind', positional: 'Positional' };
+          const typeColors = { feeding: '#f87171', starvation: '#fb923c', trap_blind: '#f472b6', risk_blind: '#c084fc', positional: '#94a3b8' };
+          for (const [type, count] of typeEntries.sort((a,b) => b[1] - a[1])) {
+            const pct = (count / totalDecisions * 100).toFixed(0);
+            b6 += `<div class="flex items-center gap-1 text-xs">
+              <div class="w-2 h-2 rounded-full" style="background:${typeColors[type]}"></div>
+              <span style="color:${typeColors[type]}">${typeLabels[type]}: ${count}</span>
+              <div class="flex-1 bg-slate-700 rounded-full h-1"><div class="h-1 rounded-full" style="width:${pct}%;background:${typeColors[type]}"></div></div>
+            </div>`;
+          }
+        }
+      } else {
+        b6 += `<div class="text-xs text-slate-500">Navigate through moves to build game performance data. Each P0 decision will be analyzed.</div>`;
+      }
+      b6 += '</div>';
+
+      return `<div class="space-y-1 flex-1 overflow-y-auto">
+        <div class="text-xs text-cyan-300 font-bold">PRO ANALYTICS — Move #${snap.move} (${data.sampleCount} samples)</div>
+        ${b1}${b2}${b3}${b4}${b5}${b6}
+      </div>`;
+    }
+
     function renderStatsPanel() {
       const total = stats.totalMoves;
       const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
@@ -6849,8 +7400,9 @@
               <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Strategy Puzzles</button>
               <button class="btn text-lg px-6 py-3" style="background:#06b6d4;color:#0f172a;font-weight:bold" onclick="startOpeningQuiz();">Opening Quiz</button>
               <button class="btn text-lg px-6 py-3" style="background:#818cf8;color:white;font-weight:bold" onclick="startDeepStudy();">Deep Study</button>
+              <button class="btn text-lg px-6 py-3" style="background:#0891b2;color:white;font-weight:bold" onclick="startProAnalytics();">Pro Analytics</button>
             </div>
-            <div class="grid grid-cols-7 gap-3 text-left mb-6">
+            <div class="grid grid-cols-8 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
                 <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
@@ -6879,6 +7431,10 @@
                 <div class="text-indigo-400 font-bold text-sm mb-1">Deep Study</div>
                 <div class="text-xs text-slate-400">MC evaluation, tile probabilities, and strategic analysis for every move.</div>
               </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-cyan-400 font-bold text-sm mb-1">Pro Analytics</div>
+                <div class="text-xs text-slate-400">Quant-grade dashboard: OPP/PPP flow, trap radar, go-out threats, mistake classification.</div>
+              </div>
             </div>
             ${hasStats ? `
             <div class="bg-slate-800 rounded-lg p-3 inline-block">
@@ -6897,8 +7453,19 @@
       setMode('watch');
       studyCache = {};
       studyRunning = false;
+      proCache = {};
+      proRunning = false;
       studyProgress = '';
       rightPanelTab = 'study';
+      newGame();
+    }
+
+    function startProAnalytics() {
+      setMode('watch');
+      proCache = {};
+      proRunning = false;
+      proProgress = '';
+      rightPanelTab = 'pro';
       newGame();
     }
 
@@ -6917,6 +7484,8 @@
       showingOpeningQuiz = false;
       studyCache = {};
       studyRunning = false;
+      proCache = {};
+      proRunning = false;
       studyProgress = '';
       quizWaiting = false;
       quizResult = null;
@@ -6974,6 +7543,8 @@
       analysisRunning = false;
       studyCache = {};
       studyRunning = false;
+      proCache = {};
+      proRunning = false;
       studyProgress = '';
       mcCache.clear(); // clear MC cache between games
 
