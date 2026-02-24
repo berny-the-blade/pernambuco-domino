@@ -7137,32 +7137,33 @@
       // Heavy tiles (pip sum >= 9)
       const heavyTiles = hand.filter(t => t.left + t.right >= 9).length;
 
-      // Reasons based on 1M-game empirical study (opening_study.js)
-      // Format: "<b>Category:</b> description — <span>EP impact</span>"
+      // Reasons based on 1M-game empirical study — qualitative indicators
       const reasons = [];
-      const ep = (v) => {
-        const sign = v >= 0 ? '+' : '';
-        const color = v > 0.01 ? '#22c55e' : v < -0.01 ? '#ef4444' : '#94a3b8';
-        return `<span style="color:${color};font-weight:bold">${sign}${v.toFixed(2)} EP</span>`;
+      const signal = (v) => {
+        if (v > 0.05) return '<span style="color:#22c55e;font-weight:bold">strong open</span>';
+        if (v > 0.01) return '<span style="color:#86efac;font-weight:bold">favors open</span>';
+        if (v > -0.01) return '<span style="color:#94a3b8;font-weight:bold">neutral</span>';
+        if (v > -0.05) return '<span style="color:#fbbf24;font-weight:bold">slight pass</span>';
+        return '<span style="color:#ef4444;font-weight:bold">favors pass</span>';
       };
 
-      // #1 predictor: Max Suit Depth (depth 5: +0.20 EP, depth 4: +0.045 EP)
-      if (maxSuitDepth >= 5) reasons.push(`<b>Suit Depth:</b> Dominant ${deepSuit}s (${suitDepth[deepSuit]} tiles) — strongest opening signal ${ep(0.20)}`);
-      else if (maxSuitDepth >= 4) reasons.push(`<b>Suit Depth:</b> Deep ${deepSuit}s (${suitDepth[deepSuit]} tiles) — favors opening ${ep(0.05)}`);
-      else if (maxSuitDepth === 3) reasons.push(`<b>Suit Depth:</b> Moderate (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — neutral ${ep(-0.01)}`);
-      else reasons.push(`<b>Suit Depth:</b> No deep suit (max ${maxSuitDepth}) — less reason to open ${ep(-0.01)}`);
+      // #1 predictor: Max Suit Depth
+      if (maxSuitDepth >= 5) reasons.push(`<b>Suit Depth:</b> Dominant ${deepSuit}s (${suitDepth[deepSuit]} tiles) — ${signal(0.20)}`);
+      else if (maxSuitDepth >= 4) reasons.push(`<b>Suit Depth:</b> Deep ${deepSuit}s (${suitDepth[deepSuit]} tiles) — ${signal(0.05)}`);
+      else if (maxSuitDepth === 3) reasons.push(`<b>Suit Depth:</b> Moderate (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — ${signal(-0.01)}`);
+      else reasons.push(`<b>Suit Depth:</b> No deep suit (max ${maxSuitDepth}) — ${signal(-0.01)}`);
 
-      // #2 predictor: Number of Doubles (1 is best: +0.043, 0 is worst: -0.091)
-      if (doubles.length === 1) reasons.push(`<b>Doubles:</b> 1 double — ideal opener count ${ep(0.04)}`);
-      else if (doubles.length === 0) reasons.push(`<b>Doubles:</b> None — strongly favors partner opening ${ep(-0.09)}`);
-      else if (doubles.length === 2) reasons.push(`<b>Doubles:</b> 2 doubles — neutral ${ep(0.00)}`);
-      else reasons.push(`<b>Doubles:</b> ${doubles.length} doubles — too many, partner should open ${ep(doubles.length === 3 ? -0.05 : -0.07)}`);
+      // #2 predictor: Number of Doubles
+      if (doubles.length === 1) reasons.push(`<b>Doubles:</b> 1 double — ideal opener count — ${signal(0.04)}`);
+      else if (doubles.length === 0) reasons.push(`<b>Doubles:</b> None — ${signal(-0.09)}`);
+      else if (doubles.length === 2) reasons.push(`<b>Doubles:</b> 2 doubles — ${signal(0.00)}`);
+      else reasons.push(`<b>Doubles:</b> ${doubles.length} doubles — too many — ${signal(doubles.length === 3 ? -0.05 : -0.07)}`);
 
-      // #3 predictor: Suit Coverage (4 suits: -0.15 EP, 7 suits: +0.02 EP)
-      if (uniqueSuits.size <= 4) reasons.push(`<b>Suit Coverage:</b> Only ${uniqueSuits.size} suits — narrow hand, partner opens ${ep(-0.15)}`);
-      else if (uniqueSuits.size === 5) reasons.push(`<b>Suit Coverage:</b> ${uniqueSuits.size} suits — somewhat narrow ${ep(-0.05)}`);
-      else if (uniqueSuits.size === 6) reasons.push(`<b>Suit Coverage:</b> ${uniqueSuits.size} suits — decent flexibility ${ep(0.01)}`);
-      else reasons.push(`<b>Suit Coverage:</b> All 7 suits — maximum flexibility ${ep(0.02)}`);
+      // #3 predictor: Suit Coverage
+      if (uniqueSuits.size <= 4) reasons.push(`<b>Suit Coverage:</b> Only ${uniqueSuits.size} suits — narrow hand — ${signal(-0.15)}`);
+      else if (uniqueSuits.size === 5) reasons.push(`<b>Suit Coverage:</b> ${uniqueSuits.size} suits — somewhat narrow — ${signal(-0.05)}`);
+      else if (uniqueSuits.size === 6) reasons.push(`<b>Suit Coverage:</b> ${uniqueSuits.size} suits — decent flexibility — ${signal(0.01)}`);
+      else reasons.push(`<b>Suit Coverage:</b> All 7 suits — maximum flexibility — ${signal(0.02)}`);
 
       return {
         doubles: doubles.length, totalPips, maxSuitDepth, deepSuit,
@@ -7242,7 +7243,7 @@
             </div>
             ${!isClose ? `<div class="text-sm text-slate-300 mb-2"><b>${betterLabel}</b> is better by <span class="text-yellow-400 font-mono">${r.margin.toFixed(2)}</span> expected pts</div>` : `<div class="text-sm text-slate-400 mb-2">Margin only ${r.margin.toFixed(2)} — essentially a coin flip</div>`}
             <div class="text-left bg-slate-800 rounded-lg p-2 mt-2">
-              <div class="text-xs font-bold text-slate-400 mb-1">Hand Analysis</div>
+              <div class="text-xs font-bold text-slate-400 mb-1">Hand Features <span class="text-slate-600 font-normal">(heuristic rules of thumb)</span></div>
               ${r.handFeatures.reasons.map(r => `<div class="text-xs text-slate-300">- ${r}</div>`).join('')}
             </div>
           </div>
