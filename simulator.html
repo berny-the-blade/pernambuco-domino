@@ -1894,14 +1894,14 @@
                 // Check if ALL playable tiles would strand the last one (not actionable if so)
                 const allStrand = hand.filter(t => t.id !== tile.id).length === 1 && (() => {
                   const ot = lastTile; // the other tile (which would be played instead)
-                  const otherPlayable = (ot.left === leftEnd || ot.right === leftEnd || ot.left === rightEnd || ot.right === rightEnd);
+                  const otherPlayable = (ot.left === lE || ot.right === lE || ot.left === rE || ot.right === rE);
                   if (!otherPlayable) return false; // other tile can't even be played, so not comparable
                   // If we played the other tile instead, would THIS tile be stranded too?
                   for (const oSide of ['left', 'right']) {
-                    const oEnd = oSide === 'left' ? leftEnd : rightEnd;
+                    const oEnd = oSide === 'left' ? lE : rE;
                     if (ot.left !== oEnd && ot.right !== oEnd) continue;
                     const oNewEnd = (ot.left === oEnd) ? ot.right : ot.left;
-                    const oOtherEnd = oSide === 'left' ? rightEnd : leftEnd;
+                    const oOtherEnd = oSide === 'left' ? rE : lE;
                     if (tile.left === oNewEnd || tile.right === oNewEnd || tile.left === oOtherEnd || tile.right === oOtherEnd) return false;
                   }
                   return true; // both choices strand — not a differentiator
