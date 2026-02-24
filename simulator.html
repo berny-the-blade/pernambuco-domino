@@ -3251,7 +3251,7 @@
     let liveKnowledge = null, liveNotebook = null;
 
     // ========== DEEP STUDY STATE ==========
-    let studyCache = {}; studyCacheKeys = [];        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
+    let studyCache = {};
     let studyCacheKeys = [];    // FIFO order for eviction
     let studyRunning = false;
     let studyProgress = '';
