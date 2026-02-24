@@ -7139,7 +7139,9 @@
 
       // Reasons based on 1M-game empirical study — qualitative indicators
       const reasons = [];
+      let heuristicScore = 0; // net direction: >0 favors open, <0 favors pass
       const signal = (v) => {
+        heuristicScore += v;
         if (v > 0.05) return '<span style="color:#22c55e;font-weight:bold">strong open</span>';
         if (v > 0.01) return '<span style="color:#86efac;font-weight:bold">favors open</span>';
         if (v > -0.01) return '<span style="color:#94a3b8;font-weight:bold">neutral</span>';
@@ -7168,7 +7170,7 @@
       return {
         doubles: doubles.length, totalPips, maxSuitDepth, deepSuit,
         suitCoverage: uniqueSuits.size, connectivity: chains,
-        heavyTiles, reasons
+        heavyTiles, reasons, heuristicScore
       };
     }
 
@@ -7243,8 +7245,17 @@
             </div>
             ${!isClose ? `<div class="text-sm text-slate-300 mb-2"><b>${betterLabel}</b> is better by <span class="text-yellow-400 font-mono">${r.margin.toFixed(2)}</span> expected pts</div>` : `<div class="text-sm text-slate-400 mb-2">Margin only ${r.margin.toFixed(2)} — essentially a coin flip</div>`}
             <div class="text-left bg-slate-800 rounded-lg p-2 mt-2">
-              <div class="text-xs font-bold text-slate-400 mb-1">Hand Features <span class="text-slate-600 font-normal">(heuristic rules of thumb)</span></div>
+              <div class="text-xs font-bold text-slate-400 mb-1">Hand Features <span class="text-slate-600 font-normal">(rules of thumb — MC simulation above is the actual verdict)</span></div>
               ${r.handFeatures.reasons.map(r => `<div class="text-xs text-slate-300">- ${r}</div>`).join('')}
+              ${(() => {
+                const hs = r.handFeatures.heuristicScore || 0;
+                const mcSaysOpen = r.p0EP > r.p2EP;
+                const heuristicSaysOpen = hs > 0;
+                if (!isClose && mcSaysOpen !== heuristicSaysOpen) {
+                  return '<div class="text-xs text-amber-400 mt-1 pt-1 border-t border-slate-700">Note: These heuristics disagree with the MC result. The simulation accounts for specific tile interactions that simple rules miss.</div>';
+                }
+                return '';
+              })()}
             </div>
           </div>
           <div class="flex gap-3 justify-center mt-4">
