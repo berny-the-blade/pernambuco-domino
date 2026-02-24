@@ -127,6 +127,8 @@
     }
 
     const ALL_TILES = createDeck(); // shared immutable deck — never mutate
+    const TILE_INDEX = {}; // tile.id → integer index (0..27) for bitfield cache keys
+    ALL_TILES.forEach((t, i) => { TILE_INDEX[t.id] = i; });
 
     // ========== SEEDABLE PRNG (SplitMix64) ==========
     class SplitMix64 {
@@ -248,7 +250,7 @@
         if (this.played.has(tile.id)) return false;
         if (this.impossible[p].has(tile.id)) return false;
         if (tile.left === tile.right) return !this._numberImpossible(p, tile.left);
-        return !this._numberImpossible(p, tile.left) || !this._numberImpossible(p, tile.right);
+        return !this._numberImpossible(p, tile.left) && !this._numberImpossible(p, tile.right);
       }
       _numberImpossible(p, n) {
         for (const t of ALL_TILES) {
@@ -987,7 +989,7 @@
       const beforeSnap = {
         move: 0, player: -1, action: 'start', tile: null, side: null,
         reasons: ['Puzzle position'], score: 0, allOptions: [],
-        hands: hands.map(h => h.map(t => ({...t}))),
+        hands: hands.map(h => [...h]),
         board: boardTiles.map(t => ({...t})),
         leftEnd: def.leftEnd, rightEnd: def.rightEnd,
         currentPlayer: 0,
@@ -997,7 +999,7 @@
       };
 
       // afterSnap: AI's best move (the correct answer)
-      const afterHands = hands.map(h => h.map(t => ({...t})));
+      const afterHands = hands.map(h => [...h]);
       afterHands[0] = afterHands[0].filter(t => t.id !== correctTileObj.id);
       const afterBoard = [...boardTiles.map(t => ({...t})), {...correctTileObj}];
 
@@ -1565,7 +1567,8 @@
 
         // Create game by replaying
         const autoTile = deal.autoTile ? ALL_TILES.find(t => t.left === deal.autoTile.left && t.right === deal.autoTile.right) : null;
-        const result = simulateFullRound(allHands, deal.autoPlayedBy,
+        const starter = (deal.autoPlayedBy + 1) % 4;
+        const result = simulateFullRound(allHands, starter,
           autoTile ? [autoTile] : [], autoTile ? autoTile.left : null, autoTile ? autoTile.right : null, deal.autoPlayedBy);
 
         currentGame = result;
@@ -1651,53 +1654,6 @@
       localStorage.setItem('domino_elo', JSON.stringify(eloRatings));
     }
 
-    // ========== WEBWORKER FOR MC ==========
-
-    let evalWorker = null;
-    let workerPending = null;
-
-    function createEvalWorker() {
-      // Gather all functions needed for evaluation into the worker
-      const workerFns = [
-        SplitMix64.toString(),
-        canPlay.toString(),
-        couldPlayBothEnds.toString(),
-        `const ALL_TILES = ${JSON.stringify(ALL_TILES)};`
-      ].join('\n');
-
-      const workerCode = `
-        ${workerFns}
-
-        self.onmessage = function(e) {
-          const { taskId, type } = e.data;
-          if (type === 'ping') {
-            self.postMessage({ taskId, type: 'pong' });
-          }
-        };
-      `;
-
-      try {
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        evalWorker = new Worker(URL.createObjectURL(blob));
-        evalWorker.onmessage = function(e) {
-          if (workerPending && e.data.taskId === workerPending.taskId) {
-            workerPending.resolve(e.data.results);
-            workerPending = null;
-          }
-        };
-        evalWorker.onerror = function(err) {
-          console.warn('WebWorker error:', err.message);
-          if (workerPending) { workerPending.reject(err); workerPending = null; }
-        };
-      } catch (e) {
-        console.warn('WebWorker not available:', e.message);
-        evalWorker = null;
-      }
-    }
-
-    // Initialize worker on load (best effort)
-    try { createEvalWorker(); } catch(e) {}
-
     function shuffleDeck(deck) {
       const s = [...deck];
       const rng = getRng();
@@ -1733,22 +1689,28 @@
         this.playsBy = [[], [], [], []];
         this.passedOn = [[], [], [], []];
         this._strengthCache = [null, null, null, null];
+        this._remainingCount = [7, 7, 7, 7, 7, 7, 7]; // each number appears on 7 tiles
       }
       clone() {
         const k = Object.create(Knowledge.prototype);
         k.cantHave = this.cantHave.map(s => new Set(s));
         k.played = new Set(this.played);
         k.allTiles = ALL_TILES;
-        k.playsBy = this.playsBy.map(a => [...a]); // tile refs are immutable
+        k.playsBy = this.playsBy.map(a => [...a]);
         k.passedOn = this.passedOn.map(a => [...a]);
         k._strengthCache = [null, null, null, null];
+        k._remainingCount = [...this._remainingCount];
         return k;
       }
       recordPlay(p, t) {
-        this.played.add(t.id);
+        if (!this.played.has(t.id)) {
+          this.played.add(t.id);
+          this._remainingCount[t.left]--;
+          if (t.left !== t.right) this._remainingCount[t.right]--;
+        }
         if (p >= 0 && p <= 3) {
           this.playsBy[p].push(t);
-          this._strengthCache[p] = null; // invalidate
+          this._strengthCache[p] = null;
         }
       }
       recordPass(p, lE, rE) {
@@ -1765,9 +1727,7 @@
       }
       deadNumbers(p) { return [...this.cantHave[p]]; }
       remainingWithNumber(n) {
-        let c = 0;
-        for (const t of ALL_TILES) { if (!this.played.has(t.id) && (t.left === n || t.right === n)) c++; }
-        return c;
+        return this._remainingCount[n];
       }
       possibleTilesFor(p) {
         const possible = [];
@@ -1800,6 +1760,16 @@
       const partner = (player + 2) % 4;
       const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
 
+      // Pre-compute tile index by number for O(1) lookups
+      const suitCount = new Array(7).fill(0);
+      const tilesByNum = Array.from({length: 7}, () => []);
+      for (const t of hand) {
+        suitCount[t.left]++;
+        if (t.left !== t.right) suitCount[t.right]++;
+        tilesByNum[t.left].push(t);
+        if (t.left !== t.right) tilesByNum[t.right].push(t);
+      }
+
       const scored = playable.flatMap(tile => {
         const options = [];
         for (const side of ['left', 'right']) {
@@ -1814,8 +1784,18 @@
           let ss = 0;
           const sr = [];
 
-          // Suit control
-          const myCount = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd || x.left === otherEnd || x.right === otherEnd)).length;
+          // Suit control — use pre-computed index
+          const endSet = new Set([newEnd, otherEnd]);
+          let myCount = 0;
+          for (const n of endSet) {
+            for (const x of tilesByNum[n]) { if (x.id !== tile.id) myCount++; }
+          }
+          // Deduplicate: tiles touching both ends were counted twice
+          if (endSet.size === 2) {
+            for (const x of tilesByNum[newEnd]) {
+              if (x.id !== tile.id && (x.left === otherEnd || x.right === otherEnd)) myCount--;
+            }
+          }
           ss += myCount * 15;
           if (myCount > 0) sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]`);
 
@@ -1834,7 +1814,8 @@
             if (played > 0) {
               // How many tiles with this number could opponents hold?
               const remaining = knowledge.remainingWithNumber(endNum);
-              const weHold = hand.filter(x => x.id !== tile.id && (x.left === endNum || x.right === endNum)).length;
+              let weHold = 0;
+              for (const x of tilesByNum[endNum]) { if (x.id !== tile.id) weHold++; }
               const tileHasEnd = (tile.left === endNum || tile.right === endNum) ? 1 : 0;
               const unknownWithEnd = Math.max(0, remaining - weHold - tileHasEnd);
               const tUnk = 28 - knowledge.played.size - hand.length;
@@ -1860,7 +1841,8 @@
           // Isolated double setup
           for (const h of hand) {
             if (h.id === tile.id || h.left !== h.right) continue;
-            const sup = hand.filter(x => x.id !== h.id && x.id !== tile.id && (x.left === h.left || x.right === h.left)).length;
+            let sup = 0;
+            for (const x of tilesByNum[h.left]) { if (x.id !== h.id && x.id !== tile.id) sup++; }
             if (sup === 0 && (newEnd === h.left || otherEnd === h.left)) { ss += 20; sr.push(`Sets up isolated [${h.left}|${h.left}]`); }
           }
 
@@ -1869,7 +1851,8 @@
           // Subtract: tiles in our hand (excl. tile being played) + tile itself (1).
           // Then adjust for 4 unknown removed tiles using expected value.
           const remNew = knowledge.remainingWithNumber(newEnd);
-          const weHoldNew = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd)).length;
+          let weHoldNew = 0;
+          for (const x of tilesByNum[newEnd]) { if (x.id !== tile.id) weHoldNew++; }
           const unknownWithNew = Math.max(0, remNew - weHoldNew - 1); // -1 for tile being played
           const totalUnknown = 28 - knowledge.played.size - hand.length;
           const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
@@ -1888,14 +1871,9 @@
           const remainAfter = hand.length - 1;
           if (remainAfter === 0) {
             // We go out immediately! Massive bonus.
-            const isD = tile.left === tile.right;
-            const wasBoth = bLen > 0 && couldPlayBothEnds(tile, lE, rE);
-            let closePts = 1;
-            if (isD && wasBoth) closePts = 4;
-            else if (isD) closePts = 2;
-            else if (wasBoth) closePts = 3;
-            ss += 200 + closePts * 30; // dominating bonus
-            sr.push(`GO OUT! Win ${closePts}pt${closePts > 1 ? ' (' + (isD && wasBoth ? 'cruzada' : isD ? 'carroca' : wasBoth ? 'la-e-lo' : 'normal') + ')' : ''}`);
+            const w = scoreWin(tile, lE, rE, bLen + 1);
+            ss += 200 + w.pts * 30;
+            sr.push(`GO OUT! Win ${w.pts}pt${w.pts > 1 ? ' (' + w.type.toLowerCase() + ')' : ''}`);
           }
           // Near-close: playing this tile leaves 1 tile, check if it can play on new ends
           else if (remainAfter === 1) {
@@ -1959,7 +1937,7 @@
       const weights = allOptions.map(o => Math.exp((o.score - maxScore) / (temperature * 25 + 1)));
       const totalWeight = weights.reduce((s, w) => s + w, 0);
 
-      let r = Math.random() * totalWeight;
+      let r = getRng().random() * totalWeight;
       for (let i = 0; i < weights.length; i++) {
         r -= weights[i];
         if (r <= 0) return allOptions[i];
@@ -2017,10 +1995,30 @@
 
     // ========== SIMULATION ENGINE ==========
 
+    // Shared helpers — used by simulateFullRound, recordLivePlay, simulateFromPosition, monteCarloEval
+    function scoreWin(tile, prevLE, prevRE, boardLen) {
+      const isD = tile.left === tile.right;
+      const wasBoth = boardLen > 1 && couldPlayBothEnds(tile, prevLE, prevRE);
+      if (isD && wasBoth) return { pts: 4, type: 'CRUZADA' };
+      if (isD) return { pts: 2, type: 'CARROCA' };
+      if (wasBoth) return { pts: 3, type: 'LA E LO' };
+      return { pts: 1, type: 'NORMAL' };
+    }
+
+    function resolveBlock(hands) {
+      const hv = hands.map((h, i) => ({ player: i, team: i % 2, points: h.reduce((s, t) => s + t.left + t.right, 0) }));
+      const min = Math.min(...hv.map(v => v.points));
+      const winners = hv.filter(v => v.points === min);
+      if (winners.length > 1 && winners.some(w => w.team === 0) && winners.some(w => w.team === 1)) {
+        return { type: 'tie', points: 0, handValues: hv };
+      }
+      return { type: 'blocked', winner: winners[0].player, team: winners[0].team, points: 1, handValues: hv };
+    }
+
     const MC_SIMS_GENERATE = 30; // MC sims during game generation (endgame only)
 
     function simulateFullRound(initHands, startPlayer, initBoard, initLeft, initRight, autoPlayer) {
-      const hands = initHands.map(h => h.map(t => ({...t})));
+      const hands = initHands.map(h => [...h]); // tiles are immutable, share refs
       let board = [...initBoard], lE = initLeft, rE = initRight;
       let cur = startPlayer, passCount = 0;
       const knowledge = new Knowledge();
@@ -2034,7 +2032,7 @@
       const snapshots = [];
       snapshots.push({
         move: 0, player: -1, action: 'start', tile: null, side: null, reasons: ['Game begins'],
-        hands: hands.map(h => h.map(t => ({...t}))),
+        hands: hands.map(h => [...h]),
         board: [...board], leftEnd: lE, rightEnd: rE, currentPlayer: cur,
         knowledge: knowledge.clone(), notebook: nb.clone()
       });
@@ -2049,8 +2047,8 @@
         // MC-assisted play: when player has ≤3 tiles and multiple options, use MC to pick
         if (decision && hands[cur].length <= 3 && allOptions.length > 1) {
           const snap = {
-            hands: hands.map(h => h.map(t => ({...t}))),
-            board: board.map(t => ({...t})),
+            hands: hands.map(h => [...h]),
+            board: [...board],
             leftEnd: lE, rightEnd: rE,
             knowledge: knowledge.clone()
           };
@@ -2101,22 +2099,16 @@
 
           let outcome = null;
           if (hands[cur].length === 0) {
-            const isD = tile.left === tile.right;
-            const wasBoth = couldPlayBothEnds(tile, pL, pR);
-            let pts, type;
-            if (isD && wasBoth) { pts = 4; type = 'CRUZADA'; }
-            else if (isD) { pts = 2; type = 'CARROCA'; }
-            else if (wasBoth) { pts = 3; type = 'LA E LO'; }
-            else { pts = 1; type = 'NORMAL'; }
-            outcome = { type: 'win', winner: cur, team: cur % 2, points: pts, winType: type };
+            const w = scoreWin(tile, pL, pR, board.length);
+            outcome = { type: 'win', winner: cur, team: cur % 2, points: w.pts, winType: w.type };
           }
 
           snapshots.push({
             move: moveNum, player: cur, action: 'play', tile: playedTile, side: side || 'first',
             reasons, score: decision.score,
             allOptions: allOptions.map(o => ({ tile: {...o.tile}, score: o.score, side: o.side, reasons: [...o.reasons] })),
-            hands: hands.map(h => h.map(t => ({...t}))),
-            board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
+            hands: hands.map(h => [...h]),
+            board: [...board], leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
             knowledge: knowledge.clone(), notebook: nb.clone(),
             outcome
@@ -2132,22 +2124,15 @@
 
           let outcome = null;
           if (passCount >= 4) {
-            const hv = hands.map((h, i) => ({ player: i, team: i%2, points: h.reduce((s,t)=>s+t.left+t.right,0) }));
-            const min = Math.min(...hv.map(v => v.points));
-            const winners = hv.filter(v => v.points === min);
-            if (winners.length > 1 && winners.some(w => w.team===0) && winners.some(w => w.team===1)) {
-              outcome = { type: 'tie', points: 0 };
-            } else {
-              outcome = { type: 'blocked', winner: winners[0].player, team: winners[0].team, points: 1, handValues: hv };
-            }
+            outcome = resolveBlock(hands);
           }
 
           snapshots.push({
             move: moveNum, player: cur, action: 'pass', tile: null, side: null,
             reasons: [`No tiles matching ${lE} or ${rE}`, `Known dead: {${knowledge.deadNumbers(cur).join(', ')}}`],
             allOptions: [],
-            hands: hands.map(h => h.map(t => ({...t}))),
-            board: board.map(t => ({...t})), leftEnd: lE, rightEnd: rE,
+            hands: hands.map(h => [...h]),
+            board: [...board], leftEnd: lE, rightEnd: rE,
             currentPlayer: outcome ? -1 : (cur + 1) % 4,
             knowledge: knowledge.clone(), notebook: nb.clone(),
             outcome
@@ -2200,6 +2185,8 @@
         for (let p = 0; p < 4; p++)
           for (const t of hands[p])
             if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        // Edge case: all 7 doubles in the 4 discarded tiles (~0.17% chance)
+        if (!ht) { hp = 0; ht = pickOpeningTile(hands[0]); }
       }
 
       const autoTile = {...ht};
@@ -2207,7 +2194,7 @@
       const starter = (hp + 1) % 4;
 
       return {
-        originalHands: hands.map(h => h.map(t => ({...t}))),
+        originalHands: hands.map(h => [...h]),
         autoPlayedBy: hp,
         autoTile,
         ...simulateFullRound(hands, starter, [autoTile], autoTile.left, autoTile.right, hp)
@@ -2259,11 +2246,11 @@
           liveKnowledge = new Knowledge();
           liveNotebook = new DeductionNotebook();
           currentGame = {
-            originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+            originalHands: liveHands.map(h => [...h]),
             snapshots: [{
               move: 0, player: -1, action: 'deal', tile: null, side: null,
               reasons: ['Choose who opens'], allOptions: [],
-              hands: liveHands.map(h => h.map(t => ({ ...t }))),
+              hands: liveHands.map(h => [...h]),
               board: [], leftEnd: null, rightEnd: null,
               currentPlayer: -1,
               knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
@@ -2349,14 +2336,14 @@
         liveKnowledge.recordPlay(opener, autoTile);
         liveNotebook.recordPlay(opener, 0, autoTile, null, undefined, undefined);
         currentGame = {
-          originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+          originalHands: liveHands.map(h => [...h]),
           autoPlayedBy: opener,
           autoTile,
           snapshots: [{
             move: 0, player: -1, action: 'start', tile: null, side: null,
             reasons: ['Game begins'],
-            hands: liveHands.map(h => h.map(t => ({ ...t }))),
-            board: liveBoard.map(t => ({ ...t })),
+            hands: liveHands.map(h => [...h]),
+            board: [...liveBoard],
             leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
             currentPlayer: liveCurrentPlayer,
             knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
@@ -2370,11 +2357,11 @@
         liveRightEnd = null;
         liveCurrentPlayer = firstPlayer;
         currentGame = {
-          originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+          originalHands: liveHands.map(h => [...h]),
           snapshots: [{
             move: 0, player: -1, action: 'start', tile: null, side: null,
             reasons: ['Game begins'],
-            hands: liveHands.map(h => h.map(t => ({ ...t }))),
+            hands: liveHands.map(h => [...h]),
             board: [], leftEnd: null, rightEnd: null,
             currentPlayer: firstPlayer,
             knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
@@ -2460,14 +2447,8 @@
 
       let outcome = null;
       if (liveHands[player].length === 0) {
-        const isD = tile.left === tile.right;
-        const wasBoth = couldPlayBothEnds(tile, pL, pR);
-        let pts, type;
-        if (isD && wasBoth) { pts = 4; type = 'CRUZADA'; }
-        else if (isD) { pts = 2; type = 'CARROCA'; }
-        else if (wasBoth) { pts = 3; type = 'LA E LO'; }
-        else { pts = 1; type = 'NORMAL'; }
-        outcome = { type: 'win', winner: player, team: player % 2, points: pts, winType: type };
+        const w = scoreWin(tile, pL, pR, liveBoard.length);
+        outcome = { type: 'win', winner: player, team: player % 2, points: w.pts, winType: w.type };
       }
 
       liveCurrentPlayer = outcome ? -1 : (player + 1) % 4;
@@ -2476,8 +2457,8 @@
         move: liveMoveNum, player, action: 'play', tile: playedTile, side: side || 'first',
         reasons: reasons || [], score: score || 0,
         allOptions: (allOptions || []).map(o => ({ tile: { ...o.tile }, score: o.score, side: o.side, reasons: [...o.reasons] })),
-        hands: liveHands.map(h => h.map(t => ({ ...t }))),
-        board: liveBoard.map(t => ({ ...t })),
+        hands: liveHands.map(h => [...h]),
+        board: [...liveBoard],
         leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
         currentPlayer: liveCurrentPlayer,
         knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone(),
@@ -2500,14 +2481,7 @@
 
       let outcome = null;
       if (livePassCount >= 4) {
-        const hv = liveHands.map((h, i) => ({ player: i, team: i % 2, points: h.reduce((s, t) => s + t.left + t.right, 0) }));
-        const min = Math.min(...hv.map(v => v.points));
-        const winners = hv.filter(v => v.points === min);
-        if (winners.length > 1 && winners.some(w => w.team === 0) && winners.some(w => w.team === 1)) {
-          outcome = { type: 'tie', points: 0 };
-        } else {
-          outcome = { type: 'blocked', winner: winners[0].player, team: winners[0].team, points: 1, handValues: hv };
-        }
+        outcome = resolveBlock(liveHands);
       }
 
       liveCurrentPlayer = outcome ? -1 : (player + 1) % 4;
@@ -2516,8 +2490,8 @@
         move: liveMoveNum, player, action: 'pass', tile: null, side: null,
         reasons: [`No tiles matching ${liveLeftEnd} or ${liveRightEnd}`],
         allOptions: [],
-        hands: liveHands.map(h => h.map(t => ({ ...t }))),
-        board: liveBoard.map(t => ({ ...t })),
+        hands: liveHands.map(h => [...h]),
+        board: [...liveBoard],
         leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
         currentPlayer: liveCurrentPlayer,
         knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone(),
@@ -2727,24 +2701,34 @@
       }
       const rng = getRng();
       const players = [0, 1, 2, 3].filter(p => p !== myIdx);
+
+      // Pre-compute per-player eligible tiles
       const eligible = {};
       for (const p of players) {
         eligible[p] = pool.filter(t => canPlayerHold(p, t, knowledge));
       }
 
-      // Try rejection sampling first (unbiased, fast when constraints are loose)
-      for (let attempt = 0; attempt < 200; attempt++) {
-        const shuffled = [...pool];
-        rng.shuffle(shuffled);
+      // Primary strategy: constraint-propagation (most-constrained-first)
+      // Sort players by slack (eligible.length - handSize) ascending
+      const sortedPlayers = [...players].sort((a, b) =>
+        (eligible[a].length - handSizes[a]) - (eligible[b].length - handSizes[b])
+      );
+
+      for (let attempt = 0; attempt < 100; attempt++) {
         const hands = [[], [], [], []];
-        hands[myIdx] = [...myHand];
-        let idx = 0, valid = true;
-        for (const p of players) {
+        hands[myIdx] = myHand; // share ref — never mutated
+        const assigned = new Set();
+        let valid = true;
+
+        for (const p of sortedPlayers) {
+          const avail = eligible[p].filter(t => !assigned.has(t.id));
+          if (avail.length < handSizes[p]) { valid = false; break; }
+          rng.shuffle(avail);
           for (let i = 0; i < handSizes[p]; i++) {
-            if (idx >= shuffled.length) { valid = false; break; }
-            hands[p].push(shuffled[idx++]);
+            hands[p].push(avail[i]);
+            assigned.add(avail[i].id);
           }
-          if (!valid) break;
+          // Validate during assignment — early reject
           for (const t of hands[p]) {
             if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
           }
@@ -2753,58 +2737,38 @@
         if (valid) return hands;
       }
 
-      // Fallback: randomized backtracking (handles tight constraints, no greedy)
-      const hands = [[], [], [], []];
-      hands[myIdx] = [...myHand];
-      const assigned = new Set();
-      const shuffledPlayers = [...players];
-      rng.shuffle(shuffledPlayers);
-
-      function backtrack(pIdx) {
-        if (pIdx >= shuffledPlayers.length) return true;
-        const p = shuffledPlayers[pIdx];
-        const available = eligible[p].filter(t => !assigned.has(t.id));
-        rng.shuffle(available);
-        if (available.length < handSizes[p]) return false;
-        const chosen = available.slice(0, handSizes[p]);
-        for (const t of chosen) { hands[p].push(t); assigned.add(t.id); }
-        if (backtrack(pIdx + 1)) return true;
-        for (const t of chosen) { hands[p].pop(); assigned.delete(t.id); }
-        for (let retry = 0; retry < 5; retry++) {
-          rng.shuffle(available);
-          const chosen2 = available.slice(0, handSizes[p]);
-          for (const t of chosen2) { hands[p].push(t); assigned.add(t.id); }
-          if (backtrack(pIdx + 1)) return true;
-          for (const t of chosen2) { hands[p].pop(); assigned.delete(t.id); }
-        }
-        return false;
-      }
-
-      if (backtrack(0)) return hands;
-
-      // Emergency: rejection with relaxed attempt count (still no greedy — correctness first)
-      for (let attempt = 0; attempt < 500; attempt++) {
-        const shuffled = [...pool];
+      // Fallback: rejection sampling with reused buffer (handles edge cases)
+      const shuffled = new Array(pool.length);
+      for (let attempt = 0; attempt < 200; attempt++) {
+        for (let i = 0; i < pool.length; i++) shuffled[i] = pool[i];
         rng.shuffle(shuffled);
-        const h2 = [[], [], [], []];
-        h2[myIdx] = [...myHand];
+        const hands = [[], [], [], []];
+        hands[myIdx] = myHand;
         let idx = 0, valid = true;
         for (const p of players) {
           for (let i = 0; i < handSizes[p]; i++) {
             if (idx >= shuffled.length) { valid = false; break; }
-            h2[p].push(shuffled[idx++]);
-          }
-          if (!valid) break;
-          for (const t of h2[p]) {
+            const t = shuffled[idx++];
             if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
+            hands[p].push(t);
           }
           if (!valid) break;
         }
-        if (valid) return h2;
+        if (valid) return hands;
       }
 
-      // Absolute last resort: return hands from backtracking even if incomplete
-      // (better than greedy which violates constraints)
+      // Absolute last resort: return partial from constraint-propagation
+      const hands = [[], [], [], []];
+      hands[myIdx] = myHand;
+      const assigned = new Set();
+      for (const p of sortedPlayers) {
+        const avail = eligible[p].filter(t => !assigned.has(t.id));
+        rng.shuffle(avail);
+        for (let i = 0; i < Math.min(handSizes[p], avail.length); i++) {
+          hands[p].push(avail[i]);
+          assigned.add(avail[i].id);
+        }
+      }
       return hands;
     }
 
@@ -3023,7 +2987,7 @@
     // Run study analysis for a specific step (async)
     function runStudyForStep(stepIdx) {
       if (!currentGame || stepIdx <= 0) return;
-      if (studyCache[stepIdx]) return; // already computed
+      if (studyCache[stepIdx]) return;
       if (studyRunning) return;
 
       const snap = currentGame.snapshots[stepIdx];
@@ -3031,62 +2995,42 @@
       if (!snap || !prevSnap) return;
 
       studyRunning = true;
-      studyProgress = 'Computing MC evaluation...';
-      render();
+      studyProgress = 'Analyzing...';
+      render(); // single render to show spinner
 
       setTimeout(() => {
         try {
-          // 1. MC evaluation for the player at this step
+          // 1. MC evaluation
           let mcResults = null;
           if (snap.action === 'play' && prevSnap) {
             mcResults = monteCarloEval(prevSnap, snap.player, MC_SIMS_STUDY);
           }
-
-          studyProgress = 'Computing tile probabilities...';
-          render();
-
-          setTimeout(() => {
-            try {
-              // 2. Tile probability matrix from P0's POV
-              const probMatrix = computeAllTileProbs(prevSnap, PROB_SAMPLES_STUDY);
-
-              // 3. Generate deductions
-              const deductions = generateStudyDeductions(snap, prevSnap, snap.player, snap.tile, snap.side, snap.action);
-
-              // 4. Generate strategic notes
-              const strategy = generateStudyStrategy(snap, prevSnap, mcResults, probMatrix, snap.player);
-
-              // 5. What the player actually played vs MC best
-              let playGrade = null;
-              if (mcResults && mcResults.length > 0 && snap.tile) {
-                const best = mcResults[0];
-                const played = mcResults.find(m => m.tile.id === snap.tile.id);
-                if (played && best) {
-                  const eqLoss = best.expectedPoints - played.expectedPoints;
-                  playGrade = {
-                    eqLoss,
-                    grade: eqLoss < 0.02 ? 'perfect' : eqLoss < 0.15 ? 'good' : eqLoss < 0.40 ? 'ok' : 'bad',
-                    bestTile: best.tile, bestSide: best.side, bestEP: best.expectedPoints,
-                    playedEP: played.expectedPoints, playedRank: mcResults.indexOf(played) + 1
-                  };
-                }
-              }
-
-              studyCache[stepIdx] = { mcResults, probMatrix, deductions, strategy, playGrade };
-              studyRunning = false;
-              studyProgress = '';
-              render();
-            } catch (e) {
-              studyRunning = false;
-              studyProgress = '';
-              render();
+          // 2. Tile probability matrix
+          const probMatrix = computeAllTileProbs(prevSnap, PROB_SAMPLES_STUDY);
+          // 3. Deductions
+          const deductions = generateStudyDeductions(snap, prevSnap, snap.player, snap.tile, snap.side, snap.action);
+          // 4. Strategic notes
+          const strategy = generateStudyStrategy(snap, prevSnap, mcResults, probMatrix, snap.player);
+          // 5. Play grade
+          let playGrade = null;
+          if (mcResults && mcResults.length > 0 && snap.tile) {
+            const best = mcResults[0];
+            const played = mcResults.find(m => m.tile.id === snap.tile.id);
+            if (played && best) {
+              const eqLoss = best.expectedPoints - played.expectedPoints;
+              playGrade = {
+                eqLoss,
+                grade: eqLoss < 0.02 ? 'perfect' : eqLoss < 0.15 ? 'good' : eqLoss < 0.40 ? 'ok' : 'bad',
+                bestTile: best.tile, bestSide: best.side, bestEP: best.expectedPoints,
+                playedEP: played.expectedPoints, playedRank: mcResults.indexOf(played) + 1
+              };
             }
-          }, 10);
-        } catch (e) {
-          studyRunning = false;
-          studyProgress = '';
-          render();
-        }
+          }
+          cacheSet(studyCache, studyCacheKeys, stepIdx, { mcResults, probMatrix, deductions, strategy, playGrade });
+        } catch (e) { /* study failed, cache stays empty */ }
+        studyRunning = false;
+        studyProgress = '';
+        render(); // single render to show results
       }, 10);
     }
 
@@ -3124,28 +3068,16 @@
           bLen++;
 
           if (simHands[cur].length === 0) {
-            // Score the win
-            const isD = tile.left === tile.right;
-            const wasBoth = bLen > 1 && couldPlayBothEnds(tile, prevLE, prevRE);
-            let pts = 1, type = 'normal';
-            if (isD && wasBoth) { pts = 4; type = 'cruzada'; }
-            else if (isD) { pts = 2; type = 'carroca'; }
-            else if (wasBoth) { pts = 3; type = 'laelo'; }
-            return { winnerTeam: cur % 2, points: pts, type };
+            const w = scoreWin(tile, prevLE, prevRE, bLen);
+            return { winnerTeam: cur % 2, points: w.pts, type: w.type.toLowerCase() };
           }
           cur = (cur + 1) % 4;
         } else {
           passCount++;
           simKnowledge.recordPass(cur, simLE, simRE);
           if (passCount >= 4) {
-            // Pernambuco rule: individual lowest pip count wins (not team total)
-            const pips = simHands.map((h, i) => ({ player: i, team: i % 2, pts: h.reduce((a, t) => a + t.left + t.right, 0) }));
-            const minPips = Math.min(...pips.map(p => p.pts));
-            const winners = pips.filter(p => p.pts === minPips);
-            if (winners.length > 1 && winners.some(w => w.team === 0) && winners.some(w => w.team === 1)) {
-              return { winnerTeam: -1, points: 0, type: 'tie' };
-            }
-            return { winnerTeam: winners[0].team, points: 1, type: 'blocked' };
+            const b = resolveBlock(simHands);
+            return { winnerTeam: b.type === 'tie' ? -1 : b.team, points: b.points, type: b.type };
           }
           cur = (cur + 1) % 4;
         }
@@ -3170,10 +3102,14 @@
       }
 
       // Check cache
-      const cacheKey = [lE, rE, hand.map(t=>t.id).sort().join(','),
-        snap.hands.map(h=>h.length).join(','),
-        [...knowledge.played].sort().join(','),
-        knowledge.cantHave.map(s => [...s].sort().join(',')).join(';')].join('::');
+      // Bitfield-based cache key: O(n) integer ops instead of sort+join strings
+      let playedBits = 0;
+      for (const id of knowledge.played) playedBits |= (1 << TILE_INDEX[id]);
+      let handBits = 0;
+      for (const t of hand) handBits |= (1 << TILE_INDEX[t.id]);
+      let cantBits = 0;
+      for (let p = 0; p < 4; p++) for (const n of knowledge.cantHave[p]) cantBits |= (1 << (p * 7 + n));
+      const cacheKey = `${lE}:${rE}:${handBits}:${playedBits}:${cantBits}`;
       if (mcCache.has(cacheKey)) return mcCache.get(cacheKey);
 
       const handSizes = snap.hands.map(h => h.length);
@@ -3212,17 +3148,13 @@
 
           // Check instant win
           if (newHandSizes[player] === 0) {
-            const isD = tile.left === tile.right;
-            const wasBoth = board.length > 0 && couldPlayBothEnds(tile, lE, rE);
-            let pts = 1, type = 'normal';
-            if (isD && wasBoth) { pts = 4; type = 'cruzada'; }
-            else if (isD) { pts = 2; type = 'carroca'; }
-            else if (wasBoth) { pts = 3; type = 'laelo'; }
+            const w = scoreWin(tile, lE, rE, board.length + 1);
+            const wt = w.type.toLowerCase();
             bestResult = {
               tile, side,
-              winRate: 1.0, expectedPoints: pts,
-              blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0, [type]: numSims },
-              sims: numSims, variance: 0, stdDev: 0, ci95: 0, cvar5: pts
+              winRate: 1.0, expectedPoints: w.pts,
+              blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0, [wt]: numSims },
+              sims: numSims, variance: 0, stdDev: 0, ci95: 0, cvar5: w.pts
             };
             break;
           }
@@ -3319,18 +3251,32 @@
     let liveKnowledge = null, liveNotebook = null;
 
     // ========== DEEP STUDY STATE ==========
-    let studyCache = {};        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
-    let studyRunning = false;   // is study computation in progress?
-    let studyProgress = '';     // status text during computation
-    const MC_SIMS_STUDY = 1000;  // sims per tile option in study mode
-    const PROB_SAMPLES_STUDY = 1000; // samples for tile probability matrix
+    let studyCache = {}; studyCacheKeys = [];        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
+    let studyCacheKeys = [];    // FIFO order for eviction
+    let studyRunning = false;
+    let studyProgress = '';
+    const MC_SIMS_STUDY = 1000;
+    const PROB_SAMPLES_STUDY = 1000;
+    const MAX_CACHE_SIZE = 15;
 
     // ========== PRO ANALYTICS STATE ==========
     let proCache = {};
+    let proCacheKeys = [];
     let proRunning = false;
     let proProgress = '';
     const PRO_MC_SIMS = 50;
     const PRO_SAMPLES = 40;
+
+    function cacheSet(cache, keys, key, value) {
+      if (!cache[key]) {
+        keys.push(key);
+        if (keys.length > MAX_CACHE_SIZE) {
+          const evict = keys.shift();
+          delete cache[evict];
+        }
+      }
+      cache[key] = value;
+    }
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -5601,8 +5547,8 @@
           eqLoss, grade, stepIdx: i
         });
         idx++;
-        render(); // show progress
-        setTimeout(processNext, 10); // yield to UI between each move's MC
+        if (idx % 3 === 0 || idx >= p0Steps.length) render(); // render every 3 moves, not every move
+        setTimeout(processNext, 10);
       }
       setTimeout(processNext, 10);
     }
@@ -6394,7 +6340,7 @@
           const mcResults = (studyCache[stepIdx] && studyCache[stepIdx].mcResults) || null;
 
           const analytics = computeProAnalytics(snap, player, mcResults);
-          proCache[stepIdx] = { mcResults, ...analytics };
+          cacheSet(proCache, proCacheKeys, stepIdx, { mcResults, ...analytics });
           proRunning = false;
           proProgress = '';
           render();
@@ -7082,7 +7028,7 @@
 
           // P0 opens
           try {
-            const g0 = generateGame(0, true, hands.map(h => h.map(t => ({...t}))));
+            const g0 = generateGame(0, true, hands.map(h => [...h]));
             if (g0.outcome) {
               const ep = g0.outcome.team === 0 ? (g0.outcome.points || 1) : -(g0.outcome.points || 1);
               p0Total += ep;
@@ -7091,7 +7037,7 @@
 
           // P2 opens
           try {
-            const g2 = generateGame(2, true, hands.map(h => h.map(t => ({...t}))));
+            const g2 = generateGame(2, true, hands.map(h => [...h]));
             if (g2.outcome) {
               const ep = g2.outcome.team === 0 ? (g2.outcome.points || 1) : -(g2.outcome.points || 1);
               p2Total += ep;
@@ -7456,9 +7402,9 @@
 
     function startDeepStudy() {
       setMode('watch');
-      studyCache = {};
+      studyCache = {}; studyCacheKeys = [];
       studyRunning = false;
-      proCache = {};
+      proCache = {}; proCacheKeys = [];
       proRunning = false;
       studyProgress = '';
       rightPanelTab = 'study';
@@ -7467,7 +7413,7 @@
 
     function startProAnalytics() {
       setMode('watch');
-      proCache = {};
+      proCache = {}; proCacheKeys = [];
       proRunning = false;
       proProgress = '';
       rightPanelTab = 'pro';
@@ -7487,9 +7433,9 @@
       playMatchWinner = null;
       playShowingDiffPicker = false;
       showingOpeningQuiz = false;
-      studyCache = {};
+      studyCache = {}; studyCacheKeys = [];
       studyRunning = false;
-      proCache = {};
+      proCache = {}; proCacheKeys = [];
       proRunning = false;
       studyProgress = '';
       quizWaiting = false;
@@ -7546,9 +7492,9 @@
       quizSidePick = null;
       mcResults = null;
       analysisRunning = false;
-      studyCache = {};
+      studyCache = {}; studyCacheKeys = [];
       studyRunning = false;
-      proCache = {};
+      proCache = {}; proCacheKeys = [];
       proRunning = false;
       studyProgress = '';
       mcCache.clear(); // clear MC cache between games
@@ -7723,19 +7669,24 @@
     }
 
     function resetStats() {
-      stats = { totalMoves: 0, optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0, games: 0, history: [] };
+      stats = { totalMoves: 0, optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0, games: 0, totalEquityLoss: 0, history: [] };
       saveStats();
       render();
     }
 
-    // Keyboard controls
+    // Keyboard controls — throttle rapid arrow keys to max ~20fps
+    let _keyRenderPending = false;
+    function throttledRender() {
+      if (_keyRenderPending) return;
+      _keyRenderPending = true;
+      requestAnimationFrame(() => { _keyRenderPending = false; render(); });
+    }
     document.addEventListener('keydown', e => {
       if (gameMode === 'play') {
         if (e.key === 'n') startPlayGame();
-        // Arrow keys only for post-game review
         if (currentGame && currentGame.outcome) {
-          if (e.key === 'ArrowRight') { e.preventDefault(); if (currentStep < currentGame.snapshots.length - 1) { currentStep++; render(); } }
-          if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentStep > 0) { currentStep--; render(); } }
+          if (e.key === 'ArrowRight') { e.preventDefault(); if (currentStep < currentGame.snapshots.length - 1) { currentStep++; throttledRender(); } }
+          if (e.key === 'ArrowLeft') { e.preventDefault(); if (currentStep > 0) { currentStep--; throttledRender(); } }
         }
         return;
       }
