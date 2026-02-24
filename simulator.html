@@ -6112,18 +6112,22 @@
 
     function computeProAnalytics(snap, player, mcResults) {
       const hand = snap.hands[player];
-      const lE = snap.leftEnd, rE = snap.rightEnd;
       const knowledge = snap.knowledge;
       const handSizes = snap.hands.map(h => h.length);
-      const partner = (player + 2) % 4;
-      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
-
-      // Generate belief samples
       const samples = [];
       for (let i = 0; i < PRO_SAMPLES; i++) {
         try { samples.push(generateConsistentDeal(hand, handSizes, knowledge, player)); }
         catch(e) { break; }
       }
+      return computeProAnalyticsFromSamples(snap, player, mcResults, samples);
+    }
+
+    function computeProAnalyticsFromSamples(snap, player, mcResults, samples) {
+      const hand = snap.hands[player];
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const knowledge = snap.knowledge;
+      const partner = (player + 2) % 4;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
       const N = samples.length || 1;
 
       // --- Single-pass: compute ALL per-sample metrics at once ---
@@ -6338,23 +6342,39 @@
       proProgress = 'Sampling...';
       render();
 
-      setTimeout(() => {
-        try {
-          const snap = currentGame.snapshots[stepIdx];
-          const player = snap.currentPlayer;
+      const snap = currentGame.snapshots[stepIdx];
+      const player = snap.currentPlayer;
+      const hand = snap.hands[player];
+      const knowledge = snap.knowledge;
+      const handSizes = snap.hands.map(h => h.length);
 
-          // Reuse MC from study cache if available — never run MC ourselves
-          const mcResults = (studyCache[stepIdx] && studyCache[stepIdx].mcResults) || null;
+      // Async batched sampling — generate 5 deals per frame to avoid freezing UI
+      const samples = [];
+      const BATCH = 5;
+      let idx = 0;
 
-          const analytics = computeProAnalytics(snap, player, mcResults);
-          cacheSet(proCache, proCacheKeys, stepIdx, { mcResults, ...analytics });
+      function sampleBatch() {
+        const batchEnd = Math.min(idx + BATCH, PRO_SAMPLES);
+        for (; idx < batchEnd; idx++) {
+          try { samples.push(generateConsistentDeal(hand, handSizes, knowledge, player)); }
+          catch(e) { idx = PRO_SAMPLES; break; }
+        }
+        proProgress = `Sampling ${samples.length}/${PRO_SAMPLES}...`;
+        if (idx < PRO_SAMPLES) {
+          setTimeout(sampleBatch, 0);
+        } else {
+          // All samples ready — compute analytics synchronously (fast part)
+          try {
+            const mcResults = (studyCache[stepIdx] && studyCache[stepIdx].mcResults) || null;
+            const analytics = computeProAnalyticsFromSamples(snap, player, mcResults, samples);
+            cacheSet(proCache, proCacheKeys, stepIdx, { mcResults, ...analytics });
+          } catch(e) { /* silently fail */ }
           proRunning = false;
           proProgress = '';
           render();
-        } catch(e) {
-          proRunning = false; proProgress = ''; render();
         }
-      }, 10);
+      }
+      setTimeout(sampleBatch, 10);
     }
 
     function renderProPanel(snap, pNames, pTeams, teamColors) {
