@@ -1863,9 +1863,9 @@
           // Scarcity
           if (knowledge.remainingWithNumber(newEnd) <= 1) { ss -= 8; sr.push(`Few tiles left with ${newEnd}`); }
 
-          // Partner close to winning
+          // Partner close to winning (uniform bonus — same for all options, so not shown as a reason)
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
-          if (estPHand <= 2 && estPHand > 0) { ss += 15; sr.push(`Partner close (est. ${estPHand} tiles)`); }
+          if (estPHand <= 2 && estPHand > 0) { ss += 15; }
 
           // === CLOSING BONUS ===
           // Instant win: playing this tile empties our hand
