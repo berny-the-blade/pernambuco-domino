@@ -2824,6 +2824,265 @@
       return probs;
     }
 
+    // Compute tile probabilities for ALL opponents from P0's perspective
+    function computeAllTileProbs(snap, numSamples = PROB_SAMPLES_STUDY) {
+      const knowledge = snap.knowledge;
+      const p0Hand = snap.hands[0];
+      const handSizes = snap.hands.map(h => h.length);
+      const counts = {}; // { tileId: { 1: count, 2: count, 3: count } }
+      for (const t of ALL_TILES) {
+        if (knowledge.played.has(t.id) || p0Hand.some(m => m.id === t.id)) continue;
+        counts[t.id] = { 1: 0, 2: 0, 3: 0 };
+      }
+      let validSamples = 0;
+      for (let i = 0; i < numSamples; i++) {
+        const deal = generateConsistentDeal(p0Hand, handSizes, knowledge, 0);
+        validSamples++;
+        for (const p of [1, 2, 3]) {
+          for (const t of deal[p]) {
+            if (counts[t.id]) counts[t.id][p]++;
+          }
+        }
+      }
+      if (validSamples === 0) return {};
+      const probs = {};
+      for (const id of Object.keys(counts)) {
+        probs[id] = {};
+        for (const p of [1, 2, 3]) {
+          probs[id][p] = counts[id][p] / validSamples;
+        }
+        // Also compute "removed" probability (in the 4 discarded tiles)
+        probs[id].removed = 1 - (probs[id][1] + probs[id][2] + probs[id][3]);
+      }
+      return probs;
+    }
+
+    // Generate deduction bullets from P0's perspective for a move
+    function generateStudyDeductions(snap, prevSnap, player, tile, side, action) {
+      const bullets = [];
+      const pName = pn(player);
+      const teamLabel = player % 2 === 0 ? 'your team' : 'opponent';
+      const k = snap.knowledge;
+
+      if (action === 'pass') {
+        const lE = prevSnap.leftEnd, rE = prevSnap.rightEnd;
+        bullets.push({
+          type: 'CERTAIN', icon: '🚫',
+          text: `${pName} PASSED on ends ${lE}/${rE} — has NO tiles with ${lE} or ${rE}`
+        });
+        // Count remaining tiles with those numbers
+        const remL = k.remainingWithNumber(lE);
+        const remR = k.remainingWithNumber(rE);
+        if (remL <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remL} tiles with ${lE} remain in play — ${lE}s are scarce` });
+        if (rE !== lE && remR <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remR} tiles with ${rE} remain in play — ${rE}s are scarce` });
+        if (player % 2 !== 0) {
+          bullets.push({ type: 'STRATEGY', icon: '💡', text: `Keep ${lE} and ${rE} on the board to block ${pName}` });
+        } else {
+          bullets.push({ type: 'STRATEGY', icon: '💡', text: `Avoid leaving ${lE}/${rE} ends — partner can't play them` });
+        }
+        return bullets;
+      }
+
+      if (!tile) return bullets;
+
+      // What did they play vs what was available?
+      const lE = prevSnap.leftEnd, rE = prevSnap.rightEnd;
+      const isDouble = tile.left === tile.right;
+
+      // Side choice reasoning
+      if (side === 'left' || side === 'right') {
+        const playedEnd = side === 'left' ? lE : rE;
+        const otherEnd = side === 'left' ? rE : lE;
+        const tileNumbers = [tile.left, tile.right];
+        const newEnd = tileNumbers.find(n => n !== playedEnd);
+        if (newEnd !== undefined) {
+          bullets.push({
+            type: 'OBSERVATION', icon: '🎯',
+            text: `${pName} played [${tile.left}|${tile.right}] on the ${side}, opening ${newEnd} and closing ${playedEnd}`
+          });
+        }
+      }
+
+      // Double play analysis
+      if (isDouble) {
+        const rem = k.remainingWithNumber(tile.left);
+        bullets.push({
+          type: 'INFO', icon: '🎲',
+          text: `Double [${tile.left}|${tile.left}] played — ${rem} tiles with ${tile.left} remain`
+        });
+        if (rem <= 2) {
+          bullets.push({ type: 'STRATEGY', icon: '⚠️', text: `${tile.left}s nearly exhausted — controlling the ${tile.left}-end is now very powerful` });
+        }
+      }
+
+      // Avoidance detection
+      const nb = snap.notebook;
+      if (nb) {
+        const pData = nb.players[player];
+        for (const n of [lE, rE]) {
+          if (n !== undefined && tile.left !== n && tile.right !== n) {
+            const avoid = pData.avoidanceEvidence[n];
+            if (avoid && avoid.count >= 2) {
+              bullets.push({ type: 'LIKELY', icon: '🔍', text: `${pName} avoided ${n}s ${avoid.count} times — likely LOW on ${n}s` });
+            }
+          }
+        }
+      }
+
+      // Void detection — check if this play reveals new voids
+      const prevVoids = prevSnap.knowledge.cantHave[player];
+      const newVoids = k.cantHave[player];
+      for (const n of newVoids) {
+        if (!prevVoids.has(n)) {
+          bullets.push({ type: 'CERTAIN', icon: '🚫', text: `${pName} is now confirmed void in ${n}s` });
+        }
+      }
+
+      return bullets;
+    }
+
+    // Generate strategic commentary for a move
+    function generateStudyStrategy(snap, prevSnap, mcResults, probMatrix, player) {
+      const notes = [];
+      const pName = pn(player);
+      const k = snap.knowledge;
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+
+      // Board state
+      notes.push({ icon: '📋', text: `Board ends: ${lE} / ${rE} — ${snap.board.length} tiles on board` });
+
+      // Suit scarcity analysis
+      for (let n = 0; n <= 6; n++) {
+        const rem = k.remainingWithNumber(n);
+        if (rem <= 2 && rem > 0) {
+          const onEnd = (n === lE || n === rE);
+          notes.push({ icon: '📉', text: `${n}s: only ${rem} left${onEnd ? ' — currently on an end!' : ''}` });
+        } else if (rem === 0) {
+          notes.push({ icon: '❌', text: `${n}s: EXHAUSTED — no tiles with ${n} remain` });
+        }
+      }
+
+      // MC analysis summary
+      if (mcResults && mcResults.length > 0) {
+        const best = mcResults[0];
+        const worst = mcResults[mcResults.length - 1];
+        if (mcResults.length > 1) {
+          const gap = best.expectedPoints - worst.expectedPoints;
+          if (gap > 0.5) {
+            notes.push({ icon: '⚡', text: `Critical decision: ${gap.toFixed(2)} EP gap between best and worst option` });
+          } else if (gap < 0.05) {
+            notes.push({ icon: '🤷', text: `Close decision: only ${gap.toFixed(2)} EP separates all options` });
+          }
+        }
+        if (best.winRate > 0.7) notes.push({ icon: '💪', text: `${pName}'s team in strong position (${(best.winRate*100).toFixed(0)}% WR with best play)` });
+        else if (best.winRate < 0.35) notes.push({ icon: '😰', text: `${pName}'s team struggling (${(best.winRate*100).toFixed(0)}% WR even with best play)` });
+      }
+
+      // Partner coordination
+      if (player % 2 === 0) {
+        // P0 or P2 (your team)
+        const partnerVoids = [...k.cantHave[player === 0 ? 2 : 0]];
+        if (partnerVoids.length > 0) {
+          notes.push({ icon: '🤝', text: `Partner void in: {${partnerVoids.join(', ')}} — avoid leaving those ends` });
+        }
+      } else {
+        // P1 or P3 (opponents)
+        const oppPartnerVoids = [...k.cantHave[player === 1 ? 3 : 1]];
+        if (oppPartnerVoids.length > 0) {
+          notes.push({ icon: '🎯', text: `Opponent's partner void in: {${oppPartnerVoids.join(', ')}} — keep those ends to block them` });
+        }
+      }
+
+      // High probability tiles
+      if (probMatrix && Object.keys(probMatrix).length > 0) {
+        for (const p of [1, 3]) { // opponents
+          const highProb = [];
+          for (const [tileId, probs] of Object.entries(probMatrix)) {
+            if (probs[p] > 0.6) {
+              highProb.push({ id: tileId, prob: probs[p] });
+            }
+          }
+          if (highProb.length > 0) {
+            highProb.sort((a, b) => b.prob - a.prob);
+            const top3 = highProb.slice(0, 3).map(h => `[${h.id.replace('-','|')}] ${(h.prob*100).toFixed(0)}%`).join(', ');
+            notes.push({ icon: '🔮', text: `${pn(p)} likely holds: ${top3}` });
+          }
+        }
+      }
+
+      return notes;
+    }
+
+    // Run study analysis for a specific step (async)
+    function runStudyForStep(stepIdx) {
+      if (!currentGame || stepIdx <= 0) return;
+      if (studyCache[stepIdx]) return; // already computed
+      if (studyRunning) return;
+
+      const snap = currentGame.snapshots[stepIdx];
+      const prevSnap = currentGame.snapshots[stepIdx - 1];
+      if (!snap || !prevSnap) return;
+
+      studyRunning = true;
+      studyProgress = 'Computing MC evaluation...';
+      render();
+
+      setTimeout(() => {
+        try {
+          // 1. MC evaluation for the player at this step
+          let mcResults = null;
+          if (snap.action === 'play' && prevSnap) {
+            mcResults = monteCarloEval(prevSnap, snap.player, MC_SIMS_STUDY);
+          }
+
+          studyProgress = 'Computing tile probabilities...';
+          render();
+
+          setTimeout(() => {
+            try {
+              // 2. Tile probability matrix from P0's POV
+              const probMatrix = computeAllTileProbs(prevSnap, PROB_SAMPLES_STUDY);
+
+              // 3. Generate deductions
+              const deductions = generateStudyDeductions(snap, prevSnap, snap.player, snap.tile, snap.side, snap.action);
+
+              // 4. Generate strategic notes
+              const strategy = generateStudyStrategy(snap, prevSnap, mcResults, probMatrix, snap.player);
+
+              // 5. What the player actually played vs MC best
+              let playGrade = null;
+              if (mcResults && mcResults.length > 0 && snap.tile) {
+                const best = mcResults[0];
+                const played = mcResults.find(m => m.tile.id === snap.tile.id);
+                if (played && best) {
+                  const eqLoss = best.expectedPoints - played.expectedPoints;
+                  playGrade = {
+                    eqLoss,
+                    grade: eqLoss < 0.02 ? 'perfect' : eqLoss < 0.15 ? 'good' : eqLoss < 0.40 ? 'ok' : 'bad',
+                    bestTile: best.tile, bestSide: best.side, bestEP: best.expectedPoints,
+                    playedEP: played.expectedPoints, playedRank: mcResults.indexOf(played) + 1
+                  };
+                }
+              }
+
+              studyCache[stepIdx] = { mcResults, probMatrix, deductions, strategy, playGrade };
+              studyRunning = false;
+              studyProgress = '';
+              render();
+            } catch (e) {
+              studyRunning = false;
+              studyProgress = '';
+              render();
+            }
+          }, 10);
+        } catch (e) {
+          studyRunning = false;
+          studyProgress = '';
+          render();
+        }
+      }, 10);
+    }
+
     // Simulate a game from a given position using smartAI for all players
     // Returns { winnerTeam, points, type } with full scoring
     function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge, initBLen) {
@@ -3050,6 +3309,13 @@
     let liveHands = null, liveBoard = null, liveLeftEnd = null, liveRightEnd = null;
     let liveCurrentPlayer = null, livePassCount = 0, liveMoveNum = 0;
     let liveKnowledge = null, liveNotebook = null;
+
+    // ========== DEEP STUDY STATE ==========
+    let studyCache = {};        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
+    let studyRunning = false;   // is study computation in progress?
+    let studyProgress = '';     // status text during computation
+    const MC_SIMS_STUDY = 150;  // sims per tile option in study mode
+    const PROB_SAMPLES_STUDY = 300; // samples for tile probability matrix
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -3891,6 +4157,7 @@
                   <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
                   <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">Coach</div>
                   <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
+                  <div class="tab ${rightPanelTab === 'study' ? 'active' : ''}" onclick="setTab('study')" style="${rightPanelTab === 'study' ? 'border-color:#818cf8;color:#818cf8' : ''}">Study</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
                   <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">History</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
@@ -3900,6 +4167,7 @@
                   rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'coach' ? renderCoachPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'analysis' ? renderAnalysisPanel(snap, pNames, pTeams, teamColors) :
+                  rightPanelTab === 'study' ? renderStudyPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'history' ? renderHistoryPanel() :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
@@ -5441,6 +5709,202 @@
       `;
     }
 
+    function renderStudyPanel(snap, pNames, pTeams, teamColors) {
+      if (!currentGame) return '<div class="text-xs text-slate-500">No game loaded</div>';
+      if (snap.move === 0) {
+        return `<div class="space-y-3 flex-1 overflow-y-auto">
+          <div class="bg-indigo-950/40 border border-indigo-700 rounded-lg p-3 text-center">
+            <div class="text-lg font-bold text-indigo-400 mb-1">Deep Study</div>
+            <div class="text-xs text-slate-400">Step through moves with arrow keys to see MC evaluation, tile probabilities, and strategic analysis for every player.</div>
+            <div class="text-xs text-slate-500 mt-2">All hands are visible. Each move is evaluated with ${MC_SIMS_STUDY} MC rollouts.</div>
+            <div class="text-xs text-indigo-300 mt-2">Press → to start</div>
+          </div>
+        </div>`;
+      }
+
+      // Auto-trigger study computation
+      if (!studyCache[currentStep] && !studyRunning) {
+        setTimeout(() => runStudyForStep(currentStep), 10);
+      }
+
+      // Show loading state
+      if (studyRunning || !studyCache[currentStep]) {
+        return `<div class="space-y-3 flex-1 overflow-y-auto">
+          <div class="text-center py-6">
+            <div class="inline-block w-6 h-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mb-2"></div>
+            <div class="text-xs text-indigo-300">${studyProgress || 'Analyzing position...'}</div>
+          </div>
+        </div>`;
+      }
+
+      const study = studyCache[currentStep];
+      const { mcResults: mc, probMatrix, deductions, strategy, playGrade } = study;
+      const player = snap.player;
+      const pColor = teamColors[player % 2];
+      const pColors = ['#60a5fa','#f87171','#a78bfa','#fbbf24'];
+
+      // Move header
+      let moveHeader = '';
+      if (snap.action === 'play') {
+        const gradeHtml = playGrade ? (() => {
+          const gc = { perfect: '#22c55e', good: '#86efac', ok: '#eab308', bad: '#ef4444' }[playGrade.grade];
+          const gl = { perfect: 'OPTIMAL', good: 'GOOD', ok: 'MISTAKE', bad: 'BLUNDER' }[playGrade.grade];
+          return `<span class="px-2 py-0.5 rounded text-xs font-bold" style="background:${gc};color:#0f172a">${gl}</span>`;
+        })() : '';
+        moveHeader = `
+          <div class="bg-slate-900 rounded-lg p-2.5 border border-indigo-600">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${pColor}">${pn(player)}</span>
+              <span class="text-xs font-bold text-indigo-300">plays [${snap.tile.left}|${snap.tile.right}] on ${snap.side}</span>
+              ${gradeHtml}
+            </div>
+            ${playGrade && playGrade.grade !== 'perfect' ? `
+            <div class="text-xs text-slate-400 mt-1">
+              Best was [${playGrade.bestTile.left}|${playGrade.bestTile.right}] ${playGrade.bestSide || ''}
+              <span class="text-emerald-400 font-mono">EP ${playGrade.bestEP >= 0 ? '+' : ''}${playGrade.bestEP.toFixed(2)}</span>
+              vs played <span class="text-red-400 font-mono">EP ${playGrade.playedEP >= 0 ? '+' : ''}${playGrade.playedEP.toFixed(2)}</span>
+              <span class="text-red-400 font-bold">(−${playGrade.eqLoss.toFixed(2)})</span>
+            </div>` : ''}
+          </div>`;
+      } else if (snap.action === 'pass') {
+        moveHeader = `
+          <div class="bg-slate-900 rounded-lg p-2.5 border border-orange-600">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${pColor}">${pn(player)}</span>
+              <span class="text-xs font-bold text-orange-400">PASSES</span>
+            </div>
+          </div>`;
+      }
+
+      // MC Results section
+      let mcHtml = '';
+      if (mc && mc.length > 0) {
+        mcHtml = `
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-indigo-400 mb-1">MC Evaluation (${MC_SIMS_STUDY} sims/option)</div>
+            <div class="space-y-1">
+              ${mc.map((r, i) => {
+                const isPlayed = snap.tile && r.tile.id === snap.tile.id;
+                const epCol = r.expectedPoints > 0.2 ? '#22c55e' : r.expectedPoints > 0 ? '#86efac' : r.expectedPoints > -0.2 ? '#eab308' : '#ef4444';
+                return `<div class="flex items-center gap-1.5 text-xs ${isPlayed ? 'bg-indigo-950/40 rounded px-1 py-0.5 border border-indigo-700' : ''}">
+                  <span class="font-mono w-3 ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${i+1}.</span>
+                  <span class="${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">[${r.tile.left}|${r.tile.right}]</span>
+                  <span class="text-slate-500 w-8">${r.side || 'open'}</span>
+                  <span class="font-mono font-bold" style="color:${epCol}">${r.expectedPoints >= 0 ? '+' : ''}${r.expectedPoints.toFixed(2)}</span>
+                  <span class="text-slate-600 font-mono text-xs">${(r.winRate*100).toFixed(0)}%</span>
+                  ${isPlayed ? '<span class="text-indigo-400 text-xs ml-auto">← played</span>' : ''}
+                  ${i === 0 && !isPlayed ? '<span class="text-emerald-400 text-xs ml-auto">★ best</span>' : ''}
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      }
+
+      // Deductions section
+      let deductHtml = '';
+      if (deductions && deductions.length > 0) {
+        deductHtml = `
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-amber-400 mb-1">Deductions (from P0's view)</div>
+            <div class="space-y-1">
+              ${deductions.map(d => {
+                const borderColor = d.type === 'CERTAIN' ? 'border-red-500' : d.type === 'LIKELY' ? 'border-amber-500' : d.type === 'STRATEGY' ? 'border-emerald-500' : 'border-slate-600';
+                return `<div class="text-xs text-slate-300 border-l-2 ${borderColor} pl-2 py-0.5">
+                  <span>${d.icon}</span> ${d.text}
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      }
+
+      // Tile probability matrix
+      let probHtml = '';
+      if (probMatrix && Object.keys(probMatrix).length > 0) {
+        // Group by numbers for a cleaner display — show top uncertain tiles
+        const entries = Object.entries(probMatrix)
+          .map(([id, probs]) => ({ id, ...probs }))
+          .filter(e => {
+            // Skip tiles that are certainly in one place (>95%)
+            const max = Math.max(e[1], e[2], e[3], e.removed);
+            return max < 0.95;
+          })
+          .sort((a, b) => {
+            // Sort by uncertainty (most evenly distributed first)
+            const maxA = Math.max(a[1], a[2], a[3]);
+            const maxB = Math.max(b[1], b[2], b[3]);
+            return maxA - maxB;
+          });
+
+        if (entries.length > 0) {
+          const shown = entries.slice(0, 12);
+          probHtml = `
+            <div class="bg-slate-900 rounded-lg p-2">
+              <div class="text-xs font-bold text-purple-400 mb-1">Tile Probabilities (P0's view)</div>
+              <div class="text-xs text-slate-600 mb-1">Who likely holds each unknown tile?</div>
+              <table class="w-full text-xs">
+                <tr class="text-slate-500">
+                  <td class="pb-0.5">Tile</td>
+                  <td class="pb-0.5 text-center" style="color:${pColors[1]}">P1</td>
+                  <td class="pb-0.5 text-center" style="color:${pColors[2]}">P2</td>
+                  <td class="pb-0.5 text-center" style="color:${pColors[3]}">P3</td>
+                  <td class="pb-0.5 text-center text-slate-600">Out</td>
+                </tr>
+                ${shown.map(e => {
+                  const probCell = (p) => {
+                    const v = e[p];
+                    const bg = v > 0.5 ? 'rgba(139,92,246,0.3)' : v > 0.3 ? 'rgba(139,92,246,0.15)' : 'transparent';
+                    const col = v > 0.5 ? '#a78bfa' : v > 0.3 ? '#8b5cf6' : '#64748b';
+                    return `<td class="text-center font-mono py-0.5" style="background:${bg};color:${col}">${v > 0.01 ? (v*100).toFixed(0) + '%' : '—'}</td>`;
+                  };
+                  const outV = e.removed;
+                  return `<tr>
+                    <td class="text-slate-300 font-mono py-0.5">[${e.id.replace('-','|')}]</td>
+                    ${probCell(1)}${probCell(2)}${probCell(3)}
+                    <td class="text-center font-mono py-0.5 text-slate-600">${outV > 0.01 ? (outV*100).toFixed(0) + '%' : '—'}</td>
+                  </tr>`;
+                }).join('')}
+              </table>
+              ${entries.length > 12 ? `<div class="text-xs text-slate-600 mt-1">+${entries.length - 12} more tiles tracked</div>` : ''}
+            </div>`;
+        }
+      }
+
+      // Strategy notes
+      let stratHtml = '';
+      if (strategy && strategy.length > 0) {
+        stratHtml = `
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-emerald-400 mb-1">Strategic Notes</div>
+            <div class="space-y-0.5">
+              ${strategy.map(s => `<div class="text-xs text-slate-300">${s.icon} ${s.text}</div>`).join('')}
+            </div>
+          </div>`;
+      }
+
+      // Heuristic reasoning (from the snapshot)
+      let reasonsHtml = '';
+      if (snap.reasons && snap.reasons.length > 0) {
+        reasonsHtml = `
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">AI Heuristic Reasoning</div>
+            <div class="space-y-0.5">
+              ${snap.reasons.map(r => `<div class="text-xs text-slate-400">▸ ${r}</div>`).join('')}
+            </div>
+          </div>`;
+      }
+
+      return `
+        <div class="space-y-2 flex-1 overflow-y-auto">
+          <div class="text-xs text-indigo-300 font-bold">DEEP STUDY — Move #${snap.move}</div>
+          ${moveHeader}
+          ${mcHtml}
+          ${deductHtml}
+          ${probHtml}
+          ${stratHtml}
+          ${reasonsHtml}
+        </div>`;
+    }
+
     function renderStatsPanel() {
       const total = stats.totalMoves;
       const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
@@ -6153,8 +6617,9 @@
               <button class="btn text-lg px-6 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="showDifficultyPicker();">Play vs AI</button>
               <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Strategy Puzzles</button>
               <button class="btn text-lg px-6 py-3" style="background:#06b6d4;color:#0f172a;font-weight:bold" onclick="startOpeningQuiz();">Opening Quiz</button>
+              <button class="btn text-lg px-6 py-3" style="background:#818cf8;color:white;font-weight:bold" onclick="startDeepStudy();">Deep Study</button>
             </div>
-            <div class="grid grid-cols-6 gap-3 text-left mb-6">
+            <div class="grid grid-cols-7 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
                 <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
@@ -6179,6 +6644,10 @@
                 <div class="text-cyan-400 font-bold text-sm mb-1">Opening Quiz</div>
                 <div class="text-xs text-slate-400">Practice whether to open or let partner open, validated by MC rollouts.</div>
               </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-indigo-400 font-bold text-sm mb-1">Deep Study</div>
+                <div class="text-xs text-slate-400">MC evaluation, tile probabilities, and strategic analysis for every move.</div>
+              </div>
             </div>
             ${hasStats ? `
             <div class="bg-slate-800 rounded-lg p-3 inline-block">
@@ -6193,6 +6662,15 @@
 
     // ========== CONTROLS ==========
 
+    function startDeepStudy() {
+      setMode('watch');
+      studyCache = {};
+      studyRunning = false;
+      studyProgress = '';
+      rightPanelTab = 'study';
+      newGame();
+    }
+
     function setMode(m) {
       gameMode = m;
       stopAutoPlay();
@@ -6206,6 +6684,9 @@
       playMatchWinner = null;
       playShowingDiffPicker = false;
       showingOpeningQuiz = false;
+      studyCache = {};
+      studyRunning = false;
+      studyProgress = '';
       quizWaiting = false;
       quizResult = null;
       quizShowingResult = false;
@@ -6260,6 +6741,9 @@
       quizSidePick = null;
       mcResults = null;
       analysisRunning = false;
+      studyCache = {};
+      studyRunning = false;
+      studyProgress = '';
       mcCache.clear(); // clear MC cache between games
 
       // Seed new PRNG for this game
