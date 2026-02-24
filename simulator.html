@@ -2261,7 +2261,7 @@
       playAITimer = setTimeout(() => {
         playAITimer = null;
         executeAIMove();
-      }, PLAY_AI_DELAY);
+      }, playAIDelay * 1000);
     }
 
     function executeAIMove() {
@@ -2859,7 +2859,7 @@
       advanced:     { value: 0.75, label: 'Advanced',      desc: 'Strong, rare errors',  color: '#f97316' },
       expert:       { value: 1.00, label: 'Expert',        desc: 'Always optimal',   color: '#ef4444' }
     };
-    const PLAY_AI_DELAY = 600;
+    let playAIDelay = 1.5; // seconds per AI move (user-configurable)
     let playShowingDiffPicker = false;
     let playHint = null; // { tileId, side, reasons } — AI recommendation shown on request
     // Live game mutable state (play mode only)
@@ -5130,6 +5130,16 @@
                 `).join('')}
               </div>
 
+              <div class="text-sm font-bold text-emerald-400 mb-2 mt-1">AI Speed</div>
+              <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs text-slate-400 w-10">Fast</span>
+                <input type="range" min="0.3" max="5" step="0.1" value="${playAIDelay}"
+                       oninput="setPlayAIDelay(parseFloat(this.value))"
+                       class="flex-1 h-2 accent-emerald-500 cursor-pointer">
+                <span class="text-xs text-slate-400 w-10 text-right">Slow</span>
+                <span class="text-sm font-mono text-emerald-400 w-12 text-right">${playAIDelay.toFixed(1)}s</span>
+              </div>
+
               <div class="text-xs text-slate-500 mt-2">
                 <strong>Beginner</strong>: Nearly random &middot;
                 <strong>Intermediate</strong>: Decent, mistakes &middot;
@@ -5148,6 +5158,11 @@
 
     function setPlayDifficulty(target, value) {
       playDifficulty[target] = value;
+      render();
+    }
+
+    function setPlayAIDelay(value) {
+      playAIDelay = value;
       render();
     }
 
