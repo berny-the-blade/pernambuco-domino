@@ -3720,6 +3720,10 @@
         app.innerHTML = renderPuzzleBrowser();
         return;
       }
+      if (showingOpeningQuiz) {
+        app.innerHTML = renderOpeningQuiz();
+        return;
+      }
       if (playShowingDiffPicker) {
         app.innerHTML = renderDifficultyPicker();
         return;
@@ -5768,6 +5772,268 @@
       render();
     }
 
+    // ========== OPENING QUIZ ==========
+
+    let showingOpeningQuiz = false;
+    let oqHand = null;           // P0's 6 tiles for current question
+    let oqAllHands = null;       // All 4 hands (for display after answer)
+    let oqState = 'choosing';    // 'choosing' | 'evaluating' | 'result'
+    let oqResult = null;         // { p0EP, p2EP, correct, chosen, margin, handFeatures }
+    let oqStats = { correct: 0, total: 0, streak: 0, bestStreak: 0, history: [] };
+
+    try {
+      const saved = localStorage.getItem('domino-opening-quiz-stats');
+      if (saved) oqStats = JSON.parse(saved);
+    } catch(e) {}
+
+    function saveOQStats() {
+      try { localStorage.setItem('domino-opening-quiz-stats', JSON.stringify(oqStats)); } catch(e) {}
+    }
+
+    function startOpeningQuiz() {
+      showingOpeningQuiz = true;
+      nextOpeningQuestion();
+    }
+
+    function nextOpeningQuestion() {
+      oqState = 'choosing';
+      oqResult = null;
+      newSeed();
+      const deck = shuffleDeck(ALL_TILES);
+      oqAllHands = [[],[],[],[]];
+      for (let i = 0; i < 24; i++) oqAllHands[i%4].push({...deck[i]});
+      oqHand = oqAllHands[0].map(t => ({...t}));
+      render();
+    }
+
+    function oqChoose(choice) {
+      // choice: 'me' or 'partner'
+      oqState = 'evaluating';
+      render();
+
+      // Run MC rollouts async to not freeze UI
+      const NUM_SIMS = 40;
+      let p0Total = 0, p2Total = 0;
+      let simsDone = 0;
+
+      function runBatch() {
+        const batchSize = 5;
+        for (let b = 0; b < batchSize && simsDone < NUM_SIMS; b++, simsDone++) {
+          // For each sim, redistribute P1/P2/P3 tiles randomly (P0 fixed)
+          const remaining = ALL_TILES.filter(t => !oqHand.some(h => h.id === t.id));
+          const shuffled = shuffleDeck(remaining.map(t => ({...t})));
+          const hands = [
+            oqHand.map(t => ({...t})),
+            shuffled.slice(0, 6),
+            shuffled.slice(6, 12),
+            shuffled.slice(12, 18)
+          ];
+
+          // P0 opens
+          try {
+            const g0 = generateGame(0, true, hands.map(h => h.map(t => ({...t}))));
+            if (g0.outcome) {
+              const ep = g0.outcome.team === 0 ? (g0.outcome.points || 1) : -(g0.outcome.points || 1);
+              p0Total += ep;
+            }
+          } catch(e) {}
+
+          // P2 opens
+          try {
+            const g2 = generateGame(2, true, hands.map(h => h.map(t => ({...t}))));
+            if (g2.outcome) {
+              const ep = g2.outcome.team === 0 ? (g2.outcome.points || 1) : -(g2.outcome.points || 1);
+              p2Total += ep;
+            }
+          } catch(e) {}
+        }
+
+        if (simsDone < NUM_SIMS) {
+          setTimeout(runBatch, 5);
+        } else {
+          // Done — compute result
+          const p0EP = p0Total / NUM_SIMS;
+          const p2EP = p2Total / NUM_SIMS;
+          const better = p0EP >= p2EP ? 'me' : 'partner';
+          const margin = Math.abs(p0EP - p2EP);
+          const isCorrect = (margin < 0.05) || (choice === better); // close calls are both correct
+
+          // Analyze hand features
+          const handFeatures = analyzeOpeningHand(oqHand);
+
+          oqResult = { p0EP, p2EP, correct: isCorrect, chosen: choice, better, margin, handFeatures };
+
+          // Update stats
+          oqStats.total++;
+          if (isCorrect) {
+            oqStats.correct++;
+            oqStats.streak++;
+            if (oqStats.streak > oqStats.bestStreak) oqStats.bestStreak = oqStats.streak;
+          } else {
+            oqStats.streak = 0;
+          }
+          oqStats.history.push({
+            date: Date.now(), correct: isCorrect, chosen: choice, better,
+            margin: Math.round(margin * 100) / 100,
+            p0EP: Math.round(p0EP * 100) / 100,
+            p2EP: Math.round(p2EP * 100) / 100,
+            features: handFeatures
+          });
+          if (oqStats.history.length > 50) oqStats.history.shift();
+          saveOQStats();
+
+          oqState = 'result';
+          render();
+        }
+      }
+      setTimeout(runBatch, 10);
+    }
+
+    function analyzeOpeningHand(hand) {
+      const doubles = hand.filter(t => t.left === t.right);
+      const totalPips = hand.reduce((s, t) => s + t.left + t.right, 0);
+
+      // Suit depth: how many tiles touch each number
+      const suitDepth = {};
+      for (let n = 0; n <= 6; n++) suitDepth[n] = hand.filter(t => t.left === n || t.right === n).length;
+      const maxSuitDepth = Math.max(...Object.values(suitDepth));
+      const deepSuit = parseInt(Object.entries(suitDepth).sort((a,b) => b[1] - a[1])[0][0]);
+      const uniqueSuits = new Set();
+      hand.forEach(t => { uniqueSuits.add(t.left); uniqueSuits.add(t.right); });
+
+      // Connectivity: can tiles chain well?
+      let chains = 0;
+      for (let i = 0; i < hand.length; i++) {
+        for (let j = i+1; j < hand.length; j++) {
+          const a = hand[i], b = hand[j];
+          if (a.left === b.left || a.left === b.right || a.right === b.left || a.right === b.right) chains++;
+        }
+      }
+
+      // Heavy tiles (pip sum >= 9)
+      const heavyTiles = hand.filter(t => t.left + t.right >= 9).length;
+
+      const reasons = [];
+      if (doubles.length >= 2) reasons.push(`${doubles.length} doubles — good for opening (control)`);
+      else if (doubles.length === 0) reasons.push('No doubles — weaker opener');
+      if (maxSuitDepth >= 4) reasons.push(`Deep suit (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — strong opener`);
+      if (uniqueSuits.size <= 4) reasons.push(`Only ${uniqueSuits.size} suits — limited flexibility`);
+      if (uniqueSuits.size >= 6) reasons.push(`${uniqueSuits.size} suits covered — good flexibility`);
+      if (heavyTiles >= 3) reasons.push(`${heavyTiles} heavy tiles — opening lets you dump early`);
+      if (totalPips <= 20) reasons.push(`Low pips (${totalPips}) — safe hand, less risk`);
+      if (totalPips >= 35) reasons.push(`High pips (${totalPips}) — risky if blocked, open to dump`);
+      if (chains >= 10) reasons.push(`Well-connected tiles (${chains} links) — good playability`);
+      else if (chains <= 5) reasons.push(`Poorly connected (${chains} links) — may get stuck`);
+
+      return {
+        doubles: doubles.length, totalPips, maxSuitDepth, deepSuit,
+        suitCoverage: uniqueSuits.size, connectivity: chains,
+        heavyTiles, reasons
+      };
+    }
+
+    function renderOpeningQuiz() {
+      if (!oqHand) return '<div>Loading...</div>';
+
+      const tilesHTML = oqHand.map(t =>
+        tileHTML(t, '', 'v', '', '', 'transform:scale(1.3);margin:4px')
+      ).join('');
+
+      // Hand analysis summary (always show)
+      const fa = oqResult ? oqResult.handFeatures : analyzeOpeningHand(oqHand);
+      const featureBadges = `
+        <div class="flex gap-2 flex-wrap justify-center text-xs mt-2">
+          <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">${fa.doubles}D</span>
+          <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">${fa.totalPips}pips</span>
+          <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">${fa.suitCoverage} suits</span>
+          <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">deep ${fa.deepSuit}s(${fa.maxSuitDepth})</span>
+          <span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300">${fa.connectivity} links</span>
+        </div>`;
+
+      let body = '';
+
+      if (oqState === 'choosing') {
+        body = `
+          <div class="text-lg text-slate-300 mb-4">Your team won the last game. Who should open?</div>
+          <div class="flex gap-2 justify-center mb-4 flex-wrap">${tilesHTML}</div>
+          ${featureBadges}
+          <div class="text-xs text-slate-500 mt-3 mb-4">The opener can play any tile. Look at your hand and decide.</div>
+          <div class="flex gap-4 justify-center">
+            <button class="btn btn-green text-lg px-8 py-3" onclick="oqChoose('me')">I'll Open</button>
+            <button class="btn btn-blue text-lg px-8 py-3" onclick="oqChoose('partner')">Partner Opens</button>
+          </div>
+        `;
+      } else if (oqState === 'evaluating') {
+        body = `
+          <div class="flex gap-2 justify-center mb-4 flex-wrap">${tilesHTML}</div>
+          ${featureBadges}
+          <div class="text-center py-8">
+            <div class="inline-block w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+            <div class="text-blue-300 text-sm">Running ${40} Monte Carlo simulations...</div>
+            <div class="text-xs text-slate-500">Evaluating both scenarios</div>
+          </div>
+        `;
+      } else if (oqState === 'result') {
+        const r = oqResult;
+        const isClose = r.margin < 0.05;
+        const correctColor = r.correct ? 'text-emerald-400' : 'text-red-400';
+        const verdictText = r.correct ? (isClose ? 'CLOSE CALL — Both OK!' : 'CORRECT!') : 'WRONG!';
+        const verdictIcon = r.correct ? (isClose ? '~' : '+') : 'X';
+
+        const betterLabel = r.better === 'me' ? 'You open' : 'Partner opens';
+        const chosenLabel = r.chosen === 'me' ? 'You open' : 'Partner opens';
+
+        body = `
+          <div class="flex gap-2 justify-center mb-3 flex-wrap">${tilesHTML}</div>
+          ${featureBadges}
+          <div class="bg-slate-900 rounded-lg p-4 mt-3 text-center">
+            <div class="text-3xl font-bold ${correctColor} mb-1">${verdictIcon} ${verdictText}</div>
+            <div class="text-sm text-slate-300 mb-3">You chose: <b>${chosenLabel}</b></div>
+            <div class="grid grid-cols-2 gap-4 mb-3">
+              <div class="bg-slate-800 rounded-lg p-3 ${r.better === 'me' ? 'ring-2 ring-emerald-500' : ''}">
+                <div class="text-xs text-slate-500 mb-1">You Open</div>
+                <div class="text-xl font-bold font-mono ${r.p0EP > 0 ? 'text-emerald-400' : 'text-red-400'}">${r.p0EP > 0 ? '+' : ''}${r.p0EP.toFixed(2)}</div>
+                <div class="text-xs text-slate-500">avg EP</div>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-3 ${r.better === 'partner' ? 'ring-2 ring-emerald-500' : ''}">
+                <div class="text-xs text-slate-500 mb-1">Partner Opens</div>
+                <div class="text-xl font-bold font-mono ${r.p2EP > 0 ? 'text-emerald-400' : 'text-red-400'}">${r.p2EP > 0 ? '+' : ''}${r.p2EP.toFixed(2)}</div>
+                <div class="text-xs text-slate-500">avg EP</div>
+              </div>
+            </div>
+            ${!isClose ? `<div class="text-sm text-slate-300 mb-2"><b>${betterLabel}</b> is better by <span class="text-yellow-400 font-mono">${r.margin.toFixed(2)}</span> expected pts</div>` : `<div class="text-sm text-slate-400 mb-2">Margin only ${r.margin.toFixed(2)} — essentially a coin flip</div>`}
+            <div class="text-left bg-slate-800 rounded-lg p-2 mt-2">
+              <div class="text-xs font-bold text-slate-400 mb-1">Hand Analysis</div>
+              ${r.handFeatures.reasons.map(r => `<div class="text-xs text-slate-300">- ${r}</div>`).join('')}
+            </div>
+          </div>
+          <div class="flex gap-3 justify-center mt-4">
+            <button class="btn btn-green px-6 py-2" onclick="nextOpeningQuestion()">Next Hand</button>
+            <button class="btn btn-gray px-4 py-2" onclick="showingOpeningQuiz=false;render();">Back</button>
+          </div>
+        `;
+      }
+
+      // Stats bar
+      const pct = oqStats.total > 0 ? Math.round(oqStats.correct / oqStats.total * 100) : 0;
+      const statsBar = `
+        <div class="flex gap-4 justify-center text-xs text-slate-400 mb-4">
+          <span>Score: <b class="text-white">${oqStats.correct}/${oqStats.total}</b> (${pct}%)</span>
+          <span>Streak: <b class="${oqStats.streak >= 3 ? 'text-emerald-400' : 'text-white'}">${oqStats.streak}</b></span>
+          <span>Best: <b class="text-yellow-400">${oqStats.bestStreak}</b></span>
+        </div>`;
+
+      return `
+        <div class="flex items-center justify-center min-h-screen">
+          <div class="text-center max-w-2xl w-full">
+            <h1 class="text-2xl font-bold text-cyan-400 mb-1">Opening Decision Quiz</h1>
+            <p class="text-sm text-slate-500 mb-3">Should you open or let your partner open?</p>
+            ${statsBar}
+            ${body}
+          </div>
+        </div>`;
+    }
+
     // ========== DIFFICULTY PICKER ==========
 
     function renderDifficultyPicker() {
@@ -5871,8 +6137,9 @@
               <button class="btn btn-purple text-lg px-6 py-3" onclick="setMode('quiz'); newGame();">Quiz Mode</button>
               <button class="btn text-lg px-6 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="showDifficultyPicker();">Play vs AI</button>
               <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Strategy Puzzles</button>
+              <button class="btn text-lg px-6 py-3" style="background:#06b6d4;color:#0f172a;font-weight:bold" onclick="startOpeningQuiz();">Opening Quiz</button>
             </div>
-            <div class="grid grid-cols-5 gap-3 text-left mb-6">
+            <div class="grid grid-cols-6 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
                 <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
@@ -5892,6 +6159,10 @@
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-blue-400 font-bold text-sm mb-1">Card Tracker</div>
                 <div class="text-xs text-slate-400">Visual grid showing which tiles each opponent could hold.</div>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-3">
+                <div class="text-cyan-400 font-bold text-sm mb-1">Opening Quiz</div>
+                <div class="text-xs text-slate-400">Practice whether to open or let partner open, validated by MC rollouts.</div>
               </div>
             </div>
             ${hasStats ? `
@@ -5919,6 +6190,7 @@
       playStarterPending = false;
       playMatchWinner = null;
       playShowingDiffPicker = false;
+      showingOpeningQuiz = false;
       quizWaiting = false;
       quizResult = null;
       quizShowingResult = false;
