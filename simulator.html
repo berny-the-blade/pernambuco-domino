@@ -1861,8 +1861,16 @@
             if (sup === 0 && (newEnd === h.left || otherEnd === h.left)) { ss += 20; sr.push(`Sets up isolated [${h.left}|${h.left}]`); }
           }
 
-          // Scarcity
-          if (knowledge.remainingWithNumber(newEnd) <= 1) { ss -= 8; sr.push(`Few tiles left with ${newEnd}`); }
+          // Board counting — prefer creating ends with numbers mostly played (fewer left for opponents)
+          // Each number has 7 tiles in total. remainingWithNumber counts unplayed tiles (incl. our hand + removed 4).
+          const remNew = knowledge.remainingWithNumber(newEnd);
+          const weHoldNew = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd)).length;
+          const oppCouldHaveNew = Math.max(0, remNew - weHoldNew);
+          // Gradient: 0 opponents tiles = +12, 1 = +6, 2 = 0, 3 = -6, 4+ = -12
+          const boardCountScore = (2 - oppCouldHaveNew) * 6;
+          ss += boardCountScore;
+          if (oppCouldHaveNew <= 1) sr.push(`${newEnd}s nearly exhausted (${oppCouldHaveNew} out)`);
+          else if (oppCouldHaveNew >= 4) sr.push(`${newEnd}s heavy — ${oppCouldHaveNew} still out for opponents`);
 
           // Partner close to winning (uniform bonus — same for all options, so not shown as a reason)
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
