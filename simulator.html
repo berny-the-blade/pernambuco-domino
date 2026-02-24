@@ -1832,10 +1832,13 @@
           for (const endNum of endNums) {
             const played = pStr[endNum] || 0;
             if (played > 0) {
-              // How many tiles with this number are left in play (not played, not in our hand)?
+              // How many tiles with this number could opponents hold?
               const remaining = knowledge.remainingWithNumber(endNum);
               const weHold = hand.filter(x => x.id !== tile.id && (x.left === endNum || x.right === endNum)).length;
-              const othersCouldHave = remaining - weHold;
+              const tileHasEnd = (tile.left === endNum || tile.right === endNum) ? 1 : 0;
+              const unknownWithEnd = Math.max(0, remaining - weHold - tileHasEnd);
+              const tUnk = 28 - knowledge.played.size - hand.length;
+              const othersCouldHave = tUnk > 4 ? Math.round(unknownWithEnd * (tUnk - 4) / tUnk) : 0;
               if (othersCouldHave > 0 && !knowledge.cantHave[partner].has(endNum)) {
                 pAff += played;
                 partnerDetails.push(`${endNum}s (played ${played}x, ${othersCouldHave} still out)`);
@@ -1862,10 +1865,14 @@
           }
 
           // Board counting — prefer creating ends with numbers mostly played (fewer left for opponents)
-          // Each number has 7 tiles in total. remainingWithNumber counts unplayed tiles (incl. our hand + removed 4).
+          // Each number appears on 7 tiles. remainingWithNumber = unplayed tiles with that number.
+          // Subtract: tiles in our hand (excl. tile being played) + tile itself (1).
+          // Then adjust for 4 unknown removed tiles using expected value.
           const remNew = knowledge.remainingWithNumber(newEnd);
           const weHoldNew = hand.filter(x => x.id !== tile.id && (x.left === newEnd || x.right === newEnd)).length;
-          const oppCouldHaveNew = Math.max(0, remNew - weHoldNew);
+          const unknownWithNew = Math.max(0, remNew - weHoldNew - 1); // -1 for tile being played
+          const totalUnknown = 28 - knowledge.played.size - hand.length;
+          const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
           // Gradient: 0 opponents tiles = +12, 1 = +6, 2 = 0, 3 = -6, 4+ = -12
           const boardCountScore = (2 - oppCouldHaveNew) * 6;
           ss += boardCountScore;
@@ -3165,7 +3172,8 @@
       // Check cache
       const cacheKey = [lE, rE, hand.map(t=>t.id).sort().join(','),
         snap.hands.map(h=>h.length).join(','),
-        [...knowledge.played].sort().join(',')].join('::');
+        [...knowledge.played].sort().join(','),
+        knowledge.cantHave.map(s => [...s].sort().join(',')).join(';')].join('::');
       if (mcCache.has(cacheKey)) return mcCache.get(cacheKey);
 
       const handSizes = snap.hands.map(h => h.length);
@@ -3403,21 +3411,7 @@
     function roundToMatchEquity(epts, myTeamScore, oppTeamScore, dob) {
       const d = dob || scoreMultiplier || 1;
       const currentME = getMatchEquity3D(myTeamScore, oppTeamScore, d);
-      // Improved: weight by actual point distribution × dobrada
-      let meAfter = 0;
-      for (const { pts: basePts, prob } of POINT_DIST) {
-        const pts = basePts * d;
-        if (epts >= 0) {
-          // Positive: probability of us winning with these pts
-          const frac = prob; // weight this outcome type
-          meAfter += frac * getMatchEquity3D(
-            Math.min(myTeamScore + pts, MATCH_TARGET + 4), oppTeamScore, 1);
-        } else {
-          meAfter += prob * getMatchEquity3D(
-            myTeamScore, Math.min(oppTeamScore + pts, MATCH_TARGET + 4), 1);
-        }
-      }
-      // Scale by magnitude of epts (epts is signed expected pts)
+      // Linear approximation: ME shift per expected point
       const mePerPt = getMatchEquity3D(Math.min(myTeamScore + d, MATCH_TARGET + 4), oppTeamScore, 1) - currentME;
       return epts * mePerPt;
     }
@@ -5829,9 +5823,9 @@
         const opp = parseInt(out);
         const score = (2 - opp) * 6;
         return {
-          what: `<b>Board counting (favorable).</b> This play opens ${num} on the board. Only ${out} tile${opp!==1?'s':''} with ${num} remain that opponents could hold — this end is very hard for them to play on.`,
-          math: `Score = (2 − opponent_tiles) × 6 = (2 − ${out}) × 6 = <b>+${score}</b>. "opponent_tiles" = remaining tiles with ${num} in play MINUS tiles you hold with ${num}. Gradient: 0 out → +12, 1 → +6, 2 → 0, 3 → −6, 4+ → −12.`,
-          why: `This is board control by counting — one of the most skill-intensive concepts. Each number appears on exactly 7 of the 28 tiles. As tiles are played, numbers get scarcer. If only ${out} tile${opp!==1?'s':''} with ${num} exist${opp===1?'s':''} outside your hand, putting ${num} on the board is a soft block — opponents likely can't play there. Advanced players constantly track which numbers are scarce.`,
+          what: `<b>Board counting (favorable).</b> This play opens ${num} on the board. Only ~${out} tile${opp!==1?'s':''} with ${num} are estimated in opponents' hands — this end is very hard for them to play on.`,
+          math: `Score = (2 − opp_expected) × 6 = (2 − ${out}) × 6 = <b>+${score}</b>. "opp_expected" = (unplayed with ${num} − you hold − 1 for tile played) × (total_unknown − 4 removed) / total_unknown. This adjusts for the 4 face-down removed tiles. Gradient: 0 → +12, 1 → +6, 2 → 0, 3 → −6, 4+ → −12.`,
+          why: `This is board control by counting — one of the most skill-intensive concepts. Each number appears on exactly 7 of the 28 tiles. As tiles are played, numbers get scarcer. 4 tiles are removed face-down at deal time, so not all unplayed tiles are in opponents' hands. If only ~${out} tile${opp!==1?'s':''} with ${num} are expected in opponent hands, putting ${num} on the board is a soft block. Advanced players constantly track which numbers are scarce.`,
           color: 'border-emerald-500', scoreLabel: `+${score}`, scoreColor: 'text-emerald-400'
         };
       }
@@ -5842,9 +5836,9 @@
         const opp = parseInt(out);
         const score = (2 - opp) * 6;
         return {
-          what: `<b>Board counting (unfavorable).</b> This play opens ${num} on the board, but ${out} tiles with ${num} are still out there — many opponents can likely play on this end.`,
-          math: `Score = (2 − opponent_tiles) × 6 = (2 − ${out}) × 6 = <b>${score}</b>. At ${out} tiles out, this is a significant penalty. Compare: opening a number with 1 tile out scores +6, but with ${out} out scores ${score}.`,
-          why: `Opening a "heavy" number (many tiles still in play) is the opposite of board control — you're giving opponents easy plays. If you open 2s with ${out} tiles out, nearly every opponent probably has a 2-tile. But opening 5s with only 1 out creates a near-impassable wall. The best players track which numbers are scarce and steer the board toward them.`,
+          what: `<b>Board counting (unfavorable).</b> This play opens ${num} on the board, but ~${out} tiles with ${num} are estimated in opponents' hands — many can likely play on this end.`,
+          math: `Score = (2 − opp_expected) × 6 = (2 − ${out}) × 6 = <b>${score}</b>. "opp_expected" = (unplayed with ${num} − you hold − 1 for tile played) × (total_unknown − 4 removed) / total_unknown. At ~${out} in opponent hands, this is a significant penalty. Compare: 1 out → +6, but ${out} out → ${score}.`,
+          why: `Opening a "heavy" number (many tiles estimated in opponents' hands) is the opposite of board control — you're giving opponents easy plays. The formula adjusts for the 4 face-down removed tiles (not all unplayed tiles are available to opponents). The best players track which numbers are scarce and steer the board toward them.`,
           color: 'border-red-500', scoreLabel: `${score}`, scoreColor: 'text-red-400'
         };
       }
