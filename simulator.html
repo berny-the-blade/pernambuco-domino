@@ -28,7 +28,10 @@
     .board-tile-h { flex-direction: row; width: 52px; height: 26px; }
     .board-tile-v .tile-half:first-child { border-bottom: 1px solid #94a3b8; }
     .board-tile-h .tile-half:first-child { border-right: 1px solid #94a3b8; }
-    .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 10px rgba(34,197,94,0.6); position: relative; z-index: 2; }
+    .board-tile-new { border-color: #22c55e !important; box-shadow: 0 0 14px rgba(34,197,94,0.8); position: relative; z-index: 2; animation: tileAppear 0.5s ease-out; }
+    @keyframes tileAppear { 0% { transform: scale(1.4); opacity: 0.3; box-shadow: 0 0 30px rgba(34,197,94,1); } 100% { transform: scale(1); opacity: 1; } }
+    .move-announce { animation: announceIn 0.4s ease-out; }
+    @keyframes announceIn { 0% { transform: translateY(-10px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
     .board-tile-p0 { border: 2.5px solid #60a5fa !important; box-shadow: 0 0 8px rgba(96,165,250,0.5); }
     .board-tile-p1 { border: 2.5px solid #f87171 !important; box-shadow: 0 0 8px rgba(248,113,113,0.5); }
     .board-tile-p2 { border: 2.5px solid #a78bfa !important; box-shadow: 0 0 8px rgba(167,139,250,0.5); }
@@ -2186,6 +2189,7 @@
       playWaiting = false;
       playSidePick = null;
       playHint = null;
+      playLastMove = null;
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2274,8 +2278,10 @@
       const decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
 
       if (decision) {
+        playLastMove = { player, tile: decision.tile, side: decision.side, pass: false };
         recordLivePlay(player, decision.tile, decision.side, decision.reasons, decision.score, allOptions);
       } else {
+        playLastMove = { player, tile: null, side: null, pass: true };
         recordLivePass(player);
       }
 
@@ -2464,6 +2470,7 @@
       playWaiting = false;
       playSidePick = null;
       playHint = null;
+      playLastMove = null;
 
       const allOptions = smartAI(liveHands[0], liveLeftEnd, liveRightEnd, liveBoard.length, 0, liveKnowledge, true);
       const chosen = allOptions.find(o => o.tile.id === tile.id && o.side === side)
@@ -2484,6 +2491,7 @@
       playWaiting = false;
       playSidePick = null;
       playHint = null;
+      playLastMove = null;
       recordLivePass(0);
       render();
       scheduleNextMove();
@@ -2852,6 +2860,7 @@
     let playWaiting = false;        // true when waiting for human to pick tile
     let playSidePick = null;        // {tile, canLeft, canRight} — waiting for side choice
     let playAITimer = null;         // setTimeout handle for AI move delays
+    let playLastMove = null;        // { player, tile, side, pass } — last AI move announcement
     let playDifficulty = { opponents: 0.75, partner: 0.75 };
     const DIFFICULTY_PRESETS = {
       beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
@@ -3501,8 +3510,22 @@
                 <button class="btn text-sm" style="background:#eab308;color:#0f172a" onclick="startPlayGame()">Play Again</button>
                 <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">Difficulty</button>
                 ` : `
-                <span class="text-xs text-yellow-400 font-bold ${playWaiting ? 'pulse' : ''}">${playWaiting ? 'YOUR TURN — Pick a tile to play' : 'AI thinking...'}</span>
-                <div class="ml-2 text-xs text-slate-500">Opp: ${Object.entries(DIFFICULTY_PRESETS).find(([_,p])=>p.value===playDifficulty.opponents)?.[1]?.label || '?'} &middot; Partner: ${Object.entries(DIFFICULTY_PRESETS).find(([_,p])=>p.value===playDifficulty.partner)?.[1]?.label || '?'}</div>
+                ${playWaiting ? `
+                  <span class="text-xs text-yellow-400 font-bold pulse">YOUR TURN — Pick a tile to play</span>
+                  ${playLastMove ? `<span class="text-xs text-slate-400 ml-2 move-announce">${(() => {
+                    const m = playLastMove;
+                    const name = PLAYER_NAMES[m.player];
+                    const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][m.player];
+                    if (m.pass) return '<span style="color:'+color+'">'+name+'</span> passed';
+                    return '<span style="color:'+color+'">'+name+'</span> played ['+m.tile.left+'|'+m.tile.right+'] on <b>'+(m.side||'open')+'</b>';
+                  })()}</span>` : ''}
+                ` : `
+                  <span class="text-xs text-slate-400">${(() => {
+                    const name = PLAYER_NAMES[liveCurrentPlayer] || 'AI';
+                    const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][liveCurrentPlayer] || '#94a3b8';
+                    return '<span style="color:'+color+';font-weight:bold">'+name+'</span> thinking...';
+                  })()}</span>
+                `}
                 `}
                 ` : `
                 <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
@@ -5239,6 +5262,7 @@
       playWaiting = false;
       playSidePick = null;
       playHint = null;
+      playLastMove = null;
       playShowingDiffPicker = false;
       quizWaiting = false;
       quizResult = null;
