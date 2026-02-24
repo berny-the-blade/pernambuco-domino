@@ -6793,16 +6793,16 @@
           <div class="bg-slate-900 rounded-lg p-2 mb-3">
             <div class="text-xs font-bold text-slate-400 mb-1">Weakness Areas</div>
             <div class="space-y-1 text-xs">
-              <div class="flex justify-between">
-                <span class="text-slate-300">Opening moves</span>
+              <div class="flex justify-between" title="Avg equity loss on your first 2 moves each game. High = poor opening tile selection or early suit management.">
+                <span class="text-slate-300">Opening moves <span class="text-slate-600 cursor-help">&#9432;</span></span>
                 <span class="font-mono ${agg.openingAvgEL > 0.2 ? 'text-red-400' : agg.openingAvgEL > 0.1 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.openingAvgEL.toFixed(3)} EL</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-slate-300">Endgame moves</span>
+              <div class="flex justify-between" title="Avg equity loss on your last 2 moves each game. High = mistakes under pressure when few tiles remain.">
+                <span class="text-slate-300">Endgame moves <span class="text-slate-600 cursor-help">&#9432;</span></span>
                 <span class="font-mono ${agg.endgameAvgEL > 0.2 ? 'text-red-400' : agg.endgameAvgEL > 0.1 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.endgameAvgEL.toFixed(3)} EL</span>
               </div>
-              <div class="flex justify-between">
-                <span class="text-slate-300">Doubles errors</span>
+              <div class="flex justify-between" title="How often you misplayed a double tile (e.g. 3|3, 5|5). Doubles connect to only one number — timing and placement matter.">
+                <span class="text-slate-300">Doubles errors <span class="text-slate-600 cursor-help">&#9432;</span></span>
                 <span class="font-mono ${agg.doubleErrorRate > 30 ? 'text-red-400' : agg.doubleErrorRate > 15 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.doubleErrorRate}% (${agg.doubleErrors}/${agg.totalDoubles})</span>
               </div>
               <div class="flex justify-between">
