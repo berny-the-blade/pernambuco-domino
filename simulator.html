@@ -2538,6 +2538,9 @@
       const lastSnap = currentGame.snapshots[currentGame.snapshots.length - 1];
       if (lastSnap) lastSnap.outcome = outcome;
 
+      // Save match score before update for history
+      currentGame._matchScoreBefore = [...matchScore];
+
       if (outcome.winner !== undefined && outcome.points) {
         const winTeam = outcome.winner % 2;
         matchScore[winTeam] += outcome.points;
@@ -2551,6 +2554,44 @@
         scoreMultiplier *= 2;
       } else {
         scoreMultiplier = 1;
+      }
+
+      // Save game to history (analysis will be added after async computation)
+      if (gameMode === 'play') {
+        currentGame._historyId = Date.now();
+        recordGameToHistory(currentGame, null);
+        // Auto-trigger analysis for history
+        if (!currentGame._analysisCache && !analysisRunning) {
+          setTimeout(() => {
+            runAnalysisAsync(() => {
+              // Update history record with analysis once done
+              if (currentGame && currentGame._analysisCache && currentGame._historyId) {
+                const idx = gameHistory.findIndex(g => g.id === currentGame._historyId);
+                if (idx >= 0) {
+                  const cache = currentGame._analysisCache;
+                  const totalEL = cache.reduce((s, a) => s + a.eqLoss, 0);
+                  gameHistory[idx].analysis = {
+                    avgEL: Math.round((totalEL / cache.length) * 1000) / 1000,
+                    totalEL: Math.round(totalEL * 100) / 100,
+                    moves: cache.length,
+                    perfect: cache.filter(a => a.grade === 'perfect').length,
+                    good: cache.filter(a => a.grade === 'good').length,
+                    ok: cache.filter(a => a.grade === 'ok').length,
+                    bad: cache.filter(a => a.grade === 'bad').length,
+                    moveDetails: cache.map(a => ({
+                      move: a.move, grade: a.grade, eqLoss: Math.round(a.eqLoss * 1000) / 1000,
+                      tile: a.tile ? `${a.tile.left}|${a.tile.right}` : '',
+                      bestTile: a.bestTile ? `${a.bestTile.left}|${a.bestTile.right}` : '',
+                      side: a.side, bestSide: a.bestSide
+                    }))
+                  };
+                  saveGameHistory();
+                  render();
+                }
+              }
+            });
+          }, 100);
+        }
       }
 
       render();
@@ -3148,6 +3189,136 @@
       try { localStorage.setItem('domino-trainer-stats', JSON.stringify(stats)); } catch(e) {}
     }
 
+    // ========== GAME HISTORY DATABASE ==========
+
+    let gameHistory = [];
+    let historyView = 'list'; // 'list' | 'detail'
+    let historyDetailIdx = null;
+
+    try {
+      const saved = localStorage.getItem('domino-game-history');
+      if (saved) gameHistory = JSON.parse(saved);
+    } catch(e) {}
+
+    function saveGameHistory() {
+      try {
+        // Keep last 100 games to avoid localStorage bloat
+        if (gameHistory.length > 100) gameHistory = gameHistory.slice(-100);
+        localStorage.setItem('domino-game-history', JSON.stringify(gameHistory));
+      } catch(e) {}
+    }
+
+    function recordGameToHistory(game, analysisCache) {
+      if (!game || !game.snapshots || game.snapshots.length === 0) return;
+      const o = game.outcome || {};
+      // Extract compact move list
+      const moves = game.snapshots.filter(s => s.action === 'play' || s.action === 'pass').map(s => ({
+        m: s.move, p: s.player, a: s.action === 'play' ? 'p' : 'x',
+        t: s.tile ? s.tile.id : null, s: s.side || null
+      }));
+      // Compute analysis summary
+      let analysisSummary = null;
+      if (analysisCache && analysisCache.length > 0) {
+        const totalEL = analysisCache.reduce((s, a) => s + a.eqLoss, 0);
+        const avgEL = totalEL / analysisCache.length;
+        analysisSummary = {
+          avgEL: Math.round(avgEL * 1000) / 1000,
+          totalEL: Math.round(totalEL * 100) / 100,
+          moves: analysisCache.length,
+          perfect: analysisCache.filter(a => a.grade === 'perfect').length,
+          good: analysisCache.filter(a => a.grade === 'good').length,
+          ok: analysisCache.filter(a => a.grade === 'ok').length,
+          bad: analysisCache.filter(a => a.grade === 'bad').length,
+          // Per-move detail for leak detection
+          moveDetails: analysisCache.map(a => ({
+            move: a.move, grade: a.grade, eqLoss: Math.round(a.eqLoss * 1000) / 1000,
+            tile: a.tile ? `${a.tile.left}|${a.tile.right}` : '',
+            bestTile: a.bestTile ? `${a.bestTile.left}|${a.bestTile.right}` : '',
+            side: a.side, bestSide: a.bestSide
+          }))
+        };
+      }
+      const record = {
+        id: Date.now(),
+        date: new Date().toISOString(),
+        difficulty: { ...playDifficulty },
+        outcome: {
+          type: o.type || 'unknown', winner: o.winner, team: o.team,
+          points: o.points || 0, winType: o.winType || null
+        },
+        matchScoreBefore: [...(game._matchScoreBefore || matchScore)],
+        moves,
+        originalHands: game.originalHands ? game.originalHands.map(h => h.map(t => t.id)) : null,
+        analysis: analysisSummary
+      };
+      gameHistory.push(record);
+      saveGameHistory();
+    }
+
+    function getAggregateStats() {
+      const analyzed = gameHistory.filter(g => g.analysis);
+      if (analyzed.length === 0) return null;
+      const totalGames = analyzed.length;
+      const totalMoves = analyzed.reduce((s, g) => s + g.analysis.moves, 0);
+      const totalPerfect = analyzed.reduce((s, g) => s + g.analysis.perfect, 0);
+      const totalGood = analyzed.reduce((s, g) => s + g.analysis.good, 0);
+      const totalOk = analyzed.reduce((s, g) => s + g.analysis.ok, 0);
+      const totalBad = analyzed.reduce((s, g) => s + g.analysis.bad, 0);
+      const avgEL = totalMoves > 0 ? analyzed.reduce((s, g) => s + g.analysis.totalEL, 0) / totalMoves : 0;
+
+      // Trend: compare last 5 vs previous 5
+      const recent5 = analyzed.slice(-5);
+      const prev5 = analyzed.slice(-10, -5);
+      const recentAvgEL = recent5.length > 0 ? recent5.reduce((s, g) => s + g.analysis.avgEL, 0) / recent5.length : null;
+      const prevAvgEL = prev5.length > 0 ? prev5.reduce((s, g) => s + g.analysis.avgEL, 0) / prev5.length : null;
+      const trend = (recentAvgEL !== null && prevAvgEL !== null) ? prevAvgEL - recentAvgEL : null; // positive = improving
+
+      // Win rate
+      const wins = gameHistory.filter(g => g.outcome && g.outcome.team === 0).length;
+      const losses = gameHistory.filter(g => g.outcome && g.outcome.team === 1).length;
+
+      // Leak aggregation across all games
+      let openingELSum = 0, openingCount = 0;
+      let endgameELSum = 0, endgameCount = 0;
+      let doubleErrors = 0, totalDoubles = 0;
+      let blunderMoves = [];
+
+      for (const g of analyzed) {
+        const dets = g.analysis.moveDetails;
+        if (!dets || dets.length === 0) continue;
+        // Opening: first 2 moves
+        const early = dets.slice(0, 2);
+        early.forEach(d => { openingELSum += d.eqLoss; openingCount++; });
+        // Endgame: last 2 moves
+        const late = dets.slice(-2);
+        late.forEach(d => { endgameELSum += d.eqLoss; endgameCount++; });
+        // Doubles
+        dets.forEach(d => {
+          const parts = d.tile.split('|');
+          if (parts[0] === parts[1]) {
+            totalDoubles++;
+            if (d.grade === 'ok' || d.grade === 'bad') doubleErrors++;
+          }
+        });
+        // Collect all blunders
+        dets.filter(d => d.grade === 'bad').forEach(d => blunderMoves.push(d));
+      }
+
+      return {
+        totalGames, totalMoves, avgEL: Math.round(avgEL * 1000) / 1000,
+        totalPerfect, totalGood, totalOk, totalBad,
+        wins, losses, ties: gameHistory.length - wins - losses,
+        recentAvgEL: recentAvgEL !== null ? Math.round(recentAvgEL * 1000) / 1000 : null,
+        trend,
+        openingAvgEL: openingCount > 0 ? Math.round((openingELSum / openingCount) * 1000) / 1000 : 0,
+        endgameAvgEL: endgameCount > 0 ? Math.round((endgameELSum / endgameCount) * 1000) / 1000 : 0,
+        doubleErrorRate: totalDoubles > 0 ? Math.round((doubleErrors / totalDoubles) * 100) : 0,
+        totalDoubles, doubleErrors,
+        blunderCount: blunderMoves.length,
+        blunderMoves: blunderMoves.slice(-10) // last 10 blunders for display
+      };
+    }
+
     // ========== QUIZ LOGIC ==========
 
     function isQuizTurn() {
@@ -3717,6 +3888,7 @@
                   <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">Coach</div>
                   <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
+                  <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">History</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
                 </div>
 
@@ -3724,6 +3896,7 @@
                   rightPanelTab === 'probability' ? renderProbabilityPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'coach' ? renderCoachPanel(snap, pNames, teamColors) :
                   rightPanelTab === 'analysis' ? renderAnalysisPanel(snap, pNames, pTeams, teamColors) :
+                  rightPanelTab === 'history' ? renderHistoryPanel() :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
                   renderStatsPanel()}
               </div>
@@ -5101,7 +5274,7 @@
 
     let analysisRunning = false;
 
-    function runAnalysisAsync() {
+    function runAnalysisAsync(onComplete) {
       if (!currentGame || currentGame._analysisCache || analysisRunning) return;
       analysisRunning = true;
       currentGame._analysisPartial = [];
@@ -5121,6 +5294,7 @@
           delete game._analysisPartial;
           delete game._analysisTotalMoves;
           analysisRunning = false;
+          if (onComplete) onComplete();
           render();
           return;
         }
@@ -5351,6 +5525,247 @@
           </div>
         </div>
       `;
+    }
+
+    // ========== HISTORY PANEL ==========
+
+    function renderHistoryPanel() {
+      if (historyView === 'detail' && historyDetailIdx !== null) {
+        return renderHistoryDetail();
+      }
+      if (gameHistory.length === 0) {
+        return `<div class="text-center py-8">
+          <div class="text-slate-500 text-sm">No games recorded yet</div>
+          <div class="text-slate-600 text-xs mt-1">Play vs AI games are automatically saved here</div>
+        </div>`;
+      }
+
+      const agg = getAggregateStats();
+
+      // Build aggregate overview
+      let aggHTML = '';
+      if (agg) {
+        const trendArrow = agg.trend !== null ? (agg.trend > 0.01 ? '<span class="text-emerald-400">improving</span>' : agg.trend < -0.01 ? '<span class="text-red-400">declining</span>' : '<span class="text-slate-400">stable</span>') : '';
+        const elColor = agg.avgEL < 0.05 ? '#22c55e' : agg.avgEL < 0.10 ? '#86efac' : agg.avgEL < 0.20 ? '#eab308' : '#ef4444';
+
+        // Find weakest area
+        const areas = [
+          { name: 'Opening', val: agg.openingAvgEL },
+          { name: 'Endgame', val: agg.endgameAvgEL },
+          { name: 'Doubles', val: agg.doubleErrorRate / 100 }
+        ].sort((a, b) => b.val - a.val);
+        const weakest = areas[0].val > 0.1 ? areas[0].name : null;
+
+        aggHTML = `
+          <div class="bg-slate-900 rounded-lg p-3 mb-3">
+            <div class="text-xs font-bold text-slate-400 mb-2">Performance Overview (${agg.totalGames} games)</div>
+            <div class="grid grid-cols-3 gap-2 text-center mb-2">
+              <div>
+                <div class="text-lg font-bold font-mono" style="color:${elColor}">${agg.avgEL.toFixed(3)}</div>
+                <div class="text-xs text-slate-500">Avg EL</div>
+              </div>
+              <div>
+                <div class="text-lg font-bold text-emerald-400">${agg.wins}</div>
+                <div class="text-xs text-slate-500">Wins</div>
+              </div>
+              <div>
+                <div class="text-lg font-bold text-red-400">${agg.losses}</div>
+                <div class="text-xs text-slate-500">Losses</div>
+              </div>
+            </div>
+            ${agg.recentAvgEL !== null ? `<div class="text-xs text-slate-400 text-center">Last 5 avg: <span class="font-mono">${agg.recentAvgEL.toFixed(3)}</span> ${trendArrow}</div>` : ''}
+            <div class="grid grid-cols-4 gap-1 mt-2 text-center text-xs">
+              <div><span class="text-emerald-400 font-bold">${agg.totalPerfect}</span><br><span class="text-slate-600">Perfect</span></div>
+              <div><span class="text-green-300 font-bold">${agg.totalGood}</span><br><span class="text-slate-600">Inacc</span></div>
+              <div><span class="text-yellow-400 font-bold">${agg.totalOk}</span><br><span class="text-slate-600">Mistake</span></div>
+              <div><span class="text-red-400 font-bold">${agg.totalBad}</span><br><span class="text-slate-600">Blunder</span></div>
+            </div>
+          </div>
+
+          <div class="bg-slate-900 rounded-lg p-2 mb-3">
+            <div class="text-xs font-bold text-slate-400 mb-1">Weakness Areas</div>
+            <div class="space-y-1 text-xs">
+              <div class="flex justify-between">
+                <span class="text-slate-300">Opening moves</span>
+                <span class="font-mono ${agg.openingAvgEL > 0.2 ? 'text-red-400' : agg.openingAvgEL > 0.1 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.openingAvgEL.toFixed(3)} EL</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-300">Endgame moves</span>
+                <span class="font-mono ${agg.endgameAvgEL > 0.2 ? 'text-red-400' : agg.endgameAvgEL > 0.1 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.endgameAvgEL.toFixed(3)} EL</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-300">Doubles errors</span>
+                <span class="font-mono ${agg.doubleErrorRate > 30 ? 'text-red-400' : agg.doubleErrorRate > 15 ? 'text-yellow-400' : 'text-emerald-400'}">${agg.doubleErrorRate}% (${agg.doubleErrors}/${agg.totalDoubles})</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-300">Total blunders</span>
+                <span class="font-mono text-red-400">${agg.blunderCount}</span>
+              </div>
+            </div>
+            ${weakest ? `<div class="text-xs text-orange-400 mt-2 border-t border-slate-700 pt-1">Focus area: <b>${weakest}</b> — your biggest source of equity loss</div>` : ''}
+          </div>
+
+          ${agg.totalGames >= 5 ? renderELTrendChart() : ''}
+        `;
+      }
+
+      // Game list (most recent first)
+      const games = [...gameHistory].reverse();
+      const gameListHTML = games.map((g, revIdx) => {
+        const idx = gameHistory.length - 1 - revIdx;
+        const d = new Date(g.date);
+        const dateStr = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+        const isWin = g.outcome && g.outcome.team === 0;
+        const isTie = g.outcome && g.outcome.type === 'tie';
+        const resultColor = isWin ? 'text-emerald-400' : isTie ? 'text-yellow-400' : 'text-red-400';
+        const resultText = isWin ? 'W' : isTie ? 'T' : 'L';
+        const pts = g.outcome ? g.outcome.points || 0 : 0;
+        const winType = g.outcome && g.outcome.winType ? g.outcome.winType : (g.outcome ? g.outcome.type : '');
+        const aEl = g.analysis ? g.analysis.avgEL.toFixed(3) : '—';
+        const aColor = g.analysis ? (g.analysis.avgEL < 0.05 ? 'text-emerald-400' : g.analysis.avgEL < 0.15 ? 'text-yellow-400' : 'text-red-400') : 'text-slate-600';
+        const blunders = g.analysis ? g.analysis.bad : 0;
+        const analyzing = !g.analysis && analysisRunning && currentGame && currentGame._historyId === g.id;
+        return `<div class="flex items-center gap-2 py-1 px-2 rounded cursor-pointer hover:bg-slate-700 transition-colors" onclick="loadHistoryGame(${idx})">
+          <span class="text-xs text-slate-500 w-14 flex-shrink-0">${dateStr}</span>
+          <span class="font-bold ${resultColor} w-5 text-center">${resultText}</span>
+          <span class="text-xs text-slate-400 flex-1 truncate">${winType}${pts > 1 ? ' +'+pts+'pt' : ''}</span>
+          ${analyzing ? '<span class="text-xs text-blue-400 animate-pulse">...</span>' : `<span class="text-xs font-mono ${aColor}">${aEl}</span>`}
+          ${blunders > 0 ? `<span class="text-xs text-red-400">${blunders}B</span>` : ''}
+        </div>`;
+      }).join('');
+
+      return `
+        <div class="space-y-2 flex-1 overflow-y-auto">
+          ${aggHTML}
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="flex justify-between items-center mb-1">
+              <div class="text-xs font-bold text-slate-400">Game History (${gameHistory.length})</div>
+              ${gameHistory.length > 0 ? `<button class="text-xs text-red-400 hover:text-red-300" onclick="clearGameHistory()">Clear</button>` : ''}
+            </div>
+            <div class="space-y-0.5 max-h-[300px] overflow-y-auto">
+              ${gameListHTML || '<div class="text-xs text-slate-500">No games yet</div>'}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderELTrendChart() {
+      const analyzed = gameHistory.filter(g => g.analysis);
+      if (analyzed.length < 3) return '';
+      // Simple sparkline using CSS bars
+      const vals = analyzed.map(g => g.analysis.avgEL);
+      const max = Math.max(...vals, 0.5);
+      const barW = Math.min(12, Math.floor(280 / vals.length));
+      const bars = vals.map((v, i) => {
+        const h = Math.max(2, Math.round((v / max) * 40));
+        const color = v < 0.05 ? '#22c55e' : v < 0.15 ? '#eab308' : '#ef4444';
+        return `<div style="width:${barW}px;height:${h}px;background:${color};border-radius:1px" title="Game ${i+1}: ${v.toFixed(3)}"></div>`;
+      }).join('');
+      return `<div class="bg-slate-900 rounded-lg p-2 mb-3">
+        <div class="text-xs font-bold text-slate-400 mb-1">Equity Loss Trend</div>
+        <div class="flex items-end gap-px justify-center" style="height:44px">${bars}</div>
+        <div class="flex justify-between text-xs text-slate-600 mt-1">
+          <span>oldest</span><span>newest</span>
+        </div>
+      </div>`;
+    }
+
+    function renderHistoryDetail() {
+      const g = gameHistory[historyDetailIdx];
+      if (!g) { historyView = 'list'; return renderHistoryPanel(); }
+      const d = new Date(g.date);
+      const dateStr = `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+      const isWin = g.outcome && g.outcome.team === 0;
+      const isTie = g.outcome && g.outcome.type === 'tie';
+
+      let movesHTML = '<div class="text-xs text-slate-500">Analysis not available</div>';
+      if (g.analysis && g.analysis.moveDetails) {
+        const gradeColors = { perfect: '#22c55e', good: '#86efac', ok: '#eab308', bad: '#ef4444' };
+        const gradeLabels = { perfect: 'OK', good: 'INACC', ok: 'MSTK', bad: 'BLNDR' };
+        movesHTML = g.analysis.moveDetails.map(m => {
+          const color = gradeColors[m.grade] || '#64748b';
+          const label = gradeLabels[m.grade] || m.grade;
+          const altTile = m.grade !== 'perfect' && m.bestTile ? ` → [${m.bestTile}] ${m.bestSide || ''}` : '';
+          return `<div class="flex items-center gap-2 text-xs py-0.5">
+            <span class="font-mono text-slate-500 w-5">#${m.move}</span>
+            <span class="font-bold px-1 rounded" style="color:${color};font-size:10px">${label}</span>
+            <span class="text-white">[${m.tile}] ${m.side || ''}</span>
+            <span class="text-slate-500">${altTile}</span>
+            ${m.eqLoss > 0.01 ? `<span class="font-mono text-red-400 ml-auto">-${m.eqLoss.toFixed(2)}</span>` : ''}
+          </div>`;
+        }).join('');
+      }
+
+      const diffLabel = (v) => {
+        const p = Object.values(DIFFICULTY_PRESETS).find(p => p.value === v);
+        return p ? p.label : v;
+      };
+
+      return `
+        <div class="space-y-2 flex-1 overflow-y-auto">
+          <button class="text-xs text-blue-400 hover:text-blue-300 mb-1" onclick="historyView='list';historyDetailIdx=null;render();">&larr; Back to list</button>
+          <div class="bg-slate-900 rounded-lg p-3 text-center">
+            <div class="text-xs text-slate-500">${dateStr}</div>
+            <div class="text-2xl font-bold ${isWin ? 'text-emerald-400' : isTie ? 'text-yellow-400' : 'text-red-400'}">
+              ${isWin ? 'WIN' : isTie ? 'TIE' : 'LOSS'}
+            </div>
+            <div class="text-sm text-slate-300">${g.outcome.winType || g.outcome.type} ${g.outcome.points ? '+' + g.outcome.points + 'pt' : ''}</div>
+            <div class="text-xs text-slate-500">vs ${diffLabel(g.difficulty.opponents)} opponents, ${diffLabel(g.difficulty.partner)} partner</div>
+            ${g.analysis ? `
+              <div class="mt-2 text-lg font-bold font-mono" style="color:${g.analysis.avgEL < 0.05 ? '#22c55e' : g.analysis.avgEL < 0.15 ? '#eab308' : '#ef4444'}">${g.analysis.avgEL.toFixed(3)}</div>
+              <div class="text-xs text-slate-400">Avg EL over ${g.analysis.moves} decisions</div>
+              <div class="flex justify-center gap-3 mt-1 text-xs">
+                <span class="text-emerald-400">${g.analysis.perfect}P</span>
+                <span class="text-green-300">${g.analysis.good}I</span>
+                <span class="text-yellow-400">${g.analysis.ok}M</span>
+                <span class="text-red-400">${g.analysis.bad}B</span>
+              </div>
+            ` : '<div class="text-xs text-slate-500 mt-2">Analysis pending...</div>'}
+          </div>
+          <div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Move-by-Move</div>
+            <div class="space-y-0.5 max-h-[250px] overflow-y-auto">
+              ${movesHTML}
+            </div>
+          </div>
+          <div class="text-center">
+            <button class="btn text-xs" style="background:#3b82f6;color:white" onclick="replayHistoryGame(${historyDetailIdx})">Replay This Game</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadHistoryGame(idx) {
+      historyView = 'detail';
+      historyDetailIdx = idx;
+      render();
+    }
+
+    function replayHistoryGame(idx) {
+      const g = gameHistory[idx];
+      if (!g || !g.originalHands) return;
+      // Reconstruct game by re-simulating with the same hands
+      const hands = g.originalHands.map(handIds => handIds.map(id => {
+        const parts = id.split('-');
+        return { left: parseInt(parts[0]), right: parseInt(parts[1]), id };
+      }));
+      // Switch to watch mode and generate game with these hands
+      gameMode = 'watch';
+      stopPlayAI();
+      currentGame = generateGame(null, false, hands);
+      currentStep = 0;
+      rightPanelTab = 'analysis';
+      historyView = 'list';
+      historyDetailIdx = null;
+      render();
+    }
+
+    function clearGameHistory() {
+      if (!confirm('Clear all game history? This cannot be undone.')) return;
+      gameHistory = [];
+      saveGameHistory();
+      render();
     }
 
     // ========== DIFFICULTY PICKER ==========
