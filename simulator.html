@@ -2212,6 +2212,7 @@
       playOpeningPending = null;
       playStarterPending = false;
       playMatchWinner = null;
+      coachMessages = [];
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2383,6 +2384,7 @@
       if (liveCurrentPlayer === 0) {
         playWaiting = true;
         playSidePick = null;
+        if (coachEnabled) generateCoachOnYourTurn();
         render();
         return;
       }
@@ -2409,6 +2411,7 @@
         recordLivePass(player);
       }
 
+      if (coachEnabled) generateCoachOnAIMove(player, decision?.tile, decision?.side, allOptions, !decision);
       render();
       scheduleNextMove();
     }
@@ -2582,6 +2585,177 @@
       if (playAITimer) { clearTimeout(playAITimer); playAITimer = null; }
     }
 
+    // ========== COACH OVERLAY ENGINE ==========
+
+    function getGamePhase() {
+      if (!liveHands) return 'opening';
+      if (liveMoveNum <= 3) return 'opening';
+      const minHand = Math.min(...liveHands.map(h => h.length));
+      if (minHand <= 2) return 'endgame';
+      return 'midgame';
+    }
+
+    function addCoachMsg(type, text) {
+      coachMessages.push({ type, text, phase: getGamePhase(), turn: liveMoveNum });
+      if (coachMessages.length > 30) coachMessages.shift();
+    }
+
+    function generateCoachOnAIMove(player, tile, side, allOptions, wasPass) {
+      const name = pn(player);
+      const isPartner = player === 2;
+      const isOpp = player === 1 || player === 3;
+
+      if (wasPass) {
+        const voids = [];
+        if (liveLeftEnd !== null) voids.push(liveLeftEnd);
+        if (liveRightEnd !== null && liveRightEnd !== liveLeftEnd) voids.push(liveRightEnd);
+        const voidStr = voids.join(' and ');
+        if (isOpp) {
+          addCoachMsg('deduction', `${name} passed — they have no ${voidStr}. Remember this! Keep those numbers on the board to block them.`);
+        } else {
+          addCoachMsg('deduction', `Your partner ${name} passed — void in ${voidStr}. Try to change board ends to numbers they might have.`);
+        }
+        return;
+      }
+
+      if (!tile) return;
+      const msgs = [];
+      const isDouble = tile.left === tile.right;
+      const prevLeft = currentGame.snapshots.length >= 2 ? currentGame.snapshots[currentGame.snapshots.length - 2].leftEnd : null;
+      const prevRight = currentGame.snapshots.length >= 2 ? currentGame.snapshots[currentGame.snapshots.length - 2].rightEnd : null;
+
+      // Double play commentary
+      if (isDouble) {
+        msgs.push(`${name} played double [${tile.left}|${tile.right}] — clearing doubles early is smart since they're inflexible (only match one number).`);
+      }
+
+      // Board end changed?
+      const newEnd = side === 'left' ? liveLeftEnd : liveRightEnd;
+      const oldEnd = side === 'left' ? prevLeft : prevRight;
+      if (oldEnd !== null && newEnd !== oldEnd && !isDouble) {
+        if (isOpp) {
+          // Check if they avoided the other end
+          const otherEnd = side === 'left' ? liveRightEnd : liveLeftEnd;
+          const oppVoids = liveKnowledge.cantHave[player];
+          if (oppVoids.has(otherEnd)) {
+            msgs.push(`${name} played on the ${side} (avoiding ${otherEnd}-end) — confirmed void in ${otherEnd}s.`);
+          } else {
+            msgs.push(`${name} changed the ${side} end from ${oldEnd} to ${newEnd}. Watch if they're building strength in ${newEnd}s.`);
+          }
+        } else {
+          msgs.push(`Partner played [${tile.left}|${tile.right}] ${side}, changing end to ${newEnd}. They may be strong in ${newEnd}s — try to keep it on the board.`);
+        }
+      }
+
+      // Opponent void-based blocking observation
+      if (isOpp && msgs.length === 0) {
+        const hasVoid = liveKnowledge.cantHave[player].size > 0;
+        if (hasVoid) {
+          const voidNums = [...liveKnowledge.cantHave[player]].join(', ');
+          msgs.push(`${name} played [${tile.left}|${tile.right}] ${side}. Remember: they're void in ${voidNums}.`);
+        } else {
+          msgs.push(`${name} played [${tile.left}|${tile.right}] ${side}.`);
+        }
+      }
+
+      // Partner support observation
+      if (isPartner && msgs.length === 0) {
+        msgs.push(`Partner played [${tile.left}|${tile.right}] ${side}.`);
+      }
+
+      // Endgame alert
+      if (liveHands[player].length <= 2 && liveHands[player].length > 0) {
+        const who = isPartner ? 'Your partner' : name;
+        msgs.push(`${who} has only ${liveHands[player].length} tile${liveHands[player].length > 1 ? 's' : ''} left!`);
+      }
+
+      if (msgs.length > 0) addCoachMsg('observation', msgs.join(' '));
+    }
+
+    function generateCoachOnYourTurn() {
+      const hand = liveHands[0];
+      const phase = getGamePhase();
+      const playable = hand.filter(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : 0));
+      const msgs = [];
+
+      // Board state
+      if (liveBoard && liveBoard.length > 0) {
+        msgs.push(`Board ends: <b>${liveLeftEnd}</b> and <b>${liveRightEnd}</b>. You have ${playable.length} playable tile${playable.length !== 1 ? 's' : ''} out of ${hand.length}.`);
+      }
+
+      // Key deductions summary
+      const oppVoids = [];
+      [1, 3].forEach(p => {
+        const v = [...liveKnowledge.cantHave[p]];
+        if (v.length > 0) oppVoids.push(`${pn(p)} void in ${v.join(',')}`);
+      });
+      const partnerVoids = [...liveKnowledge.cantHave[2]];
+      if (oppVoids.length > 0) msgs.push(`Key info: ${oppVoids.join('; ')}.`);
+      if (partnerVoids.length > 0) msgs.push(`Partner void in ${partnerVoids.join(',')}.`);
+
+      // Phase-specific guidance
+      if (phase === 'opening') {
+        msgs.push(`Early game — prioritize suit control. Which play leaves you with the most matching tiles for next turn?`);
+      } else if (phase === 'endgame') {
+        msgs.push(`Endgame — think about going out. Can you set up your last tile(s)? Watch for stranding risk.`);
+      } else {
+        // Midgame: context-sensitive tip
+        if (oppVoids.length > 0) {
+          msgs.push(`Can you keep an opponent's void number on the board to force another pass?`);
+        } else if (playable.length > 1) {
+          msgs.push(`Multiple options — which play keeps the most flexibility for your next turn?`);
+        }
+      }
+
+      if (playable.length === 0) {
+        msgs.push(`No playable tiles — you must pass. Opponents will learn you're void in ${liveLeftEnd}${liveLeftEnd !== liveRightEnd ? ' and ' + liveRightEnd : ''}.`);
+      }
+
+      if (msgs.length > 0) addCoachMsg('think', msgs.join(' '));
+    }
+
+    function generateCoachOnYourPlay(tile, side, allOptions) {
+      if (!allOptions || allOptions.length === 0) return;
+      const best = allOptions[0];
+      const played = allOptions.find(o => o.tile.id === tile.id && o.side === side)
+                  || allOptions.find(o => o.tile.id === tile.id);
+      const playedIdx = played ? allOptions.indexOf(played) : -1;
+
+      if (playedIdx === 0) {
+        addCoachMsg('good', `Good choice! [${tile.left}|${tile.right}] ${side} was the strongest play.`);
+      } else if (playedIdx >= 1 && playedIdx <= 2) {
+        // Find a differential reason
+        const bestReasons = new Set(best.reasons);
+        const playedReasons = new Set(played ? played.reasons : []);
+        const diff = best.reasons.filter(r => !playedReasons.has(r));
+        const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
+        addCoachMsg('ok', `Reasonable. Top pick was [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}`);
+      } else if (playedIdx > 2 || playedIdx === -1) {
+        const diff = best.reasons.filter(r => !(played && played.reasons.includes(r)));
+        const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
+        addCoachMsg('warn', `Consider: [${best.tile.left}|${best.tile.right}] ${best.side || ''} scored higher — ${hint}`);
+      }
+    }
+
+    function generateCoachOnPass() {
+      const voidNums = liveLeftEnd === liveRightEnd
+        ? `${liveLeftEnd}`
+        : `${liveLeftEnd} and ${liveRightEnd}`;
+      addCoachMsg('think', `Forced to pass — no tiles match ${voidNums}. Opponents now know you're void. Your partner should try to change the board ends for you.`);
+    }
+
+    function toggleCoach() {
+      coachEnabled = !coachEnabled;
+      try { localStorage.setItem('pernambuco_coach', coachEnabled ? '1' : '0'); } catch(e) {}
+      render();
+    }
+
+    function toggleCoachCollapse() {
+      coachCollapsed = !coachCollapsed;
+      try { localStorage.setItem('pernambuco_coach_collapsed', coachCollapsed ? '1' : '0'); } catch(e) {}
+      render();
+    }
+
     // ========== PLAY MODE HUMAN INPUT ==========
 
     function playPickTile(tileId) {
@@ -2628,6 +2802,7 @@
       const reasons = chosen ? chosen.reasons : ['Player choice'];
       const score = chosen ? chosen.score : 0;
 
+      if (coachEnabled) generateCoachOnYourPlay(tile, side, allOptions);
       recordLivePlay(0, tile, side, reasons, score, allOptions);
       render();
       scheduleNextMove();
@@ -2642,6 +2817,7 @@
       playSidePick = null;
       playHint = null;
       playLastMove = null;
+      if (coachEnabled) generateCoachOnPass();
       recordLivePass(0);
       render();
       scheduleNextMove();
@@ -2666,6 +2842,38 @@
         <div class="flex justify-center gap-3">
           <button class="side-pick-btn bg-blue-600 text-white" onclick="playPickSide('left')">Left End (${liveLeftEnd})</button>
           <button class="side-pick-btn bg-red-600 text-white" onclick="playPickSide('right')">Right End (${liveRightEnd})</button>
+        </div>
+      </div>`;
+    }
+
+    function renderCoachOverlay() {
+      if (!coachEnabled || gameMode !== 'play' || coachMessages.length === 0) return '';
+      const icons = { observation: '\u{1F440}', think: '\u{1F9E0}', good: '\u2705', ok: '\u{1F44D}', warn: '\u26A0\uFE0F', deduction: '\u{1F4DD}' };
+      const colors = { observation: '#94a3b8', think: '#38bdf8', good: '#22c55e', ok: '#86efac', warn: '#fbbf24', deduction: '#a78bfa' };
+      const phaseBadge = { opening: ['OPN','#475569'], midgame: ['MID','#475569'], endgame: ['END','#dc2626'] };
+      const recent = coachMessages.slice(-5).reverse();
+      if (coachCollapsed) {
+        return `<div class="mt-2 bg-slate-900/80 rounded-lg px-3 py-1.5 border border-slate-600 cursor-pointer flex items-center justify-between" onclick="toggleCoachCollapse()">
+          <span class="text-xs text-slate-400">\u{1F9E0} Coach <span class="text-slate-600">(${coachMessages.length} messages)</span></span>
+          <span class="text-xs text-slate-500">\u25B2</span>
+        </div>`;
+      }
+      return `<div class="mt-2 bg-slate-900/90 rounded-lg border border-indigo-500/40 overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-1 bg-indigo-950/60 border-b border-indigo-500/20 cursor-pointer" onclick="toggleCoachCollapse()">
+          <span class="text-xs font-bold text-indigo-300">\u{1F9E0} Coach</span>
+          <span class="text-xs text-slate-500">\u25BC</span>
+        </div>
+        <div style="max-height:160px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5">
+          ${recent.map(m => {
+            const [pLabel, pColor] = phaseBadge[m.phase] || ['','#475569'];
+            return `<div class="flex items-start gap-1.5 text-xs leading-snug">
+              <span style="flex-shrink:0">${icons[m.type] || ''}</span>
+              <div>
+                ${pLabel ? `<span class="inline-block px-1 rounded text-[10px] font-mono mr-1" style="background:${pColor};color:#e2e8f0">${pLabel}</span>` : ''}
+                <span style="color:${colors[m.type] || '#94a3b8'}">${m.text}</span>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
       </div>`;
     }
@@ -3249,6 +3457,11 @@
     let liveHands = null, liveBoard = null, liveLeftEnd = null, liveRightEnd = null;
     let liveCurrentPlayer = null, livePassCount = 0, liveMoveNum = 0;
     let liveKnowledge = null, liveNotebook = null;
+
+    // ========== COACH OVERLAY STATE ==========
+    let coachEnabled = (() => { try { const v = localStorage.getItem('pernambuco_coach'); return v === null ? true : v === '1'; } catch(e) { return true; } })();
+    let coachMessages = []; // [{type, text, phase, turn}]
+    let coachCollapsed = (() => { try { return localStorage.getItem('pernambuco_coach_collapsed') === '1'; } catch(e) { return false; } })();
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
@@ -4018,6 +4231,9 @@
               <!-- Bottom player (P0 - You) with quiz interaction -->
               ${renderPlayerAreaP0(snap, pNames, pTeams, teamColors, shouldQuiz)}
 
+              <!-- Coach Overlay -->
+              ${coachEnabled && gameMode === 'play' && !currentGame?.outcome ? renderCoachOverlay() : ''}
+
               <!-- Hand Strength Meter -->
               ${renderHandStrength(handStrength, snap.hands[0].length)}
 
@@ -4071,7 +4287,7 @@
                 `}
                 `}
                 <div class="ml-auto flex items-center gap-2 text-xs">
-                  ${gameMode !== 'play' ? `<span style="color:#60a5fa">&#9632;You</span><span style="color:#f87171">&#9632;OL</span><span style="color:#a78bfa">&#9632;Ptr</span><span style="color:#fbbf24">&#9632;OR</span>` : ''}
+                  ${gameMode === 'play' ? `<button class="px-2 py-0.5 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">\u{1F9E0} Coach ${coachEnabled ? 'ON' : 'OFF'}</button>` : `<span style="color:#60a5fa">&#9632;You</span><span style="color:#f87171">&#9632;OL</span><span style="color:#a78bfa">&#9632;Ptr</span><span style="color:#fbbf24">&#9632;OR</span>`}
                   <span class="text-slate-400">Move <span class="text-white font-bold">${snap.move}</span>/${currentGame.snapshots[total-1].move}
                   (${currentStep+1}/${total})</span>
                 </div>
@@ -7373,6 +7589,12 @@
                 <span class="text-sm font-mono text-emerald-400 w-12 text-right">${playAIDelay.toFixed(1)}s</span>
               </div>
 
+              <div class="text-sm font-bold text-indigo-400 mb-2 mt-1">\u{1F9E0} Coach Mode</div>
+              <div class="flex items-center gap-3 mb-3">
+                <span class="text-xs text-slate-400">Real-time strategic narration as you play</span>
+                <button class="ml-auto px-3 py-1 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">${coachEnabled ? 'ON' : 'OFF'}</button>
+              </div>
+
               <div class="text-xs text-slate-500 mt-2">
                 <strong>Beginner</strong>: Nearly random &middot;
                 <strong>Intermediate</strong>: Decent, mistakes &middot;
@@ -7444,7 +7666,7 @@
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-yellow-400 font-bold text-sm mb-1">Play vs AI</div>
-                <div class="text-xs text-slate-400">Play real games against AI opponents with configurable difficulty levels.</div>
+                <div class="text-xs text-slate-400">Play real games against AI opponents with configurable difficulty. Coach mode narrates strategy in real-time.</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-amber-400 font-bold text-sm mb-1">Strategy Puzzles</div>
