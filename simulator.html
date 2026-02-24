@@ -2276,7 +2276,14 @@
       saveStats();
 
       render();
-      scheduleNextMove();
+      // If P0 opened, pause longer so user sees their tile was auto-played
+      if (hp === 0) {
+        playLastMove = { player: 0, tile: autoTile, side: null, pass: false, opening: true };
+        render();
+        setTimeout(() => scheduleNextMove(), playAIDelay * 1500);
+      } else {
+        scheduleNextMove();
+      }
     }
 
     function scheduleNextMove() {
@@ -3545,10 +3552,12 @@
                     const name = PLAYER_NAMES[m.player];
                     const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][m.player];
                     if (m.pass) return '<span style="color:'+color+'">'+name+'</span> passed';
+                    if (m.opening) return '<span style="color:'+color+'">You</span> opened with ['+m.tile.left+'|'+m.tile.right+'] (highest double)';
                     return '<span style="color:'+color+'">'+name+'</span> played ['+m.tile.left+'|'+m.tile.right+'] on <b>'+(m.side||'open')+'</b>';
                   })()}</span>` : ''}
                 ` : `
                   <span class="text-xs text-slate-400">${(() => {
+                    if (playLastMove && playLastMove.opening) return '<span style="color:#60a5fa;font-weight:bold">You</span> opened with ['+playLastMove.tile.left+'|'+playLastMove.tile.right+'] (highest double)';
                     const name = PLAYER_NAMES[liveCurrentPlayer] || 'AI';
                     const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][liveCurrentPlayer] || '#94a3b8';
                     return '<span style="color:'+color+';font-weight:bold">'+name+'</span> thinking...';
