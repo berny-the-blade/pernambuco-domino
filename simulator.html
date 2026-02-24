@@ -3330,7 +3330,7 @@
     let proRunning = false;
     let proProgress = '';
     const PRO_MC_SIMS = 50;
-    const PRO_SAMPLES = 100;
+    const PRO_SAMPLES = 40;
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -6173,92 +6173,88 @@
       }
       const N = samples.length || 1;
 
-      // --- Suit Mass: E[tiles with suit v] per player ---
+      // --- Single-pass: compute ALL per-sample metrics at once ---
       const suitMass = Array.from({length: 4}, () => new Array(7).fill(0));
-      for (const deal of samples) {
-        for (let p = 0; p < 4; p++) {
-          if (p === player) continue;
-          for (const t of deal[p]) {
-            suitMass[p][t.left] += 1/N;
-            if (t.left !== t.right) suitMass[p][t.right] += 1/N;
-          }
-        }
-      }
-      for (const t of hand) {
-        suitMass[player][t.left]++;
-        if (t.left !== t.right) suitMass[player][t.right]++;
-      }
-
-      // --- Void probabilities per player per suit ---
       const voidProb = Array.from({length: 4}, () => new Array(7).fill(0));
-      for (const deal of samples) {
-        for (let p = 0; p < 4; p++) {
-          if (p === player) continue;
-          const has = new Set();
-          for (const t of deal[p]) { has.add(t.left); has.add(t.right); }
-          for (let v = 0; v <= 6; v++) {
-            if (!has.has(v)) voidProb[p][v] += 1/N;
-          }
-        }
-      }
-
-      // --- Double threats: P(player holds [v|v]) ---
       const doubleThreats = Array.from({length: 4}, () => new Array(7).fill(0));
-      for (const deal of samples) {
-        for (let p = 0; p < 4; p++) {
-          if (p === player) continue;
-          for (const t of deal[p]) {
-            if (t.left === t.right) doubleThreats[p][t.left] += 1/N;
-          }
-        }
-      }
-      for (const t of hand) {
-        if (t.left === t.right) doubleThreats[player][t.left] = 1;
-      }
+      const mobilitySum = new Array(4).fill(0);
+      const goOutRaw = Array.from({length: 4}, () => ({ gop1: 0, gop2: 0 }));
+      const dealSuits = new Array(N);
+      let oppTeamPipsSum = 0;
+      const invN = 1 / N;
 
-      // --- Mobility index per player (avg legal moves) ---
-      const mobility = new Array(4).fill(0);
-      for (const deal of samples) {
-        for (let p = 0; p < 4; p++) {
-          if (p === player) continue;
-          const count = deal[p].filter(t =>
-            t.left === lE || t.right === lE || t.left === rE || t.right === rE
-          ).length;
-          mobility[p] += count / N;
-        }
-      }
-      mobility[player] = hand.filter(t =>
-        t.left === lE || t.right === lE || t.left === rE || t.right === rE
-      ).length;
-
-      // --- Go-out threats per player ---
-      const goOut = Array.from({length: 4}, () => ({ gop1: 0, gop2: 0 }));
-      for (const deal of samples) {
+      for (let i = 0; i < N; i++) {
+        const deal = samples[i];
+        const ds_s = [0, 0, 0, 0];
+        const ds_c = [new Uint8Array(7), new Uint8Array(7), new Uint8Array(7), new Uint8Array(7)];
         for (let p = 0; p < 4; p++) {
           if (p === player) continue;
           const h = deal[p];
-          if (h.length === 0) { goOut[p].gop1 += 1/N; goOut[p].gop2 += 1/N; continue; }
-          if (h.length === 1) {
+          let suitBits = 0;
+          for (let j = 0; j < h.length; j++) {
+            const t = h[j], tl = t.left, tr = t.right;
+            suitMass[p][tl]++;
+            if (tl !== tr) suitMass[p][tr]++;
+            if (tl === tr) doubleThreats[p][tl]++;
+            suitBits |= (1 << tl) | (1 << tr);
+            ds_c[p][tl]++;
+            if (tl !== tr) ds_c[p][tr]++;
+            if (tl === lE || tr === lE || tl === rE || tr === rE) mobilitySum[p]++;
+            if (p === opp1 || p === opp2) oppTeamPipsSum += tl + tr;
+          }
+          ds_s[p] = suitBits;
+          for (let v = 0; v <= 6; v++) {
+            if (!(suitBits & (1 << v))) voidProb[p][v]++;
+          }
+          // Go-out threats
+          if (h.length === 0) { goOutRaw[p].gop1++; goOutRaw[p].gop2++; }
+          else if (h.length === 1) {
             const t = h[0];
             if (t.left === lE || t.right === lE || t.left === rE || t.right === rE) {
-              goOut[p].gop1 += 1/N; goOut[p].gop2 += 1/N;
+              goOutRaw[p].gop1++; goOutRaw[p].gop2++;
             }
           } else if (h.length === 2) {
-            for (let i = 0; i < 2; i++) {
-              const first = h[i], second = h[1-i];
+            for (let k = 0; k < 2; k++) {
+              const first = h[k], second = h[1-k];
               if (!(first.left === lE || first.right === lE || first.left === rE || first.right === rE)) continue;
-              // Compute new ends after playing first
               let nL = lE, nR = rE;
-              const canLeft = first.left === lE || first.right === lE;
-              const canRight = first.left === rE || first.right === rE;
-              if (canLeft) { nL = first.left === lE ? first.right : first.left; }
+              if (first.left === lE || first.right === lE) { nL = first.left === lE ? first.right : first.left; }
               else { nR = first.right === rE ? first.left : first.right; }
               if (second.left === nL || second.right === nL || second.left === nR || second.right === nR) {
-                goOut[p].gop2 += 1/N; break;
+                goOutRaw[p].gop2++; break;
               }
             }
           }
         }
+        dealSuits[i] = { s: ds_s, c: ds_c };
+      }
+
+      // Normalize accumulated counts → probabilities / expected values
+      for (let p = 0; p < 4; p++) {
+        if (p === player) continue;
+        for (let v = 0; v <= 6; v++) {
+          suitMass[p][v] *= invN;
+          voidProb[p][v] *= invN;
+          doubleThreats[p][v] *= invN;
+        }
+      }
+      // Player's own known data
+      for (const t of hand) {
+        suitMass[player][t.left]++;
+        if (t.left !== t.right) suitMass[player][t.right]++;
+        if (t.left === t.right) doubleThreats[player][t.left] = 1;
+      }
+      const mobility = new Array(4);
+      for (let p = 0; p < 4; p++) {
+        mobility[p] = p === player
+          ? hand.filter(t => t.left === lE || t.right === lE || t.left === rE || t.right === rE).length
+          : mobilitySum[p] * invN;
+      }
+      const goOut = Array.from({length: 4}, () => ({ gop1: 0, gop2: 0 }));
+      for (let p = 0; p < 4; p++) {
+        if (p === player) continue;
+        goOut[p].gop1 = goOutRaw[p].gop1 * invN;
+        goOut[p].gop2 = goOutRaw[p].gop2 * invN;
       }
       // P0's go-out from known hand
       if (hand.length <= 2) {
@@ -6283,19 +6279,6 @@
       }
 
       // --- Per-move flow metrics (OPP / PPP / ECV / Bait) ---
-      // Precompute per-deal suit bitmasks for O(1) lookups
-      const dealSuits = samples.map(deal => {
-        const s = Array.from({length: 4}, () => 0); // bitmask: bit v set if player has tile with v
-        const c = Array.from({length: 4}, () => new Uint8Array(7)); // count per suit
-        for (let p = 0; p < 4; p++) {
-          if (p === player) continue;
-          for (const t of deal[p]) {
-            s[p] |= (1 << t.left) | (1 << t.right);
-            c[p][t.left]++; if (t.left !== t.right) c[p][t.right]++;
-          }
-        }
-        return { s, c };
-      });
       // Build move options: from MC if available, otherwise compute playable tiles directly
       let moveOptions;
       if (mcResults && mcResults.length > 0) {
@@ -6322,11 +6305,13 @@
           const ds = dealSuits[i];
           if ((ds.s[opp1] & mask) || (ds.s[opp2] & mask)) oppCount++;
           if (ds.s[partner] & mask) partnerCount++;
-          oppMob += (ds.c[opp1][newLeft] + ds.c[opp1][newRight]) / N;
-          partnerMob += (ds.c[partner][newLeft] + ds.c[partner][newRight]) / N;
+          oppMob += ds.c[opp1][newLeft] + ds.c[opp1][newRight];
+          partnerMob += ds.c[partner][newLeft] + ds.c[partner][newRight];
         }
-        const opp = oppCount / N;
-        const ppp = partnerCount / N;
+        const opp = oppCount * invN;
+        const ppp = partnerCount * invN;
+        oppMob *= invN;
+        partnerMob *= invN;
         flowMetrics.push({
           tile: mo.tile, side: mo.side, ep: mo.ep, winRate: mo.winRate,
           cvar5: mo.cvar5, blockRate: mo.blockRate, hasMC: mo.hasMC,
@@ -6342,15 +6327,10 @@
       }
       const tension = 1 - activeSuits / 7;
 
-      // --- Block pip advantage ---
+      // --- Block pip advantage (oppTeamPipsSum already computed in single pass) ---
       const myTeamPips = [player, partner].reduce((s, p) =>
         s + snap.hands[p].reduce((a, t) => a + t.left + t.right, 0), 0);
-      let oppTeamPipsSum = 0;
-      for (const deal of samples) {
-        oppTeamPipsSum += [opp1, opp2].reduce((s, p) =>
-          s + deal[p].reduce((a, t) => a + t.left + t.right, 0), 0);
-      }
-      const oppTeamPipsEst = oppTeamPipsSum / N;
+      const oppTeamPipsEst = oppTeamPipsSum * invN;
       const blockPipAdv = oppTeamPipsEst - myTeamPips;
 
       // --- Decision Robustness ---
