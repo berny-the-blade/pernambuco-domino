@@ -7030,20 +7030,23 @@
       render();
     }
 
+    let oqSimsDone = 0, oqSimsTarget = 0;
+
     function oqChoose(choice) {
       // choice: 'me' or 'partner'
       oqState = 'evaluating';
       render();
 
-      // Run MC rollouts async to not freeze UI
-      const NUM_SIMS = 40;
+      // Paired MC: same deal, both openers. 200 sims with early stopping.
+      const MAX_SIMS = 200;
+      const BATCH = 5;
+      const diffs = []; // paired differences (P0_EP - P2_EP)
       let p0Total = 0, p2Total = 0;
-      let simsDone = 0;
+      oqSimsDone = 0;
+      oqSimsTarget = MAX_SIMS;
 
       function runBatch() {
-        const batchSize = 5;
-        for (let b = 0; b < batchSize && simsDone < NUM_SIMS; b++, simsDone++) {
-          // For each sim, redistribute P1/P2/P3 tiles randomly (P0 fixed)
+        for (let b = 0; b < BATCH && oqSimsDone < MAX_SIMS; b++, oqSimsDone++) {
           const remaining = ALL_TILES.filter(t => !oqHand.some(h => h.id === t.id));
           const shuffled = shuffleDeck(remaining.map(t => ({...t})));
           const hands = [
@@ -7053,64 +7056,92 @@
             shuffled.slice(12, 18)
           ];
 
-          // P0 opens
+          let ep0 = 0, ep2 = 0;
           try {
             const g0 = generateGame(0, true, hands.map(h => [...h]));
-            if (g0.outcome) {
-              const ep = g0.outcome.team === 0 ? (g0.outcome.points || 1) : -(g0.outcome.points || 1);
-              p0Total += ep;
-            }
+            if (g0.outcome) ep0 = g0.outcome.team === 0 ? (g0.outcome.points || 1) : -(g0.outcome.points || 1);
           } catch(e) {}
-
-          // P2 opens
           try {
             const g2 = generateGame(2, true, hands.map(h => [...h]));
-            if (g2.outcome) {
-              const ep = g2.outcome.team === 0 ? (g2.outcome.points || 1) : -(g2.outcome.points || 1);
-              p2Total += ep;
-            }
+            if (g2.outcome) ep2 = g2.outcome.team === 0 ? (g2.outcome.points || 1) : -(g2.outcome.points || 1);
           } catch(e) {}
+
+          p0Total += ep0;
+          p2Total += ep2;
+          diffs.push(ep0 - ep2);
         }
 
-        if (simsDone < NUM_SIMS) {
-          setTimeout(runBatch, 5);
+        // Early stopping: if after 80+ sims, |t-stat| > 3.0 (overwhelming), stop
+        if (oqSimsDone >= 80 && oqSimsDone < MAX_SIMS) {
+          const st = pairedTStat(diffs);
+          if (Math.abs(st.t) > 3.0) { oqSimsTarget = oqSimsDone; finishOQ(); return; }
+        }
+
+        if (oqSimsDone < MAX_SIMS) {
+          if (oqSimsDone % 20 === 0) render(); // update progress bar every 20 sims
+          setTimeout(runBatch, 0);
         } else {
-          // Done — compute result
-          const p0EP = p0Total / NUM_SIMS;
-          const p2EP = p2Total / NUM_SIMS;
-          const better = p0EP >= p2EP ? 'me' : 'partner';
-          const margin = Math.abs(p0EP - p2EP);
-          const isCorrect = (margin < 0.05) || (choice === better); // close calls are both correct
-
-          // Analyze hand features
-          const handFeatures = analyzeOpeningHand(oqHand);
-
-          oqResult = { p0EP, p2EP, correct: isCorrect, chosen: choice, better, margin, handFeatures };
-
-          // Update stats
-          oqStats.total++;
-          if (isCorrect) {
-            oqStats.correct++;
-            oqStats.streak++;
-            if (oqStats.streak > oqStats.bestStreak) oqStats.bestStreak = oqStats.streak;
-          } else {
-            oqStats.streak = 0;
-          }
-          oqStats.history.push({
-            date: Date.now(), correct: isCorrect, chosen: choice, better,
-            margin: Math.round(margin * 100) / 100,
-            p0EP: Math.round(p0EP * 100) / 100,
-            p2EP: Math.round(p2EP * 100) / 100,
-            features: handFeatures
-          });
-          if (oqStats.history.length > 50) oqStats.history.shift();
-          saveOQStats();
-
-          oqState = 'result';
-          render();
+          finishOQ();
         }
       }
+
+      function finishOQ() {
+        const N = diffs.length;
+        const p0EP = p0Total / N;
+        const p2EP = p2Total / N;
+        const better = p0EP >= p2EP ? 'me' : 'partner';
+        const margin = Math.abs(p0EP - p2EP);
+
+        // Paired t-test: diffs = P0_EP - P2_EP, so positive mean = P0 opening is better
+        const st = pairedTStat(diffs);
+        // Two-sided p-value for "is there a significant difference?"
+        const pTwoSided = 2 * Math.min(st.p, 1 - st.p);
+        const significant = pTwoSided < 0.10; // 90% confidence (two-sided)
+        const isCorrect = !significant || (choice === better);
+
+        const handFeatures = analyzeOpeningHand(oqHand);
+
+        oqResult = {
+          p0EP, p2EP, correct: isCorrect, chosen: choice, better, margin, handFeatures,
+          ci95: st.ci95, pValue: pTwoSided, tStat: st.t, nSims: N, significant
+        };
+
+        oqStats.total++;
+        if (isCorrect) {
+          oqStats.correct++;
+          oqStats.streak++;
+          if (oqStats.streak > oqStats.bestStreak) oqStats.bestStreak = oqStats.streak;
+        } else {
+          oqStats.streak = 0;
+        }
+        oqStats.history.push({
+          date: Date.now(), correct: isCorrect, chosen: choice, better,
+          margin: Math.round(margin * 100) / 100,
+          p0EP: Math.round(p0EP * 100) / 100,
+          p2EP: Math.round(p2EP * 100) / 100,
+          features: handFeatures
+        });
+        if (oqStats.history.length > 50) oqStats.history.shift();
+        saveOQStats();
+
+        oqState = 'result';
+        render();
+      }
       setTimeout(runBatch, 10);
+    }
+
+    // Paired t-test: compute t-statistic, p-value, and 95% CI for mean difference
+    function pairedTStat(diffs) {
+      const N = diffs.length;
+      if (N < 2) return { t: 0, p: 0.5, ci95: 0, mean: 0, se: 0 };
+      const mean = diffs.reduce((s, d) => s + d, 0) / N;
+      const variance = diffs.reduce((s, d) => s + (d - mean) ** 2, 0) / (N - 1);
+      const se = Math.sqrt(variance / N);
+      const t = se > 0.0001 ? mean / se : (mean > 0 ? 10 : mean < 0 ? -10 : 0);
+      // One-sided p-value: P(P0-opening advantage > 0) using normalCDF (good approx for N >= 30)
+      const p = 1 - normalCDF(t);
+      const ci95 = 1.96 * se;
+      return { t, p, ci95, mean, se };
     }
 
     function analyzeOpeningHand(hand) {
@@ -7206,18 +7237,22 @@
           </div>
         `;
       } else if (oqState === 'evaluating') {
+        const pct = oqSimsTarget > 0 ? Math.round(oqSimsDone / oqSimsTarget * 100) : 0;
         body = `
           <div class="flex gap-2 justify-center mb-4 flex-wrap">${tilesHTML}</div>
           ${featureBadges}
           <div class="text-center py-8">
             <div class="inline-block w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mb-3"></div>
-            <div class="text-blue-300 text-sm">Running ${40} Monte Carlo simulations...</div>
-            <div class="text-xs text-slate-500">Evaluating both scenarios</div>
+            <div class="text-blue-300 text-sm">Paired MC: ${oqSimsDone}/${oqSimsTarget} simulations...</div>
+            <div class="text-xs text-slate-500">Same deal tested with both openers</div>
+            <div class="w-48 mx-auto mt-2 bg-slate-700 rounded-full h-1.5">
+              <div class="bg-blue-400 h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+            </div>
           </div>
         `;
       } else if (oqState === 'result') {
         const r = oqResult;
-        const isClose = r.margin < 0.05;
+        const isClose = !r.significant;
         const correctColor = r.correct ? 'text-emerald-400' : 'text-red-400';
         const verdictText = r.correct ? (isClose ? 'CLOSE CALL — Both OK!' : 'CORRECT!') : 'WRONG!';
         const verdictIcon = r.correct ? (isClose ? '~' : '+') : 'X';
@@ -7243,7 +7278,8 @@
                 <div class="text-xs text-slate-500">avg EP</div>
               </div>
             </div>
-            ${!isClose ? `<div class="text-sm text-slate-300 mb-2"><b>${betterLabel}</b> is better by <span class="text-yellow-400 font-mono">${r.margin.toFixed(2)}</span> expected pts</div>` : `<div class="text-sm text-slate-400 mb-2">Margin only ${r.margin.toFixed(2)} — essentially a coin flip</div>`}
+            ${!isClose ? `<div class="text-sm text-slate-300 mb-1"><b>${betterLabel}</b> is better by <span class="text-yellow-400 font-mono">${r.margin.toFixed(2)}</span> expected pts</div>` : `<div class="text-sm text-slate-400 mb-1">Not statistically significant (p=${r.pValue ? r.pValue.toFixed(2) : '?'}) — either choice is fine</div>`}
+            <div class="text-xs text-slate-500 mb-2 font-mono">${r.nSims} paired sims | 95% CI: ${r.better === 'me' ? '+' : '-'}${(r.margin - (r.ci95 || 0)).toFixed(2)} to ${r.better === 'me' ? '+' : '-'}${(r.margin + (r.ci95 || 0)).toFixed(2)} | p=${(r.pValue != null ? (r.pValue < 0.001 ? '<0.001' : r.pValue.toFixed(3)) : '?')}</div>
             <div class="text-left bg-slate-800 rounded-lg p-2 mt-2">
               <div class="text-xs font-bold text-slate-400 mb-1">Hand Features <span class="text-slate-600 font-normal">(rules of thumb — MC simulation above is the actual verdict)</span></div>
               ${r.handFeatures.reasons.map(r => `<div class="text-xs text-slate-300">- ${r}</div>`).join('')}
