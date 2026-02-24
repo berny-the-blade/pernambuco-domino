@@ -2217,6 +2217,7 @@
       playLastMove = null;
       playOpeningPending = null;
       playStarterPending = false;
+      playMatchWinner = null;
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2542,9 +2543,7 @@
         matchScore[winTeam] += outcome.points;
         lastWinTeam = winTeam;
         if (matchScore[0] >= MATCH_TARGET || matchScore[1] >= MATCH_TARGET) {
-          matchScore = [0, 0];
-          scoreMultiplier = 1;
-          lastWinTeam = null;
+          playMatchWinner = matchScore[0] >= MATCH_TARGET ? 0 : 1;
         }
       }
 
@@ -2995,6 +2994,7 @@
     let playLastMove = null;        // { player, tile, side, pass } — last AI move announcement
     let playOpeningPending = null;  // { tile } — waiting for user to acknowledge opening
     let playStarterPending = false; // true when waiting for user to choose who opens
+    let playMatchWinner = null;     // 0 or 1 — team that won the match, null if no match just ended
     let playDifficulty = { opponents: 0.75, partner: 0.75 };
     const DIFFICULTY_PRESETS = {
       beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
@@ -3620,6 +3620,7 @@
                   ${starterChoicePending ? renderStarterChoice() : ''}
                   ${playOpeningPending ? renderOpeningOverlay() : ''}
                   ${playStarterPending ? renderPlayStarterChoice() : ''}
+                  ${playMatchWinner !== null ? renderMatchWinnerOverlay() : ''}
                 </div>
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
@@ -3805,6 +3806,38 @@
     function playChooseStarter(player) {
       playStarterPending = false;
       startPlayGame(liveHands, player, true);
+    }
+
+    function renderMatchWinnerOverlay() {
+      const isMyWin = playMatchWinner === 0;
+      const finalScore = `${matchScore[0]} - ${matchScore[1]}`;
+      return `<div class="absolute inset-0 bg-black/80 rounded-xl flex items-center justify-center z-30">
+        <div class="text-center bg-slate-800 rounded-xl p-6 border-2 ${isMyWin ? 'border-emerald-400' : 'border-red-400'} shadow-2xl" style="min-width:280px">
+          <div class="text-4xl mb-2">${isMyWin ? '🏆' : '💀'}</div>
+          <div class="text-3xl font-bold ${isMyWin ? 'text-emerald-400' : 'text-red-400'} mb-2">${isMyWin ? 'MATCH WON!' : 'MATCH LOST!'}</div>
+          <div class="text-lg text-white mb-1">${isMyWin ? 'You & Partner' : 'Opponents'} win the match!</div>
+          <div class="text-2xl text-white font-bold mb-3">${finalScore}</div>
+          <div class="text-xs text-slate-400 mb-4">First to ${MATCH_TARGET} points</div>
+          <div class="flex gap-2 justify-center flex-wrap">
+            <button class="btn text-sm px-5 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissMatchWinner(true)">New Match</button>
+            <button class="btn btn-gray text-sm px-4 py-2" onclick="dismissMatchWinner(false)">Back to Menu</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function dismissMatchWinner(playAgain) {
+      matchScore = [0, 0];
+      scoreMultiplier = 1;
+      lastWinTeam = null;
+      playMatchWinner = null;
+      if (playAgain) {
+        startPlayGame();
+      } else {
+        gameMode = 'watch';
+        currentGame = null;
+        render();
+      }
     }
 
     function renderOpeningOverlay() {
@@ -5469,6 +5502,7 @@
       playLastMove = null;
       playOpeningPending = null;
       playStarterPending = false;
+      playMatchWinner = null;
       playShowingDiffPicker = false;
       quizWaiting = false;
       quizResult = null;
