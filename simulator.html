@@ -3314,8 +3314,8 @@
     let studyCache = {};        // { [stepIdx]: { mcResults, probMatrix, deductions, strategy } }
     let studyRunning = false;   // is study computation in progress?
     let studyProgress = '';     // status text during computation
-    const MC_SIMS_STUDY = 500;  // sims per tile option in study mode
-    const PROB_SAMPLES_STUDY = 500; // samples for tile probability matrix
+    const MC_SIMS_STUDY = 1000;  // sims per tile option in study mode
+    const PROB_SAMPLES_STUDY = 1000; // samples for tile probability matrix
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
