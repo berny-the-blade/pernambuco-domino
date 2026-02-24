@@ -5709,6 +5709,214 @@
       `;
     }
 
+    // Deep explanation for every AI heuristic reason
+    function getReasonExplanation(reason) {
+      const def = { what: reason, math: '—', why: '—', color: 'border-slate-600', scoreLabel: '', scoreColor: 'text-slate-500' };
+
+      // Opening move
+      let m;
+      if ((m = reason.match(/^Open: suit (\d)=(\d), suit (\d)=(\d)(.*double bonus.*)?$/))) {
+        const [, s1, c1, s2, c2, dbl] = m;
+        const suitScore = parseInt(c1)*10 + parseInt(c2)*10;
+        const dblScore = dbl ? 15 : 0;
+        const pips = parseInt(s1) + parseInt(s2);
+        const total = suitScore + dblScore + pips*2;
+        return {
+          what: `<b>Opening tile selection.</b> The AI picks the opening tile by how well-connected it is to your hand. Tiles sharing suits with many hand tiles give you more future plays.`,
+          math: `Score = suit_count(${s1})×10 + suit_count(${s2})×10${dbl ? ' + 15 (double)' : ''} + pips×2 = ${c1}×10 + ${c2}×10${dbl ? ' + 15' : ''} + ${pips}×2 = <b>+${total}</b>`,
+          why: `Opening with a suit you're deep in means the board ends have numbers you can play. If you have 4 tiles with "3", opening a 3-tile means 3 remaining tiles already match. Doubles get +15 bonus because they're inflexible (connect to one number only) — better to lead them than get stuck later.`,
+          color: 'border-blue-500', scoreLabel: `+${total}`, scoreColor: 'text-blue-400'
+        };
+      }
+
+      // Suit control
+      if ((m = reason.match(/^(\d+) more tiles? match new ends \[(\d+)\.\.(\d+)\]$/))) {
+        const [, count, e1, e2] = m;
+        const score = parseInt(count) * 15;
+        return {
+          what: `<b>Suit control (#1 factor).</b> After playing this tile, ${count} of your remaining tiles can play on the new board ends [${e1}, ${e2}].`,
+          math: `Score = matching_tiles × 15 = ${count} × 15 = <b>+${score}</b>`,
+          why: `The more hand tiles that match board ends, the more options you have next turn. Having 0 playable tiles = forced pass = lost tempo. Weighted at ×15 per tile (the highest factor) because suit control is the foundation of domino strategy. A player who always has plays controls the game.`,
+          color: 'border-emerald-500', scoreLabel: `+${score}`, scoreColor: 'text-emerald-400'
+        };
+      }
+
+      // Blocking opponent
+      if ((m = reason.match(/^Blocks (.+)$/))) {
+        const [, oppName] = m;
+        return {
+          what: `<b>Opponent block.</b> After this play, BOTH board ends have numbers that ${oppName} is void in (confirmed from earlier passes).`,
+          math: `Score = <b>+25</b> (flat bonus per blocked opponent, +50 if both blocked)`,
+          why: `When an opponent passed on a number, they have ZERO tiles with it — that's certain. If both board ends are their void numbers, they're guaranteed to pass again. Forcing passes gives your team extra turns. Blocking both opponents simultaneously is devastating and often game-winning.`,
+          color: 'border-red-500', scoreLabel: '+25', scoreColor: 'text-red-400'
+        };
+      }
+
+      // Partner support
+      if ((m = reason.match(/^Partner played (.+) — may have more$/))) {
+        const [, details] = m;
+        // Count affinity from details like "3s (played 2x, 4 still out) & 5s (played 1x, 3 still out)"
+        const playedCounts = [...details.matchAll(/played (\d+)x/g)].map(x => parseInt(x[1]));
+        const totalAff = playedCounts.reduce((s,v) => s+v, 0);
+        const score = totalAff * 8;
+        return {
+          what: `<b>Partner support.</b> Your partner previously played tiles with these numbers (${details}), suggesting they hold more. This play keeps those numbers on the board for partner.`,
+          math: `Score = times_partner_played × 8 = ${totalAff} × 8 = <b>+${score}</b>. Only counts if: (a) tiles with that number still remain unplayed, and (b) partner isn't confirmed void in it.`,
+          why: `Domino is a team game. If partner played two 5-tiles, they likely hold more 5s. Keeping a 5-end open lets them play. Closing a number partner is strong in cuts them off. This heuristic encodes "support your partner's suits" — a core Pernambuco principle.`,
+          color: 'border-purple-500', scoreLabel: `+${score}`, scoreColor: 'text-purple-400'
+        };
+      }
+
+      // Partner void
+      if ((m = reason.match(/^Partner can't have (\d+)$/))) {
+        const [, num] = m;
+        return {
+          what: `<b>Partner void penalty.</b> Partner is confirmed void in ${num}s (they passed when ${num} was an end). This play opens ${num} on the board — partner can't use it.`,
+          math: `Score = <b>−10</b> (flat penalty)`,
+          why: `Opening a number your partner can't play helps opponents — only they can use that end. Moderate penalty (−10, not huge) because sometimes it's unavoidable, and opponents might also be void. But all else equal, avoid opening partner's void numbers.`,
+          color: 'border-orange-500', scoreLabel: '−10', scoreColor: 'text-orange-400'
+        };
+      }
+
+      // Dump heavy tile
+      if ((m = reason.match(/^Dump heavy tile \((\d+) pips\)$/))) {
+        const [, pips] = m;
+        const score = parseInt(pips) * 2;
+        return {
+          what: `<b>Pip dump (heavy).</b> This tile has ${pips} pips. In a blocked game (everyone passes 4x), the team with fewer total pips wins. Shedding heavy tiles reduces that risk.`,
+          math: `Score = tile_pips × 2 = ${pips} × 2 = <b>+${score}</b>. Applied to every tile, but only shown when pips ≥ 9.`,
+          why: `Every tile gets pips×2 in scoring. A [6|5]=11 pips gets +22 while [0|1]=1 pip gets +2. The 20-point difference nudges toward shedding heavy tiles when other factors are close. This matters most in blocked endgames where 1 pip decides the winner.`,
+          color: 'border-amber-500', scoreLabel: `+${score}`, scoreColor: 'text-amber-400'
+        };
+      }
+
+      // Sheds pips
+      if ((m = reason.match(/^Sheds (\d+) pips$/))) {
+        const [, pips] = m;
+        const score = parseInt(pips) * 2;
+        return {
+          what: `<b>Pip weight (medium).</b> This tile has ${pips} pips. Playing it reduces hand pip total, lowering risk in blocked-game scenarios.`,
+          math: `Score = tile_pips × 2 = ${pips} × 2 = <b>+${score}</b>. The ×2 weight is low by design — pip weight is a tiebreaker, not a dominant factor. Shown when pips = 6–8.`,
+          why: `If the game blocks (4 consecutive passes), the team with fewer total pips in hand wins 1 point. Shedding medium-weight tiles is insurance. But suit control (+15/tile) and blocking (+25) matter more — pips only decide close calls.`,
+          color: 'border-slate-500', scoreLabel: `+${score}`, scoreColor: 'text-slate-400'
+        };
+      }
+
+      // Clear inflexible double
+      if (reason === 'Clear inflexible double') {
+        return {
+          what: `<b>Double clearance.</b> Doubles are "inflexible" — [3|3] connects ONLY to 3s, while [3|5] connects to 3s OR 5s. The AI prefers playing doubles early while options exist.`,
+          math: `Score = <b>+12</b> (flat bonus for any double played mid-game)`,
+          why: `Doubles are the most dangerous tiles to hold late. They connect to only one number, so you need that exact number on the board to play them. If that number gets exhausted, your double is permanently stuck — you'll pass every turn while it rots in your hand. Playing doubles early, while many tiles are unplayed, maximizes the chance the number is available.`,
+          color: 'border-yellow-500', scoreLabel: '+12', scoreColor: 'text-yellow-400'
+        };
+      }
+
+      // Isolated double setup
+      if ((m = reason.match(/^Sets up isolated \[(\d+)\|(\d+)\]$/))) {
+        const [, d1] = m;
+        return {
+          what: `<b>Isolated double rescue.</b> You hold [${d1}|${d1}] with NO other tiles containing ${d1}. This play puts ${d1} on a board end, giving that trapped double a way to be played next.`,
+          math: `Score = <b>+20</b> (high priority). "Isolated double" = double where you have zero other tiles with that number. AI checks: after this play, is ${d1} on either board end? If yes → +20.`,
+          why: `An isolated double is a ticking time bomb. With no supporting tiles, you can never "steer" the board toward that number yourself. If the board never shows ${d1}, the double is permanently stuck. +20 is higher than suit control for 1 tile because rescuing a trapped double is critical — it's the difference between playing and passing for the rest of the game.`,
+          color: 'border-yellow-500', scoreLabel: '+20', scoreColor: 'text-yellow-400'
+        };
+      }
+
+      // Board counting — nearly exhausted
+      if ((m = reason.match(/^(\d+)s nearly exhausted \((\d+) out\)$/))) {
+        const [, num, out] = m;
+        const opp = parseInt(out);
+        const score = (2 - opp) * 6;
+        return {
+          what: `<b>Board counting (favorable).</b> This play opens ${num} on the board. Only ${out} tile${opp!==1?'s':''} with ${num} remain that opponents could hold — this end is very hard for them to play on.`,
+          math: `Score = (2 − opponent_tiles) × 6 = (2 − ${out}) × 6 = <b>+${score}</b>. "opponent_tiles" = remaining tiles with ${num} in play MINUS tiles you hold with ${num}. Gradient: 0 out → +12, 1 → +6, 2 → 0, 3 → −6, 4+ → −12.`,
+          why: `This is board control by counting — one of the most skill-intensive concepts. Each number appears on exactly 7 of the 28 tiles. As tiles are played, numbers get scarcer. If only ${out} tile${opp!==1?'s':''} with ${num} exist${opp===1?'s':''} outside your hand, putting ${num} on the board is a soft block — opponents likely can't play there. Advanced players constantly track which numbers are scarce.`,
+          color: 'border-emerald-500', scoreLabel: `+${score}`, scoreColor: 'text-emerald-400'
+        };
+      }
+
+      // Board counting — heavy
+      if ((m = reason.match(/^(\d+)s heavy — (\d+) still out for opponents$/))) {
+        const [, num, out] = m;
+        const opp = parseInt(out);
+        const score = (2 - opp) * 6;
+        return {
+          what: `<b>Board counting (unfavorable).</b> This play opens ${num} on the board, but ${out} tiles with ${num} are still out there — many opponents can likely play on this end.`,
+          math: `Score = (2 − opponent_tiles) × 6 = (2 − ${out}) × 6 = <b>${score}</b>. At ${out} tiles out, this is a significant penalty. Compare: opening a number with 1 tile out scores +6, but with ${out} out scores ${score}.`,
+          why: `Opening a "heavy" number (many tiles still in play) is the opposite of board control — you're giving opponents easy plays. If you open 2s with ${out} tiles out, nearly every opponent probably has a 2-tile. But opening 5s with only 1 out creates a near-impassable wall. The best players track which numbers are scarce and steer the board toward them.`,
+          color: 'border-red-500', scoreLabel: `${score}`, scoreColor: 'text-red-400'
+        };
+      }
+
+      // GO OUT
+      if ((m = reason.match(/^GO OUT! Win (\d+)pt(.*)?$/))) {
+        const [, pts, typeInfo] = m;
+        const p = parseInt(pts);
+        const score = 200 + p * 30;
+        return {
+          what: `<b>INSTANT WIN!</b> Playing this tile empties your hand — you go out and your team scores ${pts} point${p>1?'s':''}${typeInfo || ''}. Game over!`,
+          math: `Score = 200 + points × 30 = 200 + ${pts} × 30 = <b>+${score}</b>. Dominates all other factors. Win types: normal=1pt, carroca (finish with double)=2pt, la-e-lo (tile plays on both ends)=3pt, cruzada (double + both ends)=4pt.`,
+          why: `Going out is the ultimate play. The +200 base ensures it always beats any other option. The ×30 per point bonus means the AI prefers higher-scoring finishes — e.g., save a double for last if it scores carroca (2pt) vs normal (1pt). Always check if you can go out before considering anything else!`,
+          color: 'border-emerald-500', scoreLabel: `+${score}`, scoreColor: 'text-emerald-400'
+        };
+      }
+
+      // Near-close: sets up going out
+      if ((m = reason.match(/^Sets up going out next turn with \[(\d+)\|(\d+)\]$/))) {
+        const [, t1, t2] = m;
+        return {
+          what: `<b>Near-close setup.</b> Playing this tile leaves just [${t1}|${t2}], and that last tile can play on the resulting board ends. If opponents don't change the ends, you go out next turn!`,
+          math: `Score = <b>+80</b>. AI checks: after this play, do new board ends include ${t1} or ${t2}? Yes → last tile is playable → +80. This is huge (more than 5× suit control) because winning next turn is nearly as good as winning now.`,
+          why: `Being one tile from victory with a playable last tile is extremely powerful. Even if opponents change one end, you might still connect. In Pernambuco (4-player), 3 opponents play between your turns, but partner might preserve your end. This is why endgame counting is critical — when down to 2 tiles, every play is life or death.`,
+          color: 'border-emerald-500', scoreLabel: '+80', scoreColor: 'text-emerald-400'
+        };
+      }
+
+      // Near-close: stranded
+      if ((m = reason.match(/^STRANDS last tile \[(\d+)\|(\d+)\]/))) {
+        const [, t1, t2] = m;
+        return {
+          what: `<b>Stranding penalty.</b> Playing this leaves [${t1}|${t2}] as your last tile, but it can't play on either resulting board end. You'll be stuck passing every turn.`,
+          math: `Score = <b>−30</b>. AI checks: does [${t1}|${t2}] match either new end? No → stranded → −30. This is a heavy penalty (equivalent to losing 2 suit-control tiles) because holding an unplayable tile means passing until the game ends.`,
+          why: `Stranding your last tile is a classic beginner mistake. You play what "looks good" now but leave yourself with a tile that matches nothing. The board might never show your numbers again — 3 opponents will reshape it before your turn. Always check: "if I play this, can my remaining tiles still play?"`,
+          color: 'border-red-500', scoreLabel: '−30', scoreColor: 'text-red-400'
+        };
+      }
+
+      // 2-tile coverage good
+      if (reason === 'Both remaining tiles playable on new ends') {
+        return {
+          what: `<b>Full coverage (3→2 tiles).</b> After playing this, both remaining tiles can play on the new board ends. Maximum flexibility — you can't be locked out next turn.`,
+          math: `Score = <b>+25</b>. AI counts how many of 2 remaining tiles match either end: 2 = +25, 1 = 0 (neutral), 0 = −15.`,
+          why: `With 3 tiles in hand, the choice of which to play determines whether you get stuck. If both remaining tiles are playable, you're guaranteed another play no matter what opponents do. This becomes critical as hands shrink — in the endgame, one wrong play can mean passing for the rest of the game.`,
+          color: 'border-emerald-500', scoreLabel: '+25', scoreColor: 'text-emerald-400'
+        };
+      }
+
+      // 2-tile coverage bad
+      if (reason === 'Neither remaining tile matches new ends') {
+        return {
+          what: `<b>No coverage (3→2 tiles).</b> After playing this, NEITHER remaining tile matches the new board ends. You'll pass unless opponents change the ends for you.`,
+          math: `Score = <b>−15</b>. Zero of 2 remaining tiles match the new ends. You're essentially playing your last useful tile and gambling that the board rotates back to your numbers.`,
+          why: `Playing yourself into a dead position is dangerous. You'll pass while opponents keep playing, and each play could end the game before the board helps you. The −15 penalty is moderate because sometimes ALL options leave you stuck — the AI weighs it against other factors rather than making it absolute.`,
+          color: 'border-red-500', scoreLabel: '−15', scoreColor: 'text-red-400'
+        };
+      }
+
+      // MC override
+      if ((m = reason.match(/^MC override/))) {
+        return {
+          what: `<b>Monte Carlo override.</b> The heuristic AI wanted a different tile, but the MC simulation (playing out hundreds of random complete games) found this tile gives better expected points.`,
+          math: `When ≤3 tiles remain, the AI runs MC simulations per option. Each sim randomly deals hidden hands (consistent with known voids) and plays the game to completion. The tile with the highest average points wins.`,
+          why: `Heuristics are fast but imperfect rules of thumb. In the endgame (few tiles left), exact simulation is feasible and more accurate. MC corrects heuristic errors — especially in complex positions where blocking, board counting, and partner support interact in non-obvious ways.`,
+          color: 'border-blue-500', scoreLabel: 'MC', scoreColor: 'text-blue-400'
+        };
+      }
+
+      return def;
+    }
+
     function renderStudyPanel(snap, pNames, pTeams, teamColors) {
       if (!currentGame) return '<div class="text-xs text-slate-500">No game loaded</div>';
       if (snap.move === 0) {
@@ -5776,7 +5984,8 @@
           </div>`;
       }
 
-      // MC Results section
+      // MC Results section — enriched with heuristic reasons from snapshot
+      const allOpts = snap.allOptions || [];
       let mcHtml = '';
       if (mc && mc.length > 0) {
         mcHtml = `
@@ -5786,14 +5995,30 @@
               ${mc.map((r, i) => {
                 const isPlayed = snap.tile && r.tile.id === snap.tile.id;
                 const epCol = r.expectedPoints > 0.2 ? '#22c55e' : r.expectedPoints > 0 ? '#86efac' : r.expectedPoints > -0.2 ? '#eab308' : '#ef4444';
-                return `<div class="flex items-center gap-1.5 text-xs ${isPlayed ? 'bg-indigo-950/40 rounded px-1 py-0.5 border border-indigo-700' : ''}">
-                  <span class="font-mono w-3 ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${i+1}.</span>
-                  <span class="${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">[${r.tile.left}|${r.tile.right}]</span>
-                  <span class="text-slate-500 w-8">${r.side || 'open'}</span>
-                  <span class="font-mono font-bold" style="color:${epCol}">${r.expectedPoints >= 0 ? '+' : ''}${r.expectedPoints.toFixed(2)}</span>
-                  <span class="text-slate-600 font-mono text-xs">${(r.winRate*100).toFixed(0)}%</span>
-                  ${isPlayed ? '<span class="text-indigo-400 text-xs ml-auto">← played</span>' : ''}
-                  ${i === 0 && !isPlayed ? '<span class="text-emerald-400 text-xs ml-auto">★ best</span>' : ''}
+                // Find matching heuristic option for reasons + score
+                const hOpt = allOpts.find(o => o.tile.id === r.tile.id && o.side === r.side)
+                           || allOpts.find(o => o.tile.id === r.tile.id);
+                const hScore = hOpt ? hOpt.score : null;
+                const hReasons = hOpt ? hOpt.reasons : [];
+                return `<div class="${isPlayed ? 'bg-indigo-950/40 rounded border border-indigo-700' : ''} px-1 py-0.5">
+                  <div class="flex items-center gap-1.5 text-xs cursor-pointer" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                    <span class="font-mono w-3 ${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${i+1}.</span>
+                    <span class="${i === 0 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">[${r.tile.left}|${r.tile.right}]</span>
+                    <span class="text-slate-500 w-8">${r.side || 'open'}</span>
+                    <span class="font-mono font-bold" style="color:${epCol}">${r.expectedPoints >= 0 ? '+' : ''}${r.expectedPoints.toFixed(2)}</span>
+                    <span class="text-slate-600 font-mono text-xs">${(r.winRate*100).toFixed(0)}%</span>
+                    ${hScore !== null ? `<span class="text-slate-600 font-mono text-xs">(H:${hScore})</span>` : ''}
+                    ${isPlayed ? '<span class="text-indigo-400 text-xs ml-auto">← played</span>' : ''}
+                    ${i === 0 && !isPlayed ? '<span class="text-emerald-400 text-xs ml-auto">★ best</span>' : ''}
+                  </div>
+                  <div style="display:none" class="ml-4 mt-0.5 mb-1 space-y-1">
+                    ${hReasons.map(reason => {
+                      const ex = getReasonExplanation(reason);
+                      return `<div class="border-l-2 ${ex.color} pl-1.5">
+                        <div class="text-xs text-slate-400">▸ ${reason} <span class="font-mono ${ex.scoreColor}">${ex.scoreLabel}</span></div>
+                      </div>`;
+                    }).join('') || '<div class="text-xs text-slate-600 italic">No heuristic reasons available</div>'}
+                  </div>
                 </div>`;
               }).join('')}
             </div>
@@ -5881,14 +6106,26 @@
           </div>`;
       }
 
-      // Heuristic reasoning (from the snapshot)
+      // Heuristic reasoning with deep explanations
       let reasonsHtml = '';
       if (snap.reasons && snap.reasons.length > 0) {
         reasonsHtml = `
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-1">AI Heuristic Reasoning</div>
-            <div class="space-y-0.5">
-              ${snap.reasons.map(r => `<div class="text-xs text-slate-400">▸ ${r}</div>`).join('')}
+            <div class="text-xs font-bold text-slate-400 mb-1">AI Heuristic Reasoning (click to expand)</div>
+            <div class="space-y-1.5">
+              ${snap.reasons.map((r, ri) => {
+                const ex = getReasonExplanation(r);
+                return `<div class="border-l-2 ${ex.color} pl-2">
+                  <div class="text-xs text-slate-300 cursor-pointer" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                    ▸ ${r} <span class="font-mono font-bold ${ex.scoreColor}">${ex.scoreLabel}</span>
+                  </div>
+                  <div class="mt-1 text-xs leading-relaxed bg-slate-950/50 rounded p-1.5" style="display:none">
+                    <div class="text-slate-300 mb-1">${ex.what}</div>
+                    <div class="text-indigo-300 mb-1"><b>Math:</b> ${ex.math}</div>
+                    <div class="text-emerald-300"><b>Why it matters:</b> ${ex.why}</div>
+                  </div>
+                </div>`;
+              }).join('')}
             </div>
           </div>`;
       }
