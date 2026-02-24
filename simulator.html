@@ -16,8 +16,9 @@
     .tile-h .tile-half:first-child { border-right: 1.5px solid #94a3b8; }
     .tile-played { opacity: 0.4; border-color: #334155; }
     .tile-highlight { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
-    .tile-playable { border-color: #eab308 !important; box-shadow: 0 0 8px rgba(234,179,8,0.4); cursor: pointer !important; }
-    .tile-playable:hover { transform: scale(1.15); box-shadow: 0 0 16px rgba(234,179,8,0.8); }
+    .tile-playable { border: 2.5px solid #eab308 !important; box-shadow: 0 0 12px rgba(234,179,8,0.6); cursor: pointer !important; animation: playablePulse 1.5s ease-in-out infinite; }
+    .tile-playable:hover { transform: scale(1.15); box-shadow: 0 0 20px rgba(234,179,8,1); }
+    @keyframes playablePulse { 0%,100% { box-shadow: 0 0 8px rgba(234,179,8,0.4); } 50% { box-shadow: 0 0 16px rgba(234,179,8,0.8); } }
     .tile-wrong { border-color: #ef4444 !important; box-shadow: 0 0 12px rgba(239,68,68,0.6); }
     .tile-optimal { border-color: #22c55e !important; box-shadow: 0 0 12px rgba(34,197,94,0.6); }
     .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
@@ -3717,8 +3718,11 @@
         if (playWaiting && gameMode === 'play' && playHint && playHint.tileId === t.id) {
           return 'tile-playable tile-hint';
         }
-        if ((quizWaiting && isActive) || (playWaiting && gameMode === 'play')) {
+        if (quizWaiting && isActive) {
           if (canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) return 'tile-playable';
+        }
+        if (playWaiting && gameMode === 'play') {
+          if (canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length)) return 'tile-playable';
         }
         return '';
       };
@@ -3727,7 +3731,7 @@
         if (quizWaiting && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
           return `quizPickTile('${t.id}')`;
         }
-        if (playWaiting && gameMode === 'play' && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
+        if (playWaiting && gameMode === 'play' && canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length)) {
           return `playPickTile('${t.id}')`;
         }
         return '';
@@ -3753,7 +3757,7 @@
               : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
           })() : ''}
           ${playWaiting && gameMode === 'play' && !playSidePick ? (() => {
-            const hasPlayable = hand.some(t => canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length));
+            const hasPlayable = hand.some(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length));
             const hintBtn = `<button class="btn text-xs px-3 py-0.5 ml-2" style="background:#6366f1;color:#fff" onclick="showPlayHint()">Hint</button>`;
             const hintDisplay = playHint ? `<div class="text-center mt-1 bg-indigo-950 rounded px-2 py-1 border border-indigo-500">
               <span class="text-xs text-indigo-300">${playHint.tileId ? `AI suggests: <b>[${playHint.tileId}] ${playHint.side}</b>` : 'Pass'}</span>
@@ -5457,6 +5461,7 @@
 
     function stepBack() {
       if (!currentGame || currentStep <= 0) return;
+      if (gameMode === 'play' && !currentGame.outcome) return; // no stepping during live play
       currentStep--;
       quizWaiting = false;
       quizResult = null;
@@ -5469,6 +5474,7 @@
 
     function goTo(step) {
       if (!currentGame) return;
+      if (gameMode === 'play' && !currentGame.outcome) return; // no stepping during live play
       quizWaiting = false;
       quizResult = null;
       quizShowingResult = false;
