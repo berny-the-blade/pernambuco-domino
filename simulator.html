@@ -2728,11 +2728,14 @@
           passCount++;
           simKnowledge.recordPass(cur, simLE, simRE);
           if (passCount >= 4) {
-            const t0 = simHands.filter((h, i) => i % 2 === 0).reduce((s, h) => s + h.reduce((a, t) => a + t.left + t.right, 0), 0);
-            const t1 = simHands.filter((h, i) => i % 2 === 1).reduce((s, h) => s + h.reduce((a, t) => a + t.left + t.right, 0), 0);
-            if (t0 < t1) return { winnerTeam: 0, points: 1, type: 'blocked' };
-            if (t1 < t0) return { winnerTeam: 1, points: 1, type: 'blocked' };
-            return { winnerTeam: -1, points: 0, type: 'tie' };
+            // Pernambuco rule: individual lowest pip count wins (not team total)
+            const pips = simHands.map((h, i) => ({ player: i, team: i % 2, pts: h.reduce((a, t) => a + t.left + t.right, 0) }));
+            const minPips = Math.min(...pips.map(p => p.pts));
+            const winners = pips.filter(p => p.pts === minPips);
+            if (winners.length > 1 && winners.some(w => w.team === 0) && winners.some(w => w.team === 1)) {
+              return { winnerTeam: -1, points: 0, type: 'tie' };
+            }
+            return { winnerTeam: winners[0].team, points: 1, type: 'blocked' };
           }
           cur = (cur + 1) % 4;
         }
@@ -3649,12 +3652,16 @@
           const h = snap.hands[p] || [];
           return { player: p, pips: h.reduce((s, t) => s + t.left + t.right, 0), tiles: h.length };
         });
-        const teamPips = [hv[0].pips + hv[2].pips, hv[1].pips + hv[3].pips];
+        const minPips = Math.min(...hv.map(v => v.pips));
+        const pColors = ['#60a5fa', '#f87171', '#a78bfa', '#fbbf24'];
         pipBreakdown = `<div class="mt-2 text-xs">
-          <div class="flex justify-center gap-4">
-            <span class="${teamPips[0] <= teamPips[1] ? 'text-emerald-400 font-bold' : 'text-slate-400'}">T1: ${pn(0)} ${hv[0].pips}p + ${pn(2)} ${hv[2].pips}p = ${teamPips[0]}</span>
-            <span class="${teamPips[1] <= teamPips[0] ? 'text-emerald-400 font-bold' : 'text-slate-400'}">T2: ${pn(1)} ${hv[1].pips}p + ${pn(3)} ${hv[3].pips}p = ${teamPips[1]}</span>
+          <div class="flex justify-center gap-3 flex-wrap">
+            ${hv.map(v => {
+              const isMin = v.pips === minPips;
+              return `<span class="${isMin ? 'text-emerald-400 font-bold' : 'text-slate-400'}"><span style="color:${pColors[v.player]}">${pn(v.player)}</span> ${v.pips}p${isMin ? ' ★' : ''}</span>`;
+            }).join('')}
           </div>
+          <div class="text-slate-500 mt-1">Lowest individual pip count wins</div>
         </div>`;
       }
 
