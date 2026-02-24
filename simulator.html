@@ -6296,29 +6296,43 @@
         }
         return { s, c };
       });
-      const flowMetrics = [];
+      // Build move options: from MC if available, otherwise compute playable tiles directly
+      let moveOptions;
       if (mcResults && mcResults.length > 0) {
-        for (const mc of mcResults) {
-          const { newLeft, newRight } = applyMove(snap, mc.tile, mc.side);
-          const mask = (1 << newLeft) | (1 << newRight);
-          let oppCount = 0, partnerCount = 0;
-          let oppMob = 0, partnerMob = 0;
-          for (let i = 0; i < N; i++) {
-            const ds = dealSuits[i];
-            if ((ds.s[opp1] & mask) || (ds.s[opp2] & mask)) oppCount++;
-            if (ds.s[partner] & mask) partnerCount++;
-            oppMob += (ds.c[opp1][newLeft] + ds.c[opp1][newRight]) / N;
-            partnerMob += (ds.c[partner][newLeft] + ds.c[partner][newRight]) / N;
+        moveOptions = mcResults.map(mc => ({ tile: mc.tile, side: mc.side, ep: mc.expectedPoints, winRate: mc.winRate, cvar5: mc.cvar5, blockRate: mc.blockRate, hasMC: true }));
+      } else {
+        moveOptions = [];
+        const playable = hand.filter(t => canPlay(t, lE, rE, snap.board.length));
+        for (const tile of playable) {
+          if (snap.board.length === 0) { moveOptions.push({ tile, side: null, ep: 0, winRate: 0.5, cvar5: 0, blockRate: 0, hasMC: false }); continue; }
+          if (tile.left === lE || tile.right === lE) moveOptions.push({ tile, side: 'left', ep: 0, winRate: 0.5, cvar5: 0, blockRate: 0, hasMC: false });
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) moveOptions.push({ tile, side: 'right', ep: 0, winRate: 0.5, cvar5: 0, blockRate: 0, hasMC: false });
+          if (moveOptions.length === 0 || moveOptions[moveOptions.length-1].tile.id !== tile.id) {
+            if (tile.left === rE || tile.right === rE) moveOptions.push({ tile, side: 'right', ep: 0, winRate: 0.5, cvar5: 0, blockRate: 0, hasMC: false });
           }
-          const opp = oppCount / N;
-          const ppp = partnerCount / N;
-          flowMetrics.push({
-            tile: mc.tile, side: mc.side, ep: mc.expectedPoints, winRate: mc.winRate,
-            cvar5: mc.cvar5, blockRate: mc.blockRate,
-            opp, ppp, ecv: ppp - opp, bait: opp - ppp,
-            oppMobility: oppMob, partnerMobility: partnerMob
-          });
         }
+      }
+      const flowMetrics = [];
+      for (const mo of moveOptions) {
+        const { newLeft, newRight } = applyMove(snap, mo.tile, mo.side);
+        const mask = (1 << newLeft) | (1 << newRight);
+        let oppCount = 0, partnerCount = 0;
+        let oppMob = 0, partnerMob = 0;
+        for (let i = 0; i < N; i++) {
+          const ds = dealSuits[i];
+          if ((ds.s[opp1] & mask) || (ds.s[opp2] & mask)) oppCount++;
+          if (ds.s[partner] & mask) partnerCount++;
+          oppMob += (ds.c[opp1][newLeft] + ds.c[opp1][newRight]) / N;
+          partnerMob += (ds.c[partner][newLeft] + ds.c[partner][newRight]) / N;
+        }
+        const opp = oppCount / N;
+        const ppp = partnerCount / N;
+        flowMetrics.push({
+          tile: mo.tile, side: mo.side, ep: mo.ep, winRate: mo.winRate,
+          cvar5: mo.cvar5, blockRate: mo.blockRate, hasMC: mo.hasMC,
+          opp, ppp, ecv: ppp - opp, bait: opp - ppp,
+          oppMobility: oppMob, partnerMobility: partnerMob
+        });
       }
 
       // --- Structural Tension ---
@@ -6388,7 +6402,7 @@
       if (proCache[stepIdx]) { render(); return; }
       if (proRunning) return;
       proRunning = true;
-      proProgress = 'Running Monte Carlo...';
+      proProgress = 'Sampling...';
       render();
 
       setTimeout(() => {
@@ -6396,28 +6410,14 @@
           const snap = currentGame.snapshots[stepIdx];
           const player = snap.currentPlayer;
 
-          // Reuse MC from study cache if available
-          let mcResults;
-          if (studyCache[stepIdx] && studyCache[stepIdx].mcResults) {
-            mcResults = studyCache[stepIdx].mcResults;
-          } else {
-            mcResults = monteCarloEval(snap, player, PRO_MC_SIMS);
-          }
+          // Reuse MC from study cache if available — never run MC ourselves
+          const mcResults = (studyCache[stepIdx] && studyCache[stepIdx].mcResults) || null;
 
-          proProgress = 'Computing analytics...';
+          const analytics = computeProAnalytics(snap, player, mcResults);
+          proCache[stepIdx] = { mcResults, ...analytics };
+          proRunning = false;
+          proProgress = '';
           render();
-
-          setTimeout(() => {
-            try {
-              const analytics = computeProAnalytics(snap, player, mcResults);
-              proCache[stepIdx] = { mcResults, ...analytics };
-              proRunning = false;
-              proProgress = '';
-              render();
-            } catch(e) {
-              proRunning = false; proProgress = ''; render();
-            }
-          }, 10);
         } catch(e) {
           proRunning = false; proProgress = ''; render();
         }
@@ -6458,9 +6458,10 @@
       const baitLabel = b => b > 0.2 ? '<span style="color:#ef4444">HIGH</span>' : b > 0.05 ? '<span style="color:#eab308">MED</span>' : '<span style="color:#22c55e">LOW</span>';
 
       // ===== BLOCK 1: Decision Quality =====
+      const hasMC = mc.length > 0;
       let b1 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
         <div class="text-xs font-bold text-cyan-400 mb-1">1. DECISION QUALITY</div>`;
-      if (mc.length >= 2) {
+      if (hasMC && mc.length >= 2) {
         const gap = data.indifferenceGap;
         const rob = data.robustness;
         const robPct = (rob * 100).toFixed(0);
@@ -6473,7 +6474,15 @@
           <div class="h-1.5 rounded-full" style="width:${robPct}%;background:${robColor}"></div>
         </div>`;
         if (gap < 0.05) b1 += `<div class="text-xs text-slate-500 mt-1">Top moves are statistically indistinguishable — pick the one that fits your strategy.</div>`;
-      } else if (mc.length === 1) {
+      } else if (fm.length >= 2) {
+        // Sort flow metrics by ECV (best structural move)
+        const sorted = [...fm].sort((a,b) => b.ecv - a.ecv);
+        const bestEcv = sorted[0];
+        b1 += `<div class="text-xs"><span class="text-slate-400">Options:</span> <span class="font-bold text-slate-300">${fm.length} moves</span>
+          <span class="text-slate-500 ml-2">Best ECV:</span> <span style="color:${bestEcv.ecv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">[${bestEcv.tile.left}|${bestEcv.tile.right}] ${bestEcv.ecv >= 0 ? '+' : ''}${(bestEcv.ecv*100).toFixed(0)}%</span>
+        </div>`;
+        if (!hasMC) b1 += `<div class="text-xs text-slate-600 mt-1">Use Study tab for EP/Robustness metrics (requires MC)</div>`;
+      } else if (fm.length === 1) {
         b1 += `<div class="text-xs text-slate-500">Only 1 playable tile — forced move.</div>`;
       } else {
         b1 += `<div class="text-xs text-slate-500">Pass — no legal moves.</div>`;
@@ -6489,13 +6498,16 @@
       // ===== BLOCK 2: Risk & Tail =====
       let b2 = `<div class="bg-slate-900/50 rounded-lg p-2 mb-2">
         <div class="text-xs font-bold text-red-400 mb-1">2. RISK & TAIL</div>`;
-      if (mc.length > 0) {
+      if (hasMC) {
         const best = mc[0];
         b2 += `<div class="grid grid-cols-3 gap-1 text-xs mb-1">
           <div><span class="text-slate-400">CVaR 5%:</span> <span style="color:${epColor(best.cvar5)}" class="font-bold">${best.cvar5 >= 0 ? '+' : ''}${best.cvar5.toFixed(2)}</span></div>
           <div><span class="text-slate-400">Block%:</span> <span class="font-bold text-amber-400">${(best.blockRate*100).toFixed(0)}%</span></div>
           <div><span class="text-slate-400">Pip Edge:</span> <span style="color:${data.blockPipAdv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">${data.blockPipAdv >= 0 ? '+' : ''}${data.blockPipAdv.toFixed(1)}</span></div>
         </div>`;
+      } else {
+        b2 += `<div class="text-xs mb-1"><span class="text-slate-400">Pip Edge:</span> <span style="color:${data.blockPipAdv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">${data.blockPipAdv >= 0 ? '+' : ''}${data.blockPipAdv.toFixed(1)}</span>
+          <span class="text-slate-500 ml-1">(our team ${data.myTeamPips} pips vs est. ${data.oppTeamPipsEst.toFixed(0)} opp)</span></div>`;
       }
       // Go-out threats
       b2 += `<div class="text-xs text-slate-400 mt-1 mb-0.5 font-bold">Go-Out Threats</div>
@@ -6520,13 +6532,15 @@
           <span class="text-slate-400">Tension:</span> <span style="color:${data.tension > 0.3 ? '#ef4444' : data.tension > 0.1 ? '#eab308' : '#22c55e'}" class="font-bold">${(data.tension*100).toFixed(0)}%</span>
           <span class="text-slate-500 ml-2">(${data.tension > 0.3 ? 'tight — near block' : data.tension > 0.1 ? 'moderate' : 'open'})</span>
         </div>`;
-      if (fm.length > 0) {
+      // Sort flow metrics by ECV (best structural position)
+      const fmSorted = [...fm].sort((a,b) => b.ecv - a.ecv);
+      if (fmSorted.length > 0) {
         b3 += `<div class="text-xs text-slate-400 font-bold mb-0.5">Move Flow Analysis</div>
           <table class="w-full text-xs"><tr class="text-slate-500">
-            <td>Tile</td><td class="text-center">OPP</td><td class="text-center">PPP</td><td class="text-center">ECV</td><td class="text-center">Bait</td><td class="text-center">EP</td>
+            <td>Tile</td><td class="text-center">OPP</td><td class="text-center">PPP</td><td class="text-center">ECV</td><td class="text-center">Bait</td>${hasMC ? '<td class="text-center">EP</td>' : ''}
           </tr>`;
-        for (const f of fm.slice(0, 6)) {
-          const isBest = f.tile.id === mc[0]?.tile.id;
+        for (const f of fmSorted.slice(0, 6)) {
+          const isBest = hasMC && f.tile.id === mc[0]?.tile.id;
           const isPlayed = snap.tile && f.tile.id === snap.tile.id;
           const rowBg = isBest ? 'background:#22c55e11' : isPlayed ? 'background:#818cf811' : '';
           const mark = isBest ? '<span class="text-emerald-400">★</span>' : isPlayed ? '<span class="text-indigo-400">▶</span>' : '';
@@ -6535,13 +6549,12 @@
             <td class="text-center" style="color:${pctColor(f.opp, true)}">${(f.opp*100).toFixed(0)}%</td>
             <td class="text-center" style="color:${pctColor(f.ppp, false)}">${(f.ppp*100).toFixed(0)}%</td>
             <td class="text-center" style="color:${f.ecv > 0 ? '#22c55e' : '#ef4444'}">${f.ecv >= 0 ? '+' : ''}${(f.ecv*100).toFixed(0)}%</td>
-            <td class="text-center">${baitLabel(f.bait)}</td>
-            <td class="text-center" style="color:${epColor(f.ep)}">${f.ep >= 0 ? '+' : ''}${f.ep.toFixed(2)}</td>
+            <td class="text-center">${baitLabel(f.bait)}</td>${hasMC ? `<td class="text-center" style="color:${epColor(f.ep)}">${f.ep >= 0 ? '+' : ''}${f.ep.toFixed(2)}</td>` : ''}
           </tr>`;
         }
         b3 += '</table>';
         // Best move ECV highlight
-        const bestFlow = fm[0];
+        const bestFlow = fmSorted[0];
         if (bestFlow) {
           b3 += `<div class="text-xs mt-1 text-slate-500">Best move ECV: <span style="color:${bestFlow.ecv > 0 ? '#22c55e' : '#ef4444'}" class="font-bold">${bestFlow.ecv >= 0 ? '+' : ''}${(bestFlow.ecv*100).toFixed(0)}%</span>
             — partner plays ${(bestFlow.ppp*100).toFixed(0)}%, opponents ${(bestFlow.opp*100).toFixed(0)}%</div>`;
