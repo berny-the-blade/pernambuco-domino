@@ -5916,12 +5916,13 @@
       const reasons = [];
       if (doubles.length >= 2) reasons.push(`${doubles.length} doubles — good for opening (control)`);
       else if (doubles.length === 0) reasons.push('No doubles — weaker opener');
-      if (maxSuitDepth >= 4) reasons.push(`Deep suit (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — strong opener`);
+      if (maxSuitDepth >= 4) reasons.push(`Deep suit (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — dominant suit, strong opener`);
+      else if (maxSuitDepth >= 3) reasons.push(`${suitDepth[deepSuit]} tiles with ${deepSuit}s — good suit control if you open`);
       if (uniqueSuits.size <= 4) reasons.push(`Only ${uniqueSuits.size} suits — limited flexibility`);
       if (uniqueSuits.size >= 6) reasons.push(`${uniqueSuits.size} suits covered — good flexibility`);
-      if (heavyTiles >= 3) reasons.push(`${heavyTiles} heavy tiles — opening lets you dump early`);
-      if (totalPips <= 20) reasons.push(`Low pips (${totalPips}) — safe hand, less risk`);
-      if (totalPips >= 35) reasons.push(`High pips (${totalPips}) — risky if blocked, open to dump`);
+      if (heavyTiles >= 3) reasons.push(`${heavyTiles} heavy tiles — opening lets you shed them early`);
+      if (totalPips <= 20) reasons.push(`Low pips (${totalPips}) — safe hand, less risk if blocked`);
+      if (totalPips >= 35) reasons.push(`High pips (${totalPips}) — risky if blocked, opening lets you shed early`);
       if (chains >= 10) reasons.push(`Well-connected tiles (${chains} links) — good playability`);
       else if (chains <= 5) reasons.push(`Poorly connected (${chains} links) — may get stuck`);
 
