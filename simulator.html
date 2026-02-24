@@ -5913,18 +5913,29 @@
       // Heavy tiles (pip sum >= 9)
       const heavyTiles = hand.filter(t => t.left + t.right >= 9).length;
 
+      // Reasons based on 1M-game empirical study (opening_study.js)
+      // Key findings: suit depth is #1 predictor, then doubles count, then suit coverage
       const reasons = [];
-      if (doubles.length >= 2) reasons.push(`${doubles.length} doubles — good for opening (control)`);
-      else if (doubles.length === 0) reasons.push('No doubles — weaker opener');
-      if (maxSuitDepth >= 4) reasons.push(`Deep suit (${deepSuit}s: ${suitDepth[deepSuit]} tiles) — dominant suit, strong opener`);
-      else if (maxSuitDepth >= 3) reasons.push(`${suitDepth[deepSuit]} tiles with ${deepSuit}s — good suit control if you open`);
-      if (uniqueSuits.size <= 4) reasons.push(`Only ${uniqueSuits.size} suits — limited flexibility`);
-      if (uniqueSuits.size >= 6) reasons.push(`${uniqueSuits.size} suits covered — good flexibility`);
-      if (heavyTiles >= 3) reasons.push(`${heavyTiles} heavy tiles — opening lets you shed them early`);
-      if (totalPips <= 20) reasons.push(`Low pips (${totalPips}) — safe hand, less risk if blocked`);
-      if (totalPips >= 35) reasons.push(`High pips (${totalPips}) — risky if blocked, opening lets you shed early`);
-      if (chains >= 10) reasons.push(`Well-connected tiles (${chains} links) — good playability`);
-      else if (chains <= 5) reasons.push(`Poorly connected (${chains} links) — may get stuck`);
+
+      // #1 predictor: Max Suit Depth (depth 5: +0.20 EP, depth 4: +0.045 EP)
+      if (maxSuitDepth >= 5) reasons.push(`Dominant ${deepSuit}s suit (${suitDepth[deepSuit]} tiles) — strongest opening signal (+0.20 EP)`);
+      else if (maxSuitDepth >= 4) reasons.push(`Deep ${deepSuit}s suit (${suitDepth[deepSuit]} tiles) — favors opening (+0.05 EP)`);
+      else if (maxSuitDepth <= 2) reasons.push(`No deep suit (max ${maxSuitDepth}) — less reason to open`);
+
+      // #2 predictor: Number of Doubles (1 is best: +0.043, 0 is worst: -0.091)
+      if (doubles.length === 1) reasons.push(`1 double — ideal for opening (+0.04 EP, best count)`);
+      else if (doubles.length === 0) reasons.push(`No doubles — strongly favors partner opening (-0.09 EP)`);
+      else if (doubles.length === 2) reasons.push(`2 doubles — neutral for opening decision`);
+      else if (doubles.length >= 3) reasons.push(`${doubles.length} doubles — too many, partner should open (-0.05 EP)`);
+
+      // #3 predictor: Suit Coverage (4 suits: -0.15 EP, 7 suits: +0.02 EP)
+      if (uniqueSuits.size <= 4) reasons.push(`Only ${uniqueSuits.size} suits covered — narrow hand, partner opens (-0.15 EP)`);
+      else if (uniqueSuits.size >= 7) reasons.push(`All 7 suits covered — flexible hand, slight edge to open`);
+      else if (uniqueSuits.size === 5) reasons.push(`${uniqueSuits.size} suits — somewhat narrow (-0.05 EP)`);
+
+      // Informational (weak signals per data — connectivity and pips barely matter)
+      if (totalPips >= 45) reasons.push(`High pips (${totalPips}) — no proven opening advantage from pips alone`);
+      else if (totalPips <= 20) reasons.push(`Low pips (${totalPips}) — safe hand overall`);
 
       return {
         doubles: doubles.length, totalPips, maxSuitDepth, deepSuit,
