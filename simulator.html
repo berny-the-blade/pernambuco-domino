@@ -2215,6 +2215,7 @@
       playSidePick = null;
       playHint = null;
       playLastMove = null;
+      playOpeningPending = null;
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2276,14 +2277,19 @@
       saveStats();
 
       render();
-      // If P0 opened, pause longer so user sees their tile was auto-played
+      // If P0 opened, show confirmation overlay before AI starts
       if (hp === 0) {
-        playLastMove = { player: 0, tile: autoTile, side: null, pass: false, opening: true };
+        playOpeningPending = { tile: autoTile };
         render();
-        setTimeout(() => scheduleNextMove(), playAIDelay * 1500);
       } else {
         scheduleNextMove();
       }
+    }
+
+    function dismissOpeningOverlay() {
+      playOpeningPending = null;
+      render();
+      scheduleNextMove();
     }
 
     function scheduleNextMove() {
@@ -2896,6 +2902,7 @@
     let playSidePick = null;        // {tile, canLeft, canRight} — waiting for side choice
     let playAITimer = null;         // setTimeout handle for AI move delays
     let playLastMove = null;        // { player, tile, side, pass } — last AI move announcement
+    let playOpeningPending = null;  // { tile } — waiting for user to acknowledge opening
     let playDifficulty = { opponents: 0.75, partner: 0.75 };
     const DIFFICULTY_PRESETS = {
       beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
@@ -3519,6 +3526,7 @@
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                   ${starterChoicePending ? renderStarterChoice() : ''}
+                  ${playOpeningPending ? renderOpeningOverlay() : ''}
                 </div>
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
@@ -3683,6 +3691,18 @@
             `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
           ${pipBreakdown}
           ${playButtons}
+        </div>
+      </div>`;
+    }
+
+    function renderOpeningOverlay() {
+      const t = playOpeningPending.tile;
+      return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
+        <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-yellow-500 shadow-xl">
+          <div class="text-lg font-bold text-yellow-400 mb-2">You open!</div>
+          <div class="text-sm text-slate-300 mb-3">Your highest double <span class="text-white font-bold">[${t.left}|${t.right}]</span> was placed on the board.</div>
+          <div class="flex justify-center mb-3">${tileHTML(t, '', 'v', '', '')}</div>
+          <button class="btn text-sm px-6 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissOpeningOverlay()">OK, continue</button>
         </div>
       </div>`;
     }
@@ -5307,6 +5327,7 @@
       playSidePick = null;
       playHint = null;
       playLastMove = null;
+      playOpeningPending = null;
       playShowingDiffPicker = false;
       quizWaiting = false;
       quizResult = null;
