@@ -7071,10 +7071,14 @@
           diffs.push(ep0 - ep2);
         }
 
-        // Early stopping: if after 80+ sims, |t-stat| > 3.0 (overwhelming), stop
-        if (oqSimsDone >= 80 && oqSimsDone < MAX_SIMS) {
+        // Early stopping: if after 60+ sims the evidence is clear, stop early
+        if (oqSimsDone >= 60 && oqSimsDone < MAX_SIMS) {
           const st = pairedTStat(diffs);
-          if (Math.abs(st.t) > 3.0) { oqSimsTarget = oqSimsDone; finishOQ(); return; }
+          const m = Math.abs(st.mean);
+          // Stop if overwhelming evidence (|t| > 2.5 with meaningful margin)
+          if (Math.abs(st.t) > 2.5 && m > 0.12) { oqSimsTarget = oqSimsDone; finishOQ(); return; }
+          // Also stop early if clearly a close call (tiny margin after enough sims)
+          if (oqSimsDone >= 120 && m < 0.04) { oqSimsTarget = oqSimsDone; finishOQ(); return; }
         }
 
         if (oqSimsDone < MAX_SIMS) {
@@ -7094,9 +7098,10 @@
 
         // Paired t-test: diffs = P0_EP - P2_EP, so positive mean = P0 opening is better
         const st = pairedTStat(diffs);
-        // Two-sided p-value for "is there a significant difference?"
         const pTwoSided = 2 * Math.min(st.p, 1 - st.p);
-        const significant = pTwoSided < 0.10; // 90% confidence (two-sided)
+        // Practical significance: margin must be meaningful (>0.08 EP) AND have some
+        // statistical evidence (p < 0.25). Pure close calls: margin < 0.08 regardless.
+        const significant = margin > 0.08 && pTwoSided < 0.25;
         const isCorrect = !significant || (choice === better);
 
         const handFeatures = analyzeOpeningHand(oqHand);
