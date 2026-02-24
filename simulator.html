@@ -1890,7 +1890,23 @@
               if (canPlayLast) {
                 ss += 80; sr.push(`Sets up going out next turn with [${lastTile.left}|${lastTile.right}]`);
               } else {
-                ss -= 30; sr.push(`STRANDS last tile [${lastTile.left}|${lastTile.right}] — can't play on ${newEnd}/${otherEnd}`);
+                // Check if ALL playable tiles would strand the last one (not actionable if so)
+                const allStrand = hand.filter(t => t.id !== tile.id).length === 1 && (() => {
+                  const ot = lastTile; // the other tile (which would be played instead)
+                  const otherPlayable = (ot.left === leftEnd || ot.right === leftEnd || ot.left === rightEnd || ot.right === rightEnd);
+                  if (!otherPlayable) return false; // other tile can't even be played, so not comparable
+                  // If we played the other tile instead, would THIS tile be stranded too?
+                  for (const oSide of ['left', 'right']) {
+                    const oEnd = oSide === 'left' ? leftEnd : rightEnd;
+                    if (ot.left !== oEnd && ot.right !== oEnd) continue;
+                    const oNewEnd = (ot.left === oEnd) ? ot.right : ot.left;
+                    const oOtherEnd = oSide === 'left' ? rightEnd : leftEnd;
+                    if (tile.left === oNewEnd || tile.right === oNewEnd || tile.left === oOtherEnd || tile.right === oOtherEnd) return false;
+                  }
+                  return true; // both choices strand — not a differentiator
+                })();
+                ss -= 30;
+                if (!allStrand) sr.push(`STRANDS last tile [${lastTile.left}|${lastTile.right}] — can't play on ${newEnd}/${otherEnd}`);
               }
             }
           }
