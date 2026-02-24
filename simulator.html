@@ -2209,13 +2209,14 @@
 
     // ========== LIVE PLAY ENGINE ==========
 
-    function startPlayGame() {
+    function startPlayGame(predealtHands = null, forcedStarter = null, freeChoice = false) {
       stopPlayAI();
       playWaiting = false;
       playSidePick = null;
       playHint = null;
       playLastMove = null;
       playOpeningPending = null;
+      playStarterPending = false;
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2227,11 +2228,77 @@
       belief = new BeliefModel();
 
       // Deal hands (Pernambuco rule: 24 tiles dealt, 4 removed from game)
-      const deck = shuffleDeck(ALL_TILES);
-      liveHands = [[], [], [], []];
-      for (let i = 0; i < 24; i++) liveHands[i % 4].push(deck[i]);
+      if (predealtHands) {
+        liveHands = predealtHands.map(h => h.map(t => ({ ...t })));
+      } else {
+        const deck = shuffleDeck(ALL_TILES);
+        liveHands = [[], [], [], []];
+        for (let i = 0; i < 24; i++) liveHands[i % 4].push(deck[i]);
+      }
 
-      // Find highest double opener
+      // --- Determine who opens and how ---
+      if (lastWinTeam !== null && !freeChoice) {
+        // Subsequent game: winning team chooses who opens
+        if (lastWinTeam === 0) {
+          // Our team won — ask user if they want to open or pass to partner
+          playStarterPending = true;
+          liveBoard = [];
+          liveLeftEnd = null;
+          liveRightEnd = null;
+          liveCurrentPlayer = -1;
+          livePassCount = 0;
+          liveMoveNum = 0;
+          liveKnowledge = new Knowledge();
+          liveNotebook = new DeductionNotebook();
+          currentGame = {
+            originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+            snapshots: [{
+              move: 0, player: -1, action: 'deal', tile: null, side: null,
+              reasons: ['Choose who opens'], allOptions: [],
+              hands: liveHands.map(h => h.map(t => ({ ...t }))),
+              board: [], leftEnd: null, rightEnd: null,
+              currentPlayer: -1,
+              knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
+            }],
+            outcome: null
+          };
+          currentStep = 0;
+          gameMode = 'play';
+          render();
+          return;
+        } else {
+          // Opponent team won — AI picks opener (P1 or P3)
+          forcedStarter = solverRng.random() < 0.5 ? 1 : 3;
+          freeChoice = true;
+        }
+      }
+
+      if (freeChoice && forcedStarter !== null) {
+        // Free opening: starter plays any tile (AI picks best, P0 picks manually)
+        if (forcedStarter === 0) {
+          // P0 opens with free choice — set as their turn with empty board
+          initLiveGameState(null, null, forcedStarter);
+          gameMode = 'play';
+          stats.games++;
+          saveStats();
+          playWaiting = true;
+          render();
+          return;
+        } else {
+          // AI opens with free choice
+          const opener = forcedStarter;
+          const tile = pickOpeningTile(liveHands[opener]);
+          initLiveGameState(tile, opener, null);
+          gameMode = 'play';
+          stats.games++;
+          saveStats();
+          render();
+          scheduleNextMove();
+          return;
+        }
+      }
+
+      // First game of match / dobrada: highest double across all players
       let hp = -1, ht = null, hd = -1;
       for (let p = 0; p < 4; p++)
         for (const t of liveHands[p])
@@ -2242,36 +2309,7 @@
         return;
       }
 
-      // Auto-play the opening tile
-      const autoTile = { ...ht };
-      liveHands[hp] = liveHands[hp].filter(t => t.id !== ht.id);
-      liveBoard = [autoTile];
-      liveLeftEnd = autoTile.left;
-      liveRightEnd = autoTile.right;
-      liveCurrentPlayer = (hp + 1) % 4;
-      livePassCount = 0;
-      liveMoveNum = 0;
-      liveKnowledge = new Knowledge();
-      liveNotebook = new DeductionNotebook();
-      liveKnowledge.recordPlay(hp, autoTile);
-      liveNotebook.recordPlay(hp, 0, autoTile, null, undefined, undefined);
-
-      currentGame = {
-        originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
-        autoPlayedBy: hp,
-        autoTile,
-        snapshots: [{
-          move: 0, player: -1, action: 'start', tile: null, side: null,
-          reasons: ['Game begins'],
-          hands: liveHands.map(h => h.map(t => ({ ...t }))),
-          board: liveBoard.map(t => ({ ...t })),
-          leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
-          currentPlayer: liveCurrentPlayer,
-          knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
-        }],
-        outcome: null
-      };
-      currentStep = 0;
+      initLiveGameState(ht, hp, null);
       gameMode = 'play';
       stats.games++;
       saveStats();
@@ -2279,11 +2317,64 @@
       render();
       // If P0 opened, show confirmation overlay before AI starts
       if (hp === 0) {
-        playOpeningPending = { tile: autoTile };
+        playOpeningPending = { tile: currentGame.autoTile };
         render();
       } else {
         scheduleNextMove();
       }
+    }
+
+    // Initialize live game state with an opening tile already played
+    function initLiveGameState(openTile, opener, firstPlayer) {
+      livePassCount = 0;
+      liveMoveNum = 0;
+      liveKnowledge = new Knowledge();
+      liveNotebook = new DeductionNotebook();
+
+      if (openTile && opener !== null) {
+        const autoTile = { ...openTile };
+        liveHands[opener] = liveHands[opener].filter(t => t.id !== openTile.id);
+        liveBoard = [autoTile];
+        liveLeftEnd = autoTile.left;
+        liveRightEnd = autoTile.right;
+        liveCurrentPlayer = (opener + 1) % 4;
+        liveKnowledge.recordPlay(opener, autoTile);
+        liveNotebook.recordPlay(opener, 0, autoTile, null, undefined, undefined);
+        currentGame = {
+          originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+          autoPlayedBy: opener,
+          autoTile,
+          snapshots: [{
+            move: 0, player: -1, action: 'start', tile: null, side: null,
+            reasons: ['Game begins'],
+            hands: liveHands.map(h => h.map(t => ({ ...t }))),
+            board: liveBoard.map(t => ({ ...t })),
+            leftEnd: liveLeftEnd, rightEnd: liveRightEnd,
+            currentPlayer: liveCurrentPlayer,
+            knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
+          }],
+          outcome: null
+        };
+      } else {
+        // Empty board — first player will place any tile
+        liveBoard = [];
+        liveLeftEnd = null;
+        liveRightEnd = null;
+        liveCurrentPlayer = firstPlayer;
+        currentGame = {
+          originalHands: liveHands.map(h => h.map(t => ({ ...t }))),
+          snapshots: [{
+            move: 0, player: -1, action: 'start', tile: null, side: null,
+            reasons: ['Game begins'],
+            hands: liveHands.map(h => h.map(t => ({ ...t }))),
+            board: [], leftEnd: null, rightEnd: null,
+            currentPlayer: firstPlayer,
+            knowledge: liveKnowledge.clone(), notebook: liveNotebook.clone()
+          }],
+          outcome: null
+        };
+      }
+      currentStep = 0;
     }
 
     function dismissOpeningOverlay() {
@@ -2903,6 +2994,7 @@
     let playAITimer = null;         // setTimeout handle for AI move delays
     let playLastMove = null;        // { player, tile, side, pass } — last AI move announcement
     let playOpeningPending = null;  // { tile } — waiting for user to acknowledge opening
+    let playStarterPending = false; // true when waiting for user to choose who opens
     let playDifficulty = { opponents: 0.75, partner: 0.75 };
     const DIFFICULTY_PRESETS = {
       beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
@@ -3527,6 +3619,7 @@
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                   ${starterChoicePending ? renderStarterChoice() : ''}
                   ${playOpeningPending ? renderOpeningOverlay() : ''}
+                  ${playStarterPending ? renderPlayStarterChoice() : ''}
                 </div>
                 <div class="w-20 flex-shrink-0">
                   ${renderSidePlayer(3, snap, pNames, pTeams, teamColors)}
@@ -3693,6 +3786,25 @@
           ${playButtons}
         </div>
       </div>`;
+    }
+
+    function renderPlayStarterChoice() {
+      return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
+        <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-emerald-500 shadow-xl">
+          <div class="text-lg font-bold text-emerald-400 mb-2">Your team won!</div>
+          <div class="text-sm text-slate-300 mb-1">Look at your hand below, then choose who opens.</div>
+          <div class="text-xs text-slate-500 mb-3">The opener can play any tile (free choice).</div>
+          <div class="flex gap-3 justify-center">
+            <button class="btn btn-green px-5 py-2" onclick="playChooseStarter(0)">I'll open</button>
+            <button class="btn btn-blue px-5 py-2" onclick="playChooseStarter(2)">Partner opens</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function playChooseStarter(player) {
+      playStarterPending = false;
+      startPlayGame(liveHands, player, true);
     }
 
     function renderOpeningOverlay() {
@@ -4779,6 +4891,33 @@
           </div>`;
       }).join('');
 
+      // Play history from snapshots
+      const pColors = ['#60a5fa','#f87171','#a78bfa','#fbbf24'];
+      let historyHtml = '';
+      if (currentGame && currentGame.snapshots) {
+        const moves = [];
+        if (currentGame.autoTile && currentGame.autoPlayedBy !== undefined) {
+          moves.push(`<span style="color:${pColors[currentGame.autoPlayedBy]}">${pn(currentGame.autoPlayedBy)}</span> [${currentGame.autoTile.left}|${currentGame.autoTile.right}] opens`);
+        }
+        for (let s = 0; s < currentGame.snapshots.length && s <= currentStep; s++) {
+          const sn = currentGame.snapshots[s];
+          if (sn.action === 'play' && sn.player >= 0) {
+            const side = sn.side && sn.side !== 'first' ? sn.side : '';
+            moves.push(`<span style="color:${pColors[sn.player]}">${pn(sn.player)}</span> [${sn.tile.left}|${sn.tile.right}]${side ? ' ' + side : ''}`);
+          } else if (sn.action === 'pass' && sn.player >= 0) {
+            moves.push(`<span style="color:${pColors[sn.player]}">${pn(sn.player)}</span> passes`);
+          }
+        }
+        if (moves.length > 0) {
+          historyHtml = `<div class="bg-slate-900 rounded-lg p-2">
+            <div class="text-xs font-bold text-slate-400 mb-1">Play History</div>
+            <div class="text-xs space-y-0.5 max-h-[150px] overflow-y-auto">
+              ${moves.map((m, i) => `<div class="text-slate-300"><span class="text-slate-600 w-5 inline-block">#${i+1}</span> ${m}</div>`).join('')}
+            </div>
+          </div>`;
+        }
+      }
+
       return `
         <div class="space-y-2 flex-1 overflow-y-auto">
           ${thinkHtml}
@@ -4790,6 +4929,7 @@
             <div class="text-xs font-bold text-slate-400 mb-1">Player Cards</div>
             ${cards}
           </div>
+          ${historyHtml}
         </div>`;
     }
 
@@ -5328,6 +5468,7 @@
       playHint = null;
       playLastMove = null;
       playOpeningPending = null;
+      playStarterPending = false;
       playShowingDiffPicker = false;
       quizWaiting = false;
       quizResult = null;
