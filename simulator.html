@@ -3329,8 +3329,8 @@
     let proCache = {};
     let proRunning = false;
     let proProgress = '';
-    const PRO_MC_SIMS = 150;
-    const PRO_SAMPLES = 300;
+    const PRO_MC_SIMS = 50;
+    const PRO_SAMPLES = 100;
 
     // ========== MATCH EQUITY TABLE (3D with dobrada) ==========
     // ME3D[s1][s2][dobIdx] = P(team1 wins match | scores s1 vs s2, dobrada multiplier)
@@ -6283,20 +6283,32 @@
       }
 
       // --- Per-move flow metrics (OPP / PPP / ECV / Bait) ---
+      // Precompute per-deal suit bitmasks for O(1) lookups
+      const dealSuits = samples.map(deal => {
+        const s = Array.from({length: 4}, () => 0); // bitmask: bit v set if player has tile with v
+        const c = Array.from({length: 4}, () => new Uint8Array(7)); // count per suit
+        for (let p = 0; p < 4; p++) {
+          if (p === player) continue;
+          for (const t of deal[p]) {
+            s[p] |= (1 << t.left) | (1 << t.right);
+            c[p][t.left]++; if (t.left !== t.right) c[p][t.right]++;
+          }
+        }
+        return { s, c };
+      });
       const flowMetrics = [];
       if (mcResults && mcResults.length > 0) {
         for (const mc of mcResults) {
           const { newLeft, newRight } = applyMove(snap, mc.tile, mc.side);
+          const mask = (1 << newLeft) | (1 << newRight);
           let oppCount = 0, partnerCount = 0;
           let oppMob = 0, partnerMob = 0;
-          for (const deal of samples) {
-            const o1 = deal[opp1].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
-            const o2 = deal[opp2].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
-            const pc = deal[partner].some(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight);
-            if (o1 || o2) oppCount++;
-            if (pc) partnerCount++;
-            oppMob += deal[opp1].filter(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight).length / N;
-            partnerMob += deal[partner].filter(t => t.left === newLeft || t.right === newLeft || t.left === newRight || t.right === newRight).length / N;
+          for (let i = 0; i < N; i++) {
+            const ds = dealSuits[i];
+            if ((ds.s[opp1] & mask) || (ds.s[opp2] & mask)) oppCount++;
+            if (ds.s[partner] & mask) partnerCount++;
+            oppMob += (ds.c[opp1][newLeft] + ds.c[opp1][newRight]) / N;
+            partnerMob += (ds.c[partner][newLeft] + ds.c[partner][newRight]) / N;
           }
           const opp = oppCount / N;
           const ppp = partnerCount / N;
