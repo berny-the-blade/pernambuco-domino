@@ -2883,7 +2883,7 @@
       }
 
       const pending = options.filter(o => !o.done);
-      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide, mcMsgIdx); return; }
+      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap); return; }
 
       coachMCRunning = true;
       const BATCH = 10; // sims per option per batch
@@ -2925,14 +2925,14 @@
             opt.ci95 = opt.sims > 1 ? 1.96 * Math.sqrt(Math.max(0, variance) / opt.sims) : 0;
             opt.done = true;
           }
-          finishCoachMC(options, playerTile, playerSide, mcMsgIdx);
+          finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap);
         }
       }
 
       coachMCTimer = setTimeout(mcBatch, 10);
     }
 
-    function finishCoachMC(options, playerTile, playerSide, mcMsgIdx) {
+    function finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap) {
       coachMCRunning = false;
       coachMCTimer = null;
       // Sort by expected points
@@ -2962,10 +2962,15 @@
         lines.push(`\u2705 MC confirms: your play was the best! (+${mcPlayed.ep.toFixed(2)} EP)`);
       } else if (diff < 0.15) {
         lines.push(`\u2248 Very close to optimal (${diff.toFixed(2)} EP difference — within noise).`);
-      } else if (diff < 0.40) {
-        lines.push(`\u{1F4CA} Slight edge to [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} (+${diff.toFixed(2)} EP). Your play was fine.`);
       } else {
-        lines.push(`\u{1F4CA} [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} was stronger by ${diff.toFixed(2)} EP (${(mcBest.wr*100).toFixed(0)}% vs ${(mcPlayed.wr*100).toFixed(0)}% win rate).`);
+        const severity = diff < 0.40 ? 'Slight' : 'Clear';
+        lines.push(`\u{1F4CA} ${severity} edge to [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} (+${diff.toFixed(2)} EP, ${(mcBest.wr*100).toFixed(0)}% vs ${(mcPlayed.wr*100).toFixed(0)}% WR).`);
+      }
+
+      // Detailed strategic explanation when not best play
+      if (ranking > 1 && snap) {
+        const explanation = generateMCExplanation(snap, mcBest, mcPlayed, diff, options);
+        if (explanation) lines.push(explanation);
       }
 
       // Replace the "running..." message with final results
@@ -2976,6 +2981,104 @@
         addCoachMsg('deduction', resultText);
       }
       render();
+    }
+
+    function generateMCExplanation(snap, mcBest, mcPlayed, epDiff, allMCOptions) {
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const hand = snap.hands[0];
+      const knowledge = snap.knowledge;
+      const board = snap.board;
+      const bLen = board.length;
+      const reasons = [];
+
+      const bestT = mcBest.tile, bestS = mcBest.side;
+      const playT = mcPlayed.tile, playS = mcPlayed.side;
+
+      // Compute new board ends for each option
+      const bestNewEnd = bestS === 'left' ? (bestT.left === lE ? bestT.right : bestT.left) :
+                         bestS === 'right' ? (bestT.right === rE ? bestT.left : bestT.right) :
+                         bestT.right; // opening: right end
+      const bestKeptEnd = bestS === 'left' ? rE : bestS === 'right' ? lE : bestT.left;
+
+      const playNewEnd = playS === 'left' ? (playT.left === lE ? playT.right : playT.left) :
+                         playS === 'right' ? (playT.right === rE ? playT.left : playT.right) :
+                         playT.right;
+      const playKeptEnd = playS === 'left' ? rE : playS === 'right' ? lE : playT.left;
+
+      // 1. Suit control — count remaining hand tiles matching new board ends
+      const handAfterBest = hand.filter(t => t.id !== bestT.id);
+      const handAfterPlay = hand.filter(t => t.id !== playT.id);
+      const bestMatch = handAfterBest.filter(t => t.left === bestNewEnd || t.right === bestNewEnd || t.left === bestKeptEnd || t.right === bestKeptEnd).length;
+      const playMatch = handAfterPlay.filter(t => t.left === playNewEnd || t.right === playNewEnd || t.left === playKeptEnd || t.right === playKeptEnd).length;
+      if (bestMatch > playMatch) {
+        reasons.push(`<b>Suit control:</b> [${bestT.left}|${bestT.right}] leaves ${bestMatch} tiles matching the new board ends (${bestNewEnd},${bestKeptEnd}) vs only ${playMatch} for your play (${playNewEnd},${playKeptEnd}). More matching tiles = more options next turn.`);
+      }
+
+      // 2. Opponent blocking
+      const oppVoids = [1, 3].flatMap(p => [...knowledge.cantHave[p]]);
+      if (oppVoids.length > 0) {
+        const bestBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(bestNewEnd) || knowledge.cantHave[p].has(bestKeptEnd));
+        const playBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(playNewEnd) || knowledge.cantHave[p].has(playKeptEnd));
+        if (bestBlocksOpp.length > playBlocksOpp.length) {
+          const blocked = bestBlocksOpp.map(p => pn(p)).join(' & ');
+          reasons.push(`<b>Blocking:</b> [${bestT.left}|${bestT.right}] keeps board ends on numbers that ${blocked} can't play (void), forcing them to pass. Your play opens a number they can match.`);
+        }
+      }
+
+      // 3. Partner void avoidance
+      const partnerVoids = knowledge.cantHave[2];
+      if (partnerVoids.size > 0) {
+        const bestHurtsPartner = partnerVoids.has(bestNewEnd) && partnerVoids.has(bestKeptEnd);
+        const playHurtsPartner = partnerVoids.has(playNewEnd) && partnerVoids.has(playKeptEnd);
+        if (playHurtsPartner && !bestHurtsPartner) {
+          reasons.push(`<b>Partner support:</b> Your play puts both board ends on numbers your partner is void in — they'll be forced to pass. [${bestT.left}|${bestT.right}] keeps at least one end playable for partner.`);
+        }
+      }
+
+      // 4. Double management
+      if (playT.left === playT.right && bestT.left !== bestT.right) {
+        reasons.push(`<b>Double management:</b> Holding onto double [${playT.left}|${playT.right}] for now might be better — doubles are inflexible and can strand you later. [${bestT.left}|${bestT.right}] is more versatile.`);
+      }
+      if (bestT.left === bestT.right && playT.left !== playT.right) {
+        reasons.push(`<b>Clear double early:</b> [${bestT.left}|${bestT.right}] clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.`);
+      }
+
+      // 5. Go-out setup
+      if (handAfterBest.length <= 2) {
+        const lastTiles = handAfterBest;
+        const canGoOut = lastTiles.some(t => t.left === bestNewEnd || t.right === bestNewEnd || t.left === bestKeptEnd || t.right === bestKeptEnd);
+        const canGoOutPlay = handAfterPlay.some(t => t.left === playNewEnd || t.right === playNewEnd || t.left === playKeptEnd || t.right === playKeptEnd);
+        if (canGoOut && !canGoOutPlay) {
+          reasons.push(`<b>Go-out setup:</b> [${bestT.left}|${bestT.right}] sets up your remaining tile(s) to go out next turn. Your play strands your last tiles — they don't match the new board ends.`);
+        }
+      }
+
+      // 6. Pip weight (endgame)
+      if (hand.length <= 3) {
+        const bestPips = playT.left + playT.right;
+        const playPips = bestT.left + bestT.right;
+        if (bestPips > playPips + 3) {
+          reasons.push(`<b>Dump heavy tile:</b> [${bestT.left}|${bestT.right}] sheds ${bestPips} pips vs ${playPips} for your play. In case of a block, lower pip count wins.`);
+        }
+      }
+
+      if (reasons.length === 0) {
+        // Fallback: use heuristic reasons from smartAI
+        try {
+          const aiOptions = smartAI(hand, lE, rE, bLen, 0, knowledge, true);
+          const aiBest = aiOptions.find(o => o.tile.id === bestT.id);
+          const aiPlay = aiOptions.find(o => o.tile.id === playT.id);
+          if (aiBest && aiBest.reasons.length > 0) {
+            const playReasonSet = new Set(aiPlay ? aiPlay.reasons : []);
+            const diff = aiBest.reasons.filter(r => !playReasonSet.has(r));
+            if (diff.length > 0) {
+              reasons.push(`<b>Why better:</b> ${diff.slice(0, 2).join('; ')}.`);
+            }
+          }
+        } catch(e) {}
+      }
+
+      return reasons.length > 0 ? reasons.join('<br>') : null;
     }
 
     function toggleCoach() {
