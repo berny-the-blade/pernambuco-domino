@@ -2837,6 +2837,9 @@
 
       const playable = hand.filter(t => canPlay(t, lE, rE, board.length));
       if (playable.length <= 1) return; // no comparison needed
+      const mcMsgIdx = coachMessages.length;
+      addCoachMsg('deduction', `<b>MC Analysis running...</b> ${playable.length} options \u00D7 ${COACH_MC_SIMS} rollouts`);
+      render();
 
       // Build option list: each playable tile × each valid side
       const options = [];
@@ -2870,10 +2873,9 @@
       }
 
       const pending = options.filter(o => !o.done);
-      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide); return; }
+      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide, mcMsgIdx); return; }
 
       coachMCRunning = true;
-      let simsDone = 0;
       const BATCH = 10; // sims per option per batch
 
       function mcBatch() {
@@ -2891,11 +2893,16 @@
             } catch(e) { opt.sims = COACH_MC_SIMS; } // skip on error
           }
         }
-        simsDone += BATCH;
 
-        // Update progress in coach
         const totalNeeded = pending.length * COACH_MC_SIMS;
         const totalDone = pending.reduce((s, o) => s + o.sims, 0);
+
+        // Update progress message
+        if (coachMessages[mcMsgIdx]) {
+          const pct = Math.round(100 * totalDone / totalNeeded);
+          coachMessages[mcMsgIdx].text = `<b>MC Analysis running... ${pct}%</b> (${totalDone}/${totalNeeded} rollouts)`;
+          render();
+        }
 
         if (totalDone < totalNeeded) {
           coachMCTimer = setTimeout(mcBatch, 0);
@@ -2908,14 +2915,14 @@
             opt.ci95 = opt.sims > 1 ? 1.96 * Math.sqrt(Math.max(0, variance) / opt.sims) : 0;
             opt.done = true;
           }
-          finishCoachMC(options, playerTile, playerSide);
+          finishCoachMC(options, playerTile, playerSide, mcMsgIdx);
         }
       }
 
       coachMCTimer = setTimeout(mcBatch, 10);
     }
 
-    function finishCoachMC(options, playerTile, playerSide) {
+    function finishCoachMC(options, playerTile, playerSide, mcMsgIdx) {
       coachMCRunning = false;
       coachMCTimer = null;
       // Sort by expected points
@@ -2951,7 +2958,13 @@
         lines.push(`\u{1F4CA} [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} was stronger by ${diff.toFixed(2)} EP (${(mcBest.wr*100).toFixed(0)}% vs ${(mcPlayed.wr*100).toFixed(0)}% win rate).`);
       }
 
-      addCoachMsg('deduction', `<b>MC Analysis (${COACH_MC_SIMS} rollouts):</b> ${lines.join('<br>')}`);
+      // Replace the "running..." message with final results
+      const resultText = `<b>MC Analysis (${COACH_MC_SIMS} rollouts):</b><br>${lines.join('<br>')}`;
+      if (mcMsgIdx !== undefined && coachMessages[mcMsgIdx]) {
+        coachMessages[mcMsgIdx].text = resultText;
+      } else {
+        addCoachMsg('deduction', resultText);
+      }
       render();
     }
 
