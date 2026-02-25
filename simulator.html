@@ -6798,12 +6798,19 @@
     function runProForStep(stepIdx) {
       if (proCache[stepIdx]) { render(); return; }
       if (proRunning) return;
+
+      const snap = currentGame.snapshots[stepIdx];
+      const player = snap.currentPlayer;
+      if (player < 0 || player > 3 || !snap.hands[player] || snap.hands[player].length === 0) {
+        proCache[stepIdx] = { empty: true };
+        render();
+        return;
+      }
+
       proRunning = true;
       proProgress = 'Sampling...';
       render();
 
-      const snap = currentGame.snapshots[stepIdx];
-      const player = snap.currentPlayer;
       const hand = snap.hands[player];
       const knowledge = snap.knowledge;
       const handSizes = snap.hands.map(h => h.length);
@@ -6853,6 +6860,10 @@
         // Auto-trigger computation
         setTimeout(() => runProForStep(stepIdx), 50);
         return `<div class="p-4 text-center text-xs text-slate-500">Loading Pro Analytics...</div>`;
+      }
+
+      if (data.empty) {
+        return `<div class="p-4 text-center text-xs text-slate-500">No analytics for this position (game over or opening).<br>Use ◀ Back to navigate to a move.</div>`;
       }
 
       const player = snap.currentPlayer;
