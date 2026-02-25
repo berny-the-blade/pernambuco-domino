@@ -2832,7 +2832,7 @@
       coachMCRunning = false;
     }
 
-    function runCoachMC(snapBeforePlay, playerTile, playerSide) {
+    function runCoachMC(snapBeforePlay, playerTile, playerSide, heuristicMsgIdx) {
       // Run async MC evaluation on the position BEFORE user played
       // to get ground-truth expected points for all tile options
       stopCoachMC();
@@ -2883,7 +2883,7 @@
       }
 
       const pending = options.filter(o => !o.done);
-      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap); return; }
+      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap, heuristicMsgIdx); return; }
 
       coachMCRunning = true;
       const BATCH = 10; // sims per option per batch
@@ -2925,14 +2925,14 @@
             opt.ci95 = opt.sims > 1 ? 1.96 * Math.sqrt(Math.max(0, variance) / opt.sims) : 0;
             opt.done = true;
           }
-          finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap);
+          finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap, heuristicMsgIdx);
         }
       }
 
       coachMCTimer = setTimeout(mcBatch, 10);
     }
 
-    function finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap) {
+    function finishCoachMC(options, playerTile, playerSide, mcMsgIdx, snap, heuristicMsgIdx) {
       coachMCRunning = false;
       coachMCTimer = null;
       // Sort by expected points
@@ -2980,6 +2980,43 @@
       } else {
         addCoachMsg('deduction', resultText);
       }
+
+      // Rewrite the heuristic feedback message to match MC ground truth
+      if (heuristicMsgIdx !== undefined && coachMessages[heuristicMsgIdx]) {
+        const pSide = playerSide || '';
+        if (ranking === 1) {
+          // MC confirms user's play was best — get reasons from smartAI
+          let why = '';
+          try {
+            const aiOpts = smartAI(snap.hands[0], snap.leftEnd, snap.rightEnd, snap.board.length, 0, snap.knowledge, true);
+            const aiMatch = aiOpts.find(o => o.tile.id === playerTile.id);
+            if (aiMatch && aiMatch.reasons.length > 0) why = ' — ' + aiMatch.reasons.slice(0, 2).join('; ');
+          } catch(e) {}
+          coachMessages[heuristicMsgIdx].type = 'good';
+          coachMessages[heuristicMsgIdx].text = `\u2705 Best play! You played [${playerTile.left}|${playerTile.right}] ${pSide} (EP: ${mcPlayed.ep >= 0 ? '+' : ''}${mcPlayed.ep.toFixed(2)}, WR: ${(mcPlayed.wr*100).toFixed(0)}%)${why}.`;
+        } else if (diff < 0.15) {
+          coachMessages[heuristicMsgIdx].type = 'good';
+          coachMessages[heuristicMsgIdx].text = `\u2705 You played [${playerTile.left}|${playerTile.right}] ${pSide} — effectively optimal (only ${diff.toFixed(2)} EP from best, within noise).`;
+        } else {
+          const bestT = mcBest.tile;
+          // Get strategic reasons for the MC-best tile
+          let why = '';
+          try {
+            const aiOpts = smartAI(snap.hands[0], snap.leftEnd, snap.rightEnd, snap.board.length, 0, snap.knowledge, true);
+            const aiBest = aiOpts.find(o => o.tile.id === bestT.id);
+            const aiPlay = aiOpts.find(o => o.tile.id === playerTile.id);
+            const playSet = new Set(aiPlay ? aiPlay.reasons : []);
+            if (aiBest) {
+              const diffR = aiBest.reasons.filter(r => !playSet.has(r));
+              if (diffR.length > 0) why = ' — ' + diffR.slice(0, 2).join('; ');
+            }
+          } catch(e) {}
+          const severity = diff < 0.40 ? 'ok' : 'warn';
+          coachMessages[heuristicMsgIdx].type = severity;
+          coachMessages[heuristicMsgIdx].text = `You played [${playerTile.left}|${playerTile.right}] ${pSide} (EP: ${mcPlayed.ep >= 0 ? '+' : ''}${mcPlayed.ep.toFixed(2)}). MC-best: [${bestT.left}|${bestT.right}] ${mcBest.side || ''} (EP: ${mcBest.ep >= 0 ? '+' : ''}${mcBest.ep.toFixed(2)}, +${diff.toFixed(2)} better)${why}.`;
+        }
+      }
+
       render();
     }
 
@@ -3140,11 +3177,12 @@
       const score = chosen ? chosen.score : 0;
 
       if (coachEnabled) {
+        const heuristicMsgIdx = coachMessages.length;
         generateCoachOnYourPlay(tile, side, allOptions);
         // Capture pre-play snapshot for async MC evaluation
         const snapForMC = currentGame.snapshots[currentGame.snapshots.length - 1];
         recordLivePlay(0, tile, side, reasons, score, allOptions);
-        runCoachMC(snapForMC, tile, side);
+        runCoachMC(snapForMC, tile, side, heuristicMsgIdx);
       } else {
         recordLivePlay(0, tile, side, reasons, score, allOptions);
       }
