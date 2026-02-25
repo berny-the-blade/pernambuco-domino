@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Domino Pernambucano — Strategy Trainer</title>
+  <title>Dominó Pernambucano — Strategy Trainer</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -81,6 +81,227 @@
   <div id="app"></div>
 
   <script>
+    // ========== LANGUAGE / TRANSLATION ==========
+    let appLang = (() => { try { return localStorage.getItem('pernambuco_lang') || 'pt'; } catch(e) { return 'pt'; } })();
+
+    const TR = {
+      // Player names
+      you:        { en: 'You',       pt: 'Você' },
+      opp_left:   { en: 'Opp Left',  pt: 'Opon. Esq.' },
+      partner:    { en: 'Partner',   pt: 'Parceiro' },
+      opp_right:  { en: 'Opp Right', pt: 'Opon. Dir.' },
+      you_p0:     { en: 'You (P0)',  pt: 'Você (P0)' },
+      opp_left_p1:{ en: 'Opp Left (P1)', pt: 'Opon. Esq. (P1)' },
+      partner_p2: { en: 'Partner (P2)',   pt: 'Parceiro (P2)' },
+      opp_right_p3:{en: 'Opp Right (P3)', pt: 'Opon. Dir. (P3)' },
+      // Teams
+      t1: { en: 'T1', pt: 'T1' }, t2: { en: 'T2', pt: 'T2' },
+      // Main title
+      title:    { en: 'Domino Pernambucano', pt: 'Dominó Pernambucano' },
+      subtitle: { en: 'Strategy Trainer & Simulator', pt: 'Treinador de Estratégia & Simulador' },
+      tagline:  { en: 'Learn optimal play through AI reasoning, quizzes, and card tracking', pt: 'Aprenda a jogar de forma ideal com raciocínio de IA, quizzes e rastreamento de pedras' },
+      // Mode buttons
+      watch_ai:   { en: 'Watch AI Play', pt: 'Assistir IA Jogar' },
+      quiz_mode:  { en: 'Quiz Mode', pt: 'Modo Quiz' },
+      play_vs_ai: { en: 'Play vs AI', pt: 'Jogar contra IA' },
+      strat_puzzles:{ en: 'Strategy Puzzles', pt: 'Puzzles Estratégicos' },
+      opening_quiz:{ en: 'Opening Quiz', pt: 'Quiz de Abertura' },
+      deep_study: { en: 'Deep Study', pt: 'Estudo Profundo' },
+      pro_analytics:{ en: 'Pro Analytics', pt: 'Análise Pro' },
+      // Mode descriptions
+      watch_mode: { en: 'Watch Mode', pt: 'Modo Assistir' },
+      watch_desc: { en: 'Step through AI games with full reasoning for every move.', pt: 'Acompanhe jogos da IA com raciocínio completo para cada jogada.' },
+      quiz_desc:  { en: "Pick tiles at your turns. Get graded against the AI's optimal choice.", pt: 'Escolha pedras nos seus turnos. Receba nota comparada à jogada ideal da IA.' },
+      play_desc:  { en: 'Play real games vs AI with adjustable difficulty. Coach overlay narrates strategy live.', pt: 'Jogue partidas reais contra IA com dificuldade ajustável. Narração estratégica ao vivo.' },
+      puzzle_desc:{ en: 'Curated positions where many tiles look good but only one is perfect.', pt: 'Posições selecionadas onde várias pedras parecem boas, mas apenas uma é perfeita.' },
+      card_tracker:{ en: 'Card Tracker', pt: 'Rastreador de Pedras' },
+      tracker_desc:{ en: 'Visual grid showing which tiles each opponent could hold.', pt: 'Grade visual mostrando quais pedras cada oponente pode ter.' },
+      oq_desc:    { en: 'Practice whether to open or let partner open, validated by MC rollouts.', pt: 'Pratique se deve abrir ou deixar o parceiro abrir, validado por simulações MC.' },
+      ds_desc:    { en: 'MC evaluation, tile probabilities, and strategic analysis for every move.', pt: 'Avaliação MC, probabilidades de pedras e análise estratégica para cada jogada.' },
+      pa_desc:    { en: 'Quant-grade dashboard: OPP/PPP flow, trap radar, go-out threats, mistake classification.', pt: 'Painel profissional: fluxo OPP/PPP, radar de armadilhas, ameaças de batida, classificação de erros.' },
+      // Game controls
+      watch: { en: 'Watch', pt: 'Assistir' }, quiz: { en: 'Quiz', pt: 'Quiz' }, play: { en: 'Play', pt: 'Jogar' },
+      new_game: { en: 'New Game', pt: 'Novo Jogo' },
+      export_btn: { en: 'Export', pt: 'Exportar' }, import_btn: { en: 'Import', pt: 'Importar' },
+      puzzles: { en: 'Puzzles', pt: 'Puzzles' }, hint: { en: 'Hint', pt: 'Dica' }, pass: { en: 'Pass', pt: 'Passar' },
+      play_again: { en: 'Play Again', pt: 'Jogar Novamente' },
+      change_diff: { en: 'Change Difficulty', pt: 'Mudar Dificuldade' },
+      menu: { en: 'Menu', pt: 'Menu' }, back: { en: 'Back', pt: 'Voltar' },
+      start_game: { en: 'Start Game', pt: 'Iniciar Jogo' },
+      next: { en: 'Next', pt: 'Próximo' },
+      slow: { en: 'Slow', pt: 'Lento' }, med: { en: 'Med', pt: 'Médio' }, fast: { en: 'Fast', pt: 'Rápido' },
+      difficulty: { en: 'Difficulty', pt: 'Dificuldade' },
+      ok_continue: { en: 'OK, continue', pt: 'OK, continuar' },
+      pause: { en: 'Pause', pt: 'Pausar' }, auto: { en: 'Auto', pt: 'Auto' },
+      // Match
+      match: { en: 'Match', pt: 'Partida' },
+      match_won: { en: 'MATCH WON!', pt: 'PARTIDA GANHA!' },
+      match_lost: { en: 'MATCH LOST!', pt: 'PARTIDA PERDIDA!' },
+      you_and_partner: { en: 'You & Partner', pt: 'Você & Parceiro' },
+      opponents: { en: 'Opponents', pt: 'Oponentes' },
+      new_match: { en: 'New Match', pt: 'Nova Partida' },
+      back_to_menu: { en: 'Back to Menu', pt: 'Voltar ao Menu' },
+      first_to: { en: 'First to', pt: 'Primeiro a' },
+      points: { en: 'points', pt: 'pontos' },
+      buchuda: { en: 'BUCHUDA!', pt: 'BUCHUDA!' },
+      // Game outcome
+      you_win: { en: 'YOU WIN!', pt: 'VOCÊ GANHOU!' },
+      you_lose: { en: 'YOU LOSE!', pt: 'VOCÊ PERDEU!' },
+      tied: { en: 'TIED!', pt: 'EMPATE!' },
+      wins: { en: 'wins', pt: 'ganha' },
+      win_match: { en: 'win the match!', pt: 'ganharam a partida!' },
+      lowest_pips: { en: 'Lowest individual pip count wins', pt: 'Menor contagem individual de pontos ganha' },
+      // Turn indicators
+      your_turn: { en: 'YOUR TURN — Pick a tile to play', pt: 'SUA VEZ — Escolha uma pedra para jogar' },
+      you_opened_lbl: { en: 'YOU OPENED', pt: 'VOCÊ ABRIU' },
+      your_turn_short: { en: 'YOUR TURN', pt: 'SUA VEZ' },
+      thinking: { en: 'thinking...', pt: 'pensando...' },
+      passed_lbl: { en: 'PASSED!', pt: 'PASSOU!' },
+      you_passed: { en: 'YOU PASSED!', pt: 'VOCÊ PASSOU!' },
+      no_playable: { en: 'No playable tiles!', pt: 'Sem pedras jogáveis!' },
+      opened_lbl: { en: 'OPENED', pt: 'ABRIU' },
+      played_lbl: { en: 'PLAYED', pt: 'JOGOU' },
+      playing_lbl: { en: 'Playing', pt: 'Jogando' },
+      click_tile: { en: 'Click a tile to play it', pt: 'Clique numa pedra para jogá-la' },
+      // Tabs
+      tab_reasoning: { en: 'Reasoning', pt: 'Raciocínio' },
+      tab_tracker: { en: 'Tracker', pt: 'Rastreador' },
+      tab_coach: { en: 'Coach', pt: 'Treinador' },
+      tab_analysis: { en: 'Analysis', pt: 'Análise' },
+      tab_study: { en: 'Study', pt: 'Estudo' },
+      tab_pro: { en: 'Pro', pt: 'Pro' },
+      tab_stats: { en: 'Stats', pt: 'Estatísticas' },
+      tab_history: { en: 'History', pt: 'Histórico' },
+      tab_guide: { en: 'Guide', pt: 'Guia' },
+      // Difficulty picker
+      opp_strength: { en: 'Opponent Strength (P1 & P3)', pt: 'Força dos Oponentes (P1 & P3)' },
+      part_strength: { en: 'Partner Strength (P2)', pt: 'Força do Parceiro (P2)' },
+      ai_speed: { en: 'AI Speed', pt: 'Velocidade da IA' },
+      coach_mode: { en: 'Coach Mode', pt: 'Modo Treinador' },
+      coach_desc: { en: 'Real-time strategic narration as you play', pt: 'Narração estratégica em tempo real enquanto você joga' },
+      on: { en: 'ON', pt: 'LIGADO' }, off: { en: 'OFF', pt: 'DESLIGADO' },
+      beginner: { en: 'Beginner', pt: 'Iniciante' },
+      intermediate: { en: 'Intermediate', pt: 'Intermediário' },
+      advanced: { en: 'Advanced', pt: 'Avançado' },
+      expert: { en: 'Expert', pt: 'Especialista' },
+      beginner_d: { en: 'Nearly random', pt: 'Quase aleatório' },
+      intermediate_d: { en: 'Decent, mistakes', pt: 'Decente, com erros' },
+      advanced_d: { en: 'Strong, rare errors', pt: 'Forte, erros raros' },
+      expert_d: { en: 'Always optimal', pt: 'Sempre ideal' },
+      your_moves: { en: 'Your moves shape the game. Test your real skill.', pt: 'Suas jogadas definem o jogo. Teste sua habilidade real.' },
+      you_p0_desc: { en: 'You (P0) + AI Partner (P2) vs AI Opponents (P1 & P3)', pt: 'Você (P0) + Parceiro IA (P2) vs Oponentes IA (P1 & P3)' },
+      // Stats
+      perfect_rate: { en: 'Perfect Play Rate', pt: 'Taxa de Jogada Perfeita' },
+      perf_or_inacc: { en: 'Perfect or Inaccuracy', pt: 'Perfeita ou Imprecisão' },
+      avg_loss: { en: 'Avg Equity Loss (pts/move)', pt: 'Perda Média de Valor (pts/jogada)' },
+      expert_level: { en: 'Expert level', pt: 'Nível especialista' },
+      breakdown: { en: 'Breakdown', pt: 'Detalhamento' },
+      moves: { en: 'moves', pt: 'jogadas' }, games: { en: 'games', pt: 'jogos' },
+      perfect: { en: 'Perfect', pt: 'Perfeita' }, inaccuracy: { en: 'Inaccuracy', pt: 'Imprecisão' },
+      mistake: { en: 'Mistake', pt: 'Erro' }, blunder: { en: 'Blunder', pt: 'Erro Grave' },
+      recent_dec: { en: 'Recent Decisions', pt: 'Decisões Recentes' },
+      play_quiz_track: { en: 'Play quiz mode to track decisions', pt: 'Jogue o modo quiz para rastrear decisões' },
+      elo_rating: { en: 'Elo Rating', pt: 'Rating Elo' },
+      engine: { en: 'Engine', pt: 'Motor' },
+      rated_games: { en: 'rated games', pt: 'jogos avaliados' },
+      reset_stats: { en: 'Reset Stats', pt: 'Resetar Estatísticas' },
+      // History
+      no_games_rec: { en: 'No games recorded yet', pt: 'Nenhum jogo registrado ainda' },
+      games_saved: { en: 'Play vs AI games are automatically saved here', pt: 'Jogos contra IA são salvos automaticamente aqui' },
+      replay_game: { en: 'Replay This Game', pt: 'Reproduzir Este Jogo' },
+      // Opening decision
+      your_team_won: { en: 'Your team won!', pt: 'Sua equipe ganhou!' },
+      look_hand: { en: 'Look at your hand below, then choose who opens.', pt: 'Olhe suas pedras abaixo e escolha quem abre.' },
+      opener_free: { en: 'The opener can play any tile (free choice).', pt: 'Quem abre pode jogar qualquer pedra (escolha livre).' },
+      ill_open: { en: "I'll open", pt: 'Eu abro' },
+      partner_opens: { en: 'Partner opens', pt: 'Parceiro abre' },
+      you_open: { en: 'You open!', pt: 'Você abre!' },
+      highest_double: { en: 'was placed on the board.', pt: 'foi colocada na mesa.' },
+      // Board
+      empty_board: { en: 'Empty board', pt: 'Mesa vazia' },
+      left_end: { en: 'Left End', pt: 'Ponta Esq.' },
+      right_end: { en: 'Right End', pt: 'Ponta Dir.' },
+      left: { en: 'Left', pt: 'Esq.' }, right: { en: 'Right', pt: 'Dir.' },
+      result: { en: 'Result', pt: 'Resultado' },
+      removed: { en: 'Removed', pt: 'Removidas' },
+      tiles: { en: 'tiles', pt: 'pedras' },
+      pips: { en: 'pips', pt: 'pontos' },
+      move: { en: 'Move', pt: 'Jogada' },
+      // Side pick
+      which_side: { en: 'can play on both ends. Which side?', pt: 'pode jogar em ambas pontas. Qual lado?' },
+      // Keyboard
+      keyboard_help: { en: 'Keyboard: Arrow keys to navigate, N for new game, Space for next, P for auto-play', pt: 'Teclado: Setas para navegar, N para novo jogo, Espaço para próximo, P para auto-play' },
+      // Strategy guide
+      the_big_5:  { en: 'The Big 5 — Core Rules', pt: 'As 5 Regras — Fundamentais' },
+      the_next_5: { en: 'The Next 5 — Advanced', pt: 'As Próximas 5 — Avançadas' },
+      quick_check:{ en: 'Quick Decision Checklist', pt: 'Checklist Rápido' },
+      scoring_ref:{ en: 'Scoring Reference', pt: 'Referência de Pontuação' },
+      rule1_t: { en: 'Play doubles early', pt: 'Jogue carroças cedo' },
+      rule1_d: { en: 'Doubles only play on one number — they get stuck easily. Clear them first.', pt: 'Carroças jogam em apenas um número — travam fácil. Descarte-as primeiro.' },
+      rule2_t: { en: 'Track passes religiously', pt: 'Rastreie as passagens religiosamente' },
+      rule2_d: { en: "When someone passes, remember what numbers they can't play. Use this info to block.", pt: 'Quando alguém passa, lembre quais números não pode jogar. Use essa informação para bloquear.' },
+      rule3_t: { en: 'Feed your partner', pt: 'Alimente seu parceiro' },
+      rule3_d: { en: "Leave end numbers your partner has played — they likely have more of that suit.", pt: 'Deixe números que seu parceiro jogou — provavelmente tem mais daquele naipe.' },
+      rule4_t: { en: 'Block opponents who passed', pt: 'Bloqueie oponentes que passaram' },
+      rule4_d: { en: "If an opponent passed on 4, keep 4 on the board ends.", pt: 'Se um oponente passou no 4, mantenha 4 nas pontas da mesa.' },
+      rule5_t: { en: 'Control the suit', pt: 'Controle o naipe' },
+      rule5_d: { en: 'If you have 3+ tiles of one number, play to put that number on both ends.', pt: 'Se tem 3+ pedras de um número, jogue para colocar esse número nas duas pontas.' },
+      rule6_t: { en: 'Dump heavy tiles when losing', pt: 'Descarte pedras pesadas quando perdendo' },
+      rule6_d: { en: 'If opponents might go out soon, dump your highest pip tiles.', pt: 'Se oponentes podem bater logo, descarte suas pedras de maior valor.' },
+      rule7_t: { en: "Read partner's opening tile", pt: 'Leia a pedra de abertura do parceiro' },
+      rule7_d: { en: "Partner's first play signals their strongest suit.", pt: 'A primeira jogada do parceiro indica o naipe mais forte.' },
+      rule8_t: { en: 'Keep options open', pt: 'Mantenha opções abertas' },
+      rule8_d: { en: 'Choose tiles that connect to many numbers you still hold.', pt: 'Escolha pedras que conectam a muitos números que você ainda tem.' },
+      rule9_t: { en: 'Count the tiles', pt: 'Conte as pedras' },
+      rule9_d: { en: 'Each number appears on 7 tiles. Track how many of each number are accounted for.', pt: 'Cada número aparece em 7 pedras. Rastreie quantas de cada número já foram jogadas.' },
+      rule10_t: { en: 'Score the bonus points', pt: 'Marque os pontos bônus' },
+      rule10_d: { en: 'Normal win = 1pt. Carroça = 2pts. Lá-e-lô = 3pts. Cruzada = 4pts.', pt: 'Batida normal = 1pt. Carroça = 2pts. Lá-e-lô = 3pts. Cruzada = 4pts.' },
+      // Opening quiz
+      oq_title:   { en: 'Opening Decision Quiz', pt: 'Quiz de Decisão de Abertura' },
+      oq_question:{ en: 'Should you open or let your partner open?', pt: 'Você deve abrir ou deixar o parceiro abrir?' },
+      ill_open_btn:{ en: "I'll Open", pt: 'Eu Abro' },
+      part_opens_btn:{ en: 'Partner Opens', pt: 'Parceiro Abre' },
+      correct:    { en: 'CORRECT!', pt: 'CORRETO!' },
+      wrong:      { en: 'WRONG!', pt: 'ERRADO!' },
+      close_call: { en: 'CLOSE CALL — Both OK!', pt: 'POR POUCO — Ambos OK!' },
+      next_hand:  { en: 'Next Hand', pt: 'Próxima Mão' },
+      score:      { en: 'Score', pt: 'Pontos' },
+      streak:     { en: 'Streak', pt: 'Sequência' },
+      best:       { en: 'Best', pt: 'Melhor' },
+      // Misc
+      accuracy: { en: 'Your accuracy', pt: 'Sua precisão' },
+      perfect_over: { en: 'perfect over', pt: 'perfeitas em' },
+      mc_on: { en: 'MC: ON', pt: 'MC: LIGADO' }, mc_off: { en: 'MC: OFF', pt: 'MC: DESLIGADO' },
+      dobrada: { en: 'DOBRADA', pt: 'DOBRADA' },
+      applied: { en: 'applied!', pt: 'aplicada!' },
+      next_dobrada: { en: 'Next game is DOBRADA', pt: 'Próximo jogo é DOBRADA' },
+      coach: { en: 'Coach', pt: 'Treinador' },
+      quiz_mode_pick: { en: 'QUIZ MODE — Pick your tile at P0\'s turns', pt: 'MODO QUIZ — Escolha sua pedra nos turnos de P0' },
+      puzzle_pick: { en: 'PUZZLE — Pick the best tile to play', pt: 'PUZZLE — Escolha a melhor pedra para jogar' },
+      opened_with: { en: 'opened with', pt: 'abriu com' },
+      highest_dbl: { en: 'highest double', pt: 'carroça mais alta' },
+      played_on: { en: 'played', pt: 'jogou' },
+      on_word: { en: 'on', pt: 'no' },
+      passed_word: { en: 'passed', pt: 'passou' },
+      // Coach win probability
+      win_prob: { en: 'Win Probability', pt: 'Probabilidade de Vitória' },
+      your_team: { en: 'Your Team', pt: 'Sua Equipe' },
+      opp_team: { en: 'Opponents', pt: 'Oponentes' },
+    };
+
+    function _t(key) { const e = TR[key]; return e ? (e[appLang] || e.en || key) : key; }
+
+    function setAppLang(lang) {
+      appLang = lang;
+      try { localStorage.setItem('pernambuco_lang', lang); } catch(e) {}
+      // Update mutable name arrays
+      PLAYER_NAMES[0] = _t('you'); PLAYER_NAMES[1] = _t('opp_left');
+      PLAYER_NAMES[2] = _t('partner'); PLAYER_NAMES[3] = _t('opp_right');
+      PLAYER_NAMES_FULL[0] = _t('you_p0'); PLAYER_NAMES_FULL[1] = _t('opp_left_p1');
+      PLAYER_NAMES_FULL[2] = _t('partner_p2'); PLAYER_NAMES_FULL[3] = _t('opp_right_p3');
+      render();
+    }
+
     // ========== DOMINO DOT PATTERNS ==========
     const DOT_POS = {
       0: [],
@@ -1686,8 +1907,8 @@
     }
 
     // Global player name mapping
-    const PLAYER_NAMES = ['You', 'Opp Left', 'Partner', 'Opp Right'];
-    const PLAYER_NAMES_FULL = ['You (P0)', 'Opp Left (P1)', 'Partner (P2)', 'Opp Right (P3)'];
+    const PLAYER_NAMES = [_t('you'), _t('opp_left'), _t('partner'), _t('opp_right')];
+    const PLAYER_NAMES_FULL = [_t('you_p0'), _t('opp_left_p1'), _t('partner_p2'), _t('opp_right_p3')];
     function pn(idx) { return PLAYER_NAMES[idx] || `P${idx}`; }
 
     // Knowledge tracker
@@ -3228,6 +3449,46 @@
       </div>`;
     }
 
+    function computeCoachWinProb() {
+      // Match equity from score table
+      const me = getMatchEquity3D(matchScore[0], matchScore[1], scoreMultiplier);
+      // In-game adjustment based on tile advantage
+      let gameAdj = 0;
+      if (liveHands && liveKnowledge) {
+        const myTiles = liveHands[0] ? liveHands[0].length : 0;
+        const partnerTiles = liveHands[2] ? liveHands[2].length : 0;
+        const opp1Tiles = liveHands[1] ? liveHands[1].length : 0;
+        const opp3Tiles = liveHands[3] ? liveHands[3].length : 0;
+        const teamTiles = myTiles + partnerTiles;
+        const oppTiles = opp1Tiles + opp3Tiles;
+        if (teamTiles + oppTiles > 0) {
+          gameAdj = (oppTiles - teamTiles) / (teamTiles + oppTiles) * 0.15;
+        }
+        // Void advantage: count how many more voids opponents have vs us
+        const myVoids = liveKnowledge.cantHave[0].size + liveKnowledge.cantHave[2].size;
+        const oppVoids = liveKnowledge.cantHave[1].size + liveKnowledge.cantHave[3].size;
+        gameAdj += (oppVoids - myVoids) * 0.02;
+      }
+      return Math.max(0.01, Math.min(0.99, me + gameAdj));
+    }
+
+    function renderWinProbBar() {
+      const wp = computeCoachWinProb();
+      const pct = Math.round(wp * 100);
+      const oppPct = 100 - pct;
+      const barColor = pct >= 60 ? '#22c55e' : pct >= 45 ? '#eab308' : '#ef4444';
+      return `<div class="px-3 py-1.5 border-b border-indigo-500/20">
+        <div class="flex items-center justify-between text-[10px] mb-0.5">
+          <span class="text-blue-400 font-bold">${_t('your_team')} ${pct}%</span>
+          <span class="text-xs text-slate-500">${_t('win_prob')}</span>
+          <span class="text-red-400 font-bold">${_t('opp_team')} ${oppPct}%</span>
+        </div>
+        <div class="h-2 rounded-full bg-red-900/60 overflow-hidden">
+          <div style="width:${pct}%;background:${barColor};height:100%;border-radius:9999px;transition:width 0.5s"></div>
+        </div>
+      </div>`;
+    }
+
     function renderCoachOverlay() {
       if (!coachEnabled || gameMode !== 'play' || coachMessages.length === 0) return '';
       const icons = { observation: '\u{1F440}', think: '\u{1F9E0}', good: '\u2705', ok: '\u{1F44D}', warn: '\u26A0\uFE0F', deduction: '\u{1F4DD}' };
@@ -3236,15 +3497,16 @@
       const recent = [...coachMessages].reverse();
       if (coachCollapsed) {
         return `<div class="mt-2 bg-slate-900/80 rounded-lg px-3 py-1.5 border border-slate-600 cursor-pointer flex items-center justify-between" onclick="toggleCoachCollapse()">
-          <span class="text-xs text-slate-400">\u{1F9E0} Coach <span class="text-slate-600">(${coachMessages.length} messages)</span></span>
+          <span class="text-xs text-slate-400">\u{1F9E0} ${_t('coach')} <span class="text-slate-600">(${coachMessages.length})</span></span>
           <span class="text-xs text-slate-500">\u25B2</span>
         </div>`;
       }
       return `<div class="mt-2 bg-slate-900/90 rounded-lg border border-indigo-500/40 overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1 bg-indigo-950/60 border-b border-indigo-500/20 cursor-pointer" onclick="toggleCoachCollapse()">
-          <span class="text-xs font-bold text-indigo-300">\u{1F9E0} Coach</span>
+          <span class="text-xs font-bold text-indigo-300">\u{1F9E0} ${_t('coach')}</span>
           <span class="text-xs text-slate-500">\u25BC</span>
         </div>
+        ${!currentGame?.outcome ? renderWinProbBar() : ''}
         <div style="max-height:240px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5">
           ${recent.map(m => {
             const [pLabel, pColor] = phaseBadge[m.phase] || ['','#475569'];
@@ -3826,12 +4088,13 @@
     let playStarterPending = false; // true when waiting for user to choose who opens
     let playMatchWinner = null;     // 0 or 1 — team that won the match, null if no match just ended
     let playDifficulty = { opponents: 0.75, partner: 0.75 };
-    const DIFFICULTY_PRESETS = {
-      beginner:     { value: 0.25, label: 'Beginner',     desc: 'Nearly random', color: '#22c55e' },
-      intermediate: { value: 0.50, label: 'Intermediate',  desc: 'Decent, makes mistakes', color: '#eab308' },
-      advanced:     { value: 0.75, label: 'Advanced',      desc: 'Strong, rare errors',  color: '#f97316' },
-      expert:       { value: 1.00, label: 'Expert',        desc: 'Always optimal',   color: '#ef4444' }
-    };
+    function getDifficultyPresets() { return {
+      beginner:     { value: 0.25, label: _t('beginner'),     desc: _t('beginner_d'), color: '#22c55e' },
+      intermediate: { value: 0.50, label: _t('intermediate'),  desc: _t('intermediate_d'), color: '#eab308' },
+      advanced:     { value: 0.75, label: _t('advanced'),      desc: _t('advanced_d'),  color: '#f97316' },
+      expert:       { value: 1.00, label: _t('expert'),        desc: _t('expert_d'),   color: '#ef4444' }
+    }; }
+    const DIFFICULTY_PRESETS = getDifficultyPresets();
     let playAIDelay = 1.5; // seconds per AI move (user-configurable)
     let playShowingDiffPicker = false;
     let playHint = null; // { tileId, side, reasons } — AI recommendation shown on request
@@ -4560,21 +4823,22 @@
         <div class="max-w-7xl mx-auto p-3">
           <!-- Header -->
           <div class="flex items-center justify-between mb-3">
-            <h1 class="text-lg font-bold text-emerald-400">Domino Pernambucano
-              <span class="text-sm text-slate-400 font-normal ml-2">Match: <span class="text-blue-400 font-bold">${matchScore[0]}</span>-<span class="text-red-400 font-bold">${matchScore[1]}</span>/6</span>
-              ${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">DOBRADA x${currentGame.outcome.multiplier}</span>` : ''}
+            <h1 class="text-lg font-bold text-emerald-400">${_t('title')}
+              <span class="text-sm text-slate-400 font-normal ml-2">${_t('match')}: <span class="text-blue-400 font-bold">${matchScore[0]}</span>-<span class="text-red-400 font-bold">${matchScore[1]}</span>/6</span>
+              ${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">${_t('dobrada')} x${currentGame.outcome.multiplier}</span>` : ''}
             </h1>
             <div class="flex gap-2 items-center">
               <div class="flex gap-1 mr-2">
-                <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">Watch</button>
-                <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">Quiz</button>
-                <button class="btn text-xs ${gameMode === 'play' ? '' : 'btn-gray'}" style="${gameMode === 'play' ? 'background:#eab308;color:#0f172a' : ''}" onclick="showDifficultyPicker()">Play</button>
-                ${gameMode !== 'play' ? `<button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation — slower but much smarter">${deepAnalysis ? 'MC: ON' : 'MC: OFF'}</button>` : ''}
+                <button class="btn text-xs ${gameMode === 'watch' ? 'btn-green' : 'btn-gray'}" onclick="setMode('watch')">${_t('watch')}</button>
+                <button class="btn text-xs ${gameMode === 'quiz' ? 'btn-purple' : 'btn-gray'}" onclick="setMode('quiz')">${_t('quiz')}</button>
+                <button class="btn text-xs ${gameMode === 'play' ? '' : 'btn-gray'}" style="${gameMode === 'play' ? 'background:#eab308;color:#0f172a' : ''}" onclick="showDifficultyPicker()">${_t('play')}</button>
+                ${gameMode !== 'play' ? `<button class="btn text-xs ${deepAnalysis ? 'btn-blue' : 'btn-gray'}" onclick="toggleDeepAnalysis()" title="Monte Carlo simulation">${deepAnalysis ? _t('mc_on') : _t('mc_off')}</button>` : ''}
               </div>
-              <button class="btn btn-yellow text-sm" onclick="${gameMode === 'play' ? 'startPlayGame()' : 'newGame()'}">${scoreMultiplier > 1 ? `New Game (x${scoreMultiplier})` : 'New Game'}</button>
-              <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export game as JSONL">Export</button>
-              <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL game">Import<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
-              ${!puzzleMode ? `<button class="btn text-xs" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Puzzles</button>` : ''}
+              <button class="btn btn-yellow text-sm" onclick="${gameMode === 'play' ? 'startPlayGame()' : 'newGame()'}">${scoreMultiplier > 1 ? `${_t('new_game')} (x${scoreMultiplier})` : _t('new_game')}</button>
+              <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export JSONL">${_t('export_btn')}</button>
+              <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL">${_t('import_btn')}<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
+              ${!puzzleMode ? `<button class="btn text-xs" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">${_t('puzzles')}</button>` : ''}
+              <button class="btn text-xs btn-gray" onclick="setAppLang(appLang==='en'?'pt':'en')" style="min-width:40px">${appLang === 'en' ? '🇧🇷' : '🇺🇸'}</button>
             </div>
           </div>
 
@@ -4599,7 +4863,10 @@
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
                 <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[280px] relative overflow-auto" id="board-area">
-                  <div class="board-snake" id="board-snake">
+                  ${renderScoringDial(matchScore[0], 0, 'top')}
+                  ${renderScoringDial(matchScore[1], 1, 'top')}
+                  ${renderRemovedTiles()}
+                  <div class="board-snake" id="board-snake" style="padding-bottom:32px">
                     ${renderBoard(snap)}
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
@@ -4625,55 +4892,55 @@
               <!-- Controls -->
               <div class="bg-slate-800 rounded-xl p-3 mt-2 flex items-center gap-3 flex-wrap">
                 ${puzzleMode ? `
-                <span class="text-xs text-amber-400 font-bold pulse">PUZZLE — Pick the best tile to play</span>
+                <span class="text-xs text-amber-400 font-bold pulse">${_t('puzzle_pick')}</span>
                 ` : gameMode === 'play' ? `
                 ${currentGame.outcome ? `
                 <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
-                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
-                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1?'disabled':''}>Next &rsaquo;</button>
+                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; ${_t('back')}</button>
+                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1?'disabled':''}>${_t('next')} &rsaquo;</button>
                 <button class="btn btn-gray text-sm" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>&raquo;</button>
                 <div class="mx-1 text-slate-600">|</div>
-                <button class="btn text-sm" style="background:#eab308;color:#0f172a" onclick="startPlayGame()">Play Again</button>
-                <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">Difficulty</button>
+                <button class="btn text-sm" style="background:#eab308;color:#0f172a" onclick="startPlayGame()">${_t('play_again')}</button>
+                <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">${_t('difficulty')}</button>
                 ` : `
                 ${playWaiting ? `
-                  <span class="text-xs text-yellow-400 font-bold pulse">YOUR TURN — Pick a tile to play</span>
+                  <span class="text-xs text-yellow-400 font-bold pulse">${_t('your_turn')}</span>
                   ${playLastMove ? `<span class="text-xs text-slate-400 ml-2 move-announce">${(() => {
                     const m = playLastMove;
                     const name = PLAYER_NAMES[m.player];
                     const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][m.player];
-                    if (m.pass) return '<span style="color:'+color+'">'+name+'</span> passed';
-                    if (m.opening) return '<span style="color:'+color+'">You</span> opened with ['+m.tile.left+'|'+m.tile.right+'] (highest double)';
-                    return '<span style="color:'+color+'">'+name+'</span> played ['+m.tile.left+'|'+m.tile.right+'] on <b>'+(m.side||'open')+'</b>';
+                    if (m.pass) return '<span style="color:'+color+'">'+name+'</span> '+_t('passed_word');
+                    if (m.opening) return '<span style="color:'+color+'">'+_t('you')+'</span> '+_t('opened_with')+' ['+m.tile.left+'|'+m.tile.right+'] ('+_t('highest_dbl')+')';
+                    return '<span style="color:'+color+'">'+name+'</span> '+_t('played_on')+' ['+m.tile.left+'|'+m.tile.right+'] '+_t('on_word')+' <b>'+(m.side||'open')+'</b>';
                   })()}</span>` : ''}
                 ` : `
                   <span class="text-xs text-slate-400">${(() => {
-                    if (playLastMove && playLastMove.opening) return '<span style="color:#60a5fa;font-weight:bold">You</span> opened with ['+playLastMove.tile.left+'|'+playLastMove.tile.right+'] (highest double)';
+                    if (playLastMove && playLastMove.opening) return '<span style="color:#60a5fa;font-weight:bold">'+_t('you')+'</span> '+_t('opened_with')+' ['+playLastMove.tile.left+'|'+playLastMove.tile.right+'] ('+_t('highest_dbl')+')';
                     const name = PLAYER_NAMES[liveCurrentPlayer] || 'AI';
                     const color = ['#60a5fa','#f87171','#a78bfa','#fbbf24'][liveCurrentPlayer] || '#94a3b8';
-                    return '<span style="color:'+color+';font-weight:bold">'+name+'</span> thinking...';
+                    return '<span style="color:'+color+';font-weight:bold">'+name+'</span> '+_t('thinking');
                   })()}</span>
                 `}
                 `}
                 ` : `
                 <button class="btn btn-gray text-sm" onclick="goTo(0)" ${currentStep===0?'disabled':''}>&laquo;</button>
-                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; Back</button>
-                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1 || quizWaiting?'disabled':''}>Next &rsaquo;</button>
+                <button class="btn btn-gray text-sm" onclick="stepBack()" ${currentStep===0?'disabled':''}>&lsaquo; ${_t('back')}</button>
+                <button class="btn btn-green text-sm" onclick="handleNext()" ${currentStep>=total-1 || quizWaiting?'disabled':''}>${_t('next')} &rsaquo;</button>
                 <button class="btn btn-gray text-sm" onclick="goTo(${total-1})" ${currentStep>=total-1?'disabled':''}>&raquo;</button>
                 <div class="mx-1 text-slate-600">|</div>
                 ${gameMode === 'watch' ? `
                 <button class="btn text-sm ${autoPlayTimer ? 'btn-yellow' : 'btn-blue'}" onclick="toggleAutoPlay()">
-                  ${autoPlayTimer ? 'Pause' : 'Auto'}
+                  ${autoPlayTimer ? _t('pause') : _t('auto')}
                 </button>
                 <div class="flex gap-1">
-                  ${[2000, 1000, 500].map(s => `<button class="btn btn-gray speed-btn text-xs ${autoPlaySpeed===s?'active':''}" onclick="setSpeed(${s})">${s===2000?'Slow':s===1000?'Med':'Fast'}</button>`).join('')}
+                  ${[2000, 1000, 500].map(s => `<button class="btn btn-gray speed-btn text-xs ${autoPlaySpeed===s?'active':''}" onclick="setSpeed(${s})">${s===2000?_t('slow'):s===1000?_t('med'):_t('fast')}</button>`).join('')}
                 </div>` : `
-                <span class="text-xs text-purple-400 font-bold pulse">QUIZ MODE — Pick your tile at P0's turns</span>
+                <span class="text-xs text-purple-400 font-bold pulse">${_t('quiz_mode_pick')}</span>
                 `}
                 `}
                 <div class="ml-auto flex items-center gap-2 text-xs">
-                  ${gameMode === 'play' ? `<button class="px-2 py-0.5 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">\u{1F9E0} Coach ${coachEnabled ? 'ON' : 'OFF'}</button>` : `<span style="color:#60a5fa">&#9632;You</span><span style="color:#f87171">&#9632;OL</span><span style="color:#a78bfa">&#9632;Ptr</span><span style="color:#fbbf24">&#9632;OR</span>`}
-                  <span class="text-slate-400">Move <span class="text-white font-bold">${snap.move}</span>/${currentGame.snapshots[total-1].move}
+                  ${gameMode === 'play' ? `<button class="px-2 py-0.5 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">\u{1F9E0} ${_t('coach')} ${coachEnabled ? _t('on') : _t('off')}</button>` : `<span style="color:#60a5fa">&#9632;${_t('you')}</span><span style="color:#f87171">&#9632;OL</span><span style="color:#a78bfa">&#9632;Ptr</span><span style="color:#fbbf24">&#9632;OR</span>`}
+                  <span class="text-slate-400">${_t('move')} <span class="text-white font-bold">${snap.move}</span>/${currentGame.snapshots[total-1].move}
                   (${currentStep+1}/${total})</span>
                 </div>
               </div>
@@ -4681,15 +4948,15 @@
               <!-- Board ends -->
               <div class="flex justify-center gap-4 mt-2">
                 <div class="bg-slate-800 rounded-lg px-3 py-1.5 text-center">
-                  <div class="text-xs text-slate-400">Left</div>
+                  <div class="text-xs text-slate-400">${_t('left')}</div>
                   <div class="text-xl font-bold ${snap.leftEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.leftEnd ?? '-'}</div>
                 </div>
                 <div class="bg-slate-800 rounded-lg px-3 py-1.5 text-center">
-                  <div class="text-xs text-slate-400">Right</div>
+                  <div class="text-xs text-slate-400">${_t('right')}</div>
                   <div class="text-xl font-bold ${snap.rightEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.rightEnd ?? '-'}</div>
                 </div>
                 ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-3 py-1.5 text-center border border-emerald-500">
-                  <div class="text-xs text-emerald-300">Result</div>
+                  <div class="text-xs text-emerald-300">${_t('result')}</div>
                   <div class="text-sm font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt${snap.outcome.multiplier > 1 ? ' DOB' : ''})` : ''}</div>
                   ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">${pn(snap.outcome.winner)} (${pTeams[snap.outcome.winner]})</div>` : ''}
                 </div>` : ''}
@@ -4701,15 +4968,15 @@
               <div class="bg-slate-800 rounded-xl p-3 h-full flex flex-col">
                 <!-- Tabs -->
                 <div class="flex gap-1 mb-2 flex-wrap">
-                  <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">Reasoning</div>
-                  <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">Tracker</div>
-                  <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">Coach</div>
-                  <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">Analysis</div>
-                  <div class="tab ${rightPanelTab === 'study' ? 'active' : ''}" onclick="setTab('study')" style="${rightPanelTab === 'study' ? 'border-color:#818cf8;color:#818cf8' : ''}">Study</div>
-                  <div class="tab ${rightPanelTab === 'pro' ? 'active' : ''}" onclick="setTab('pro')" style="${rightPanelTab === 'pro' ? 'border-color:#06b6d4;color:#06b6d4' : ''}">Pro</div>
-                  <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">Stats</div>
-                  <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">History</div>
-                  <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">Guide</div>
+                  <div class="tab ${rightPanelTab === 'reasoning' ? 'active' : ''}" onclick="setTab('reasoning')">${_t('tab_reasoning')}</div>
+                  <div class="tab ${rightPanelTab === 'probability' ? 'active' : ''}" onclick="setTab('probability')">${_t('tab_tracker')}</div>
+                  <div class="tab ${rightPanelTab === 'coach' ? 'active' : ''}" onclick="setTab('coach')">${_t('tab_coach')}</div>
+                  <div class="tab ${rightPanelTab === 'analysis' ? 'active' : ''}" onclick="setTab('analysis')">${_t('tab_analysis')}</div>
+                  <div class="tab ${rightPanelTab === 'study' ? 'active' : ''}" onclick="setTab('study')" style="${rightPanelTab === 'study' ? 'border-color:#818cf8;color:#818cf8' : ''}">${_t('tab_study')}</div>
+                  <div class="tab ${rightPanelTab === 'pro' ? 'active' : ''}" onclick="setTab('pro')" style="${rightPanelTab === 'pro' ? 'border-color:#06b6d4;color:#06b6d4' : ''}">${_t('tab_pro')}</div>
+                  <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">${_t('tab_stats')}</div>
+                  <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">${_t('tab_history')}</div>
+                  <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">${_t('tab_guide')}</div>
                 </div>
 
                 ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
@@ -4740,14 +5007,14 @@
     function renderOutcomeOverlay(snap, pTeams) {
       const o = snap.outcome;
       const mult = o.multiplier || 1;
-      const dobradaTag = mult > 1 ? `<div class="text-xs text-orange-400 mt-1">DOBRADA x${mult} applied!</div>` : '';
-      const nextDobrada = o.type === 'tie' ? `<div class="text-xs text-orange-300 mt-1">Next game is DOBRADA (x${scoreMultiplier} points)!</div>` : '';
+      const dobradaTag = mult > 1 ? `<div class="text-xs text-orange-400 mt-1">${_t('dobrada')} x${mult} ${_t('applied')}</div>` : '';
+      const nextDobrada = o.type === 'tie' ? `<div class="text-xs text-orange-300 mt-1">${_t('next_dobrada')} (x${scoreMultiplier} ${_t('points')})!</div>` : '';
       const isMyTeamWin = o.winner !== undefined && o.winner % 2 === 0;
       const playButtons = gameMode === 'play' ? `
         <div class="mt-3 flex gap-2 justify-center flex-wrap">
-          <button class="btn text-sm" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="startPlayGame()">Play Again</button>
-          <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">Change Difficulty</button>
-          <button class="btn btn-gray text-sm" onclick="gameMode='watch';currentGame=null;render();">Menu</button>
+          <button class="btn text-sm" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="startPlayGame()">${_t('play_again')}</button>
+          <button class="btn btn-gray text-sm" onclick="showDifficultyPicker()">${_t('change_diff')}</button>
+          <button class="btn btn-gray text-sm" onclick="gameMode='watch';currentGame=null;render();">${_t('menu')}</button>
         </div>
       ` : '';
 
@@ -4767,17 +5034,17 @@
               return `<span class="${isMin ? 'text-emerald-400 font-bold' : 'text-slate-400'}"><span style="color:${pColors[v.player]}">${pn(v.player)}</span> ${v.pips}p${isMin ? ' ★' : ''}</span>`;
             }).join('')}
           </div>
-          <div class="text-slate-500 mt-1">Lowest individual pip count wins</div>
+          <div class="text-slate-500 mt-1">${_t('lowest_pips')}</div>
         </div>`;
       }
 
       return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
         <div class="text-center">
-          <div class="text-3xl font-bold ${isMyTeamWin ? 'text-emerald-400' : o.type === 'tie' ? 'text-yellow-400' : 'text-red-400'} mb-1">${gameMode === 'play' ? (isMyTeamWin ? 'YOU WIN!' : o.type === 'tie' ? 'TIED!' : 'YOU LOSE!') : (o.winType || o.type.toUpperCase())}</div>
+          <div class="text-3xl font-bold ${isMyTeamWin ? 'text-emerald-400' : o.type === 'tie' ? 'text-yellow-400' : 'text-red-400'} mb-1">${gameMode === 'play' ? (isMyTeamWin ? _t('you_win') : o.type === 'tie' ? _t('tied') : _t('you_lose')) : (o.winType || o.type.toUpperCase())}</div>
           <div class="text-sm text-slate-300 mb-1">${o.winType || o.type.toUpperCase()}</div>
           ${o.winner !== undefined ?
-            `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) wins ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
-            `<div class="text-lg text-yellow-400">Tied!</div>${nextDobrada}`}
+            `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) ${_t('wins')} ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
+            `<div class="text-lg text-yellow-400">${_t('tied')}</div>${nextDobrada}`}
           ${pipBreakdown}
           ${playButtons}
         </div>
@@ -4787,12 +5054,12 @@
     function renderPlayStarterChoice() {
       return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
         <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-emerald-500 shadow-xl">
-          <div class="text-lg font-bold text-emerald-400 mb-2">Your team won!</div>
-          <div class="text-sm text-slate-300 mb-1">Look at your hand below, then choose who opens.</div>
-          <div class="text-xs text-slate-500 mb-3">The opener can play any tile (free choice).</div>
+          <div class="text-lg font-bold text-emerald-400 mb-2">${_t('your_team_won')}</div>
+          <div class="text-sm text-slate-300 mb-1">${_t('look_hand')}</div>
+          <div class="text-xs text-slate-500 mb-3">${_t('opener_free')}</div>
           <div class="flex gap-3 justify-center">
-            <button class="btn btn-green px-5 py-2" onclick="playChooseStarter(0)">I'll open</button>
-            <button class="btn btn-blue px-5 py-2" onclick="playChooseStarter(2)">Partner opens</button>
+            <button class="btn btn-green px-5 py-2" onclick="playChooseStarter(0)">${_t('ill_open')}</button>
+            <button class="btn btn-blue px-5 py-2" onclick="playChooseStarter(2)">${_t('partner_opens')}</button>
           </div>
         </div>
       </div>`;
@@ -4809,13 +5076,13 @@
       return `<div class="absolute inset-0 bg-black/80 rounded-xl flex items-center justify-center z-30">
         <div class="text-center bg-slate-800 rounded-xl p-6 border-2 ${isMyWin ? 'border-emerald-400' : 'border-red-400'} shadow-2xl" style="min-width:280px">
           <div class="text-4xl mb-2">${isMyWin ? '🏆' : '💀'}</div>
-          <div class="text-3xl font-bold ${isMyWin ? 'text-emerald-400' : 'text-red-400'} mb-2">${isMyWin ? 'MATCH WON!' : 'MATCH LOST!'}</div>
-          <div class="text-lg text-white mb-1">${isMyWin ? 'You & Partner' : 'Opponents'} win the match!</div>
+          <div class="text-3xl font-bold ${isMyWin ? 'text-emerald-400' : 'text-red-400'} mb-2">${isMyWin ? _t('match_won') : _t('match_lost')}${(() => { const s = matchScore; return (s[0]===6&&s[1]===0)||(s[1]===6&&s[0]===0) ? ' '+_t('buchuda') : ''; })()}</div>
+          <div class="text-lg text-white mb-1">${isMyWin ? _t('you_and_partner') : _t('opponents')} ${_t('win_match')}</div>
           <div class="text-2xl text-white font-bold mb-3">${finalScore}</div>
-          <div class="text-xs text-slate-400 mb-4">First to ${MATCH_TARGET} points</div>
+          <div class="text-xs text-slate-400 mb-4">${_t('first_to')} ${MATCH_TARGET} ${_t('points')}</div>
           <div class="flex gap-2 justify-center flex-wrap">
-            <button class="btn text-sm px-5 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissMatchWinner(true)">New Match</button>
-            <button class="btn btn-gray text-sm px-4 py-2" onclick="dismissMatchWinner(false)">Back to Menu</button>
+            <button class="btn text-sm px-5 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissMatchWinner(true)">${_t('new_match')}</button>
+            <button class="btn btn-gray text-sm px-4 py-2" onclick="dismissMatchWinner(false)">${_t('back_to_menu')}</button>
           </div>
         </div>
       </div>`;
@@ -4839,10 +5106,10 @@
       const t = playOpeningPending.tile;
       return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
         <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-yellow-500 shadow-xl">
-          <div class="text-lg font-bold text-yellow-400 mb-2">You open!</div>
-          <div class="text-sm text-slate-300 mb-3">Your highest double <span class="text-white font-bold">[${t.left}|${t.right}]</span> was placed on the board.</div>
+          <div class="text-lg font-bold text-yellow-400 mb-2">${_t('you_open')}</div>
+          <div class="text-sm text-slate-300 mb-3">${_t('highest_dbl')} <span class="text-white font-bold">[${t.left}|${t.right}]</span> ${_t('highest_double')}</div>
           <div class="flex justify-center mb-3">${tileHTML(t, '', 'v', '', '')}</div>
-          <button class="btn text-sm px-6 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissOpeningOverlay()">OK, continue</button>
+          <button class="btn text-sm px-6 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissOpeningOverlay()">${_t('ok_continue')}</button>
         </div>
       </div>`;
     }
@@ -4850,11 +5117,11 @@
     function renderStarterChoice() {
       return `<div class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center z-20">
         <div class="text-center bg-slate-800 rounded-xl p-5 border-2 border-emerald-500 shadow-xl">
-          <div class="text-lg font-bold text-emerald-400 mb-1">Your team won!</div>
-          <div class="text-sm text-slate-300 mb-2">Look at your new hand below, then choose who opens:</div>
+          <div class="text-lg font-bold text-emerald-400 mb-1">${_t('your_team_won')}</div>
+          <div class="text-sm text-slate-300 mb-2">${_t('look_hand')}</div>
           <div class="flex gap-3 justify-center">
-            <button class="btn btn-green px-5 py-2" onclick="chooseStarter(0)">You (P0)</button>
-            <button class="btn btn-blue px-5 py-2" onclick="chooseStarter(2)">Partner (P2)</button>
+            <button class="btn btn-green px-5 py-2" onclick="chooseStarter(0)">${_t('ill_open')}</button>
+            <button class="btn btn-blue px-5 py-2" onclick="chooseStarter(2)">${_t('partner_opens')}</button>
           </div>
         </div>
       </div>`;
@@ -4874,10 +5141,10 @@
         <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 ${justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700'} relative">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold" style="color:${colors[playerIdx%2]}">${names[playerIdx]} (${teams[playerIdx]})</span>
-            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : justPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'OPENED' : justPlayed ? 'PLAYED' : isActive ? 'PLAYING' : `${hand.length} tiles`}${snap.outcome && hand.length > 0 ? ` (${pips} pips)` : ''}</span>
+            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : justPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? _t('opened_lbl') : justPlayed ? _t('played_lbl') : isActive ? _t('playing_lbl') : `${hand.length} ${_t('tiles')}`}${snap.outcome && hand.length > 0 ? ` (${pips} ${_t('pips')})` : ''}</span>
           </div>
-          ${justPassed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-red-400 font-black text-2xl animate-pulse drop-shadow-lg" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">PASSED!</span></div>` : ''}
-          ${autoPlayed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-yellow-400 font-black text-lg drop-shadow-lg" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">[${currentGame.autoTile.left}|${currentGame.autoTile.right}] OPENED</span></div>` : ''}
+          ${justPassed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-red-400 font-black text-2xl animate-pulse drop-shadow-lg" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">${_t('passed_lbl')}</span></div>` : ''}
+          ${autoPlayed ? `<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="text-yellow-400 font-black text-lg drop-shadow-lg" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">[${currentGame.autoTile.left}|${currentGame.autoTile.right}] ${_t('opened_lbl')}</span></div>` : ''}
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[50px]">
             ${revealHand
               ? hand.map(t => tileHTML(t, '', 'v', '', '')).join('')
@@ -4927,29 +5194,29 @@
         <div class="player-area bg-slate-800 rounded-xl p-2.5 border-2 relative ${justPassed ? 'border-red-500' : autoPlayed ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700'}">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-bold" style="color:${colors[0]}">${names[0]} (${teams[0]})</span>
-            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? 'YOU OPENED' : isActive ? 'YOUR TURN' : `${hand.length} tiles`}</span>
+            <span class="text-xs ${autoPlayed ? 'text-yellow-400 font-bold' : isActive ? 'text-emerald-400 font-bold' : 'text-slate-500'}">${autoPlayed ? _t('you_opened_lbl') : isActive ? _t('your_turn_short') : `${hand.length} ${_t('tiles')}`}</span>
           </div>
-          ${justPassed ? `<div class="text-center mb-1"><span class="text-red-400 font-black text-lg animate-pulse" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">YOU PASSED!</span></div>` : ''}
-          ${autoPlayed ? `<div class="text-center mb-1"><span class="text-yellow-400 font-bold text-sm" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">You opened with [${currentGame.autoTile.left}|${currentGame.autoTile.right}]</span></div>` : ''}
+          ${justPassed ? `<div class="text-center mb-1"><span class="text-red-400 font-black text-lg animate-pulse" style="text-shadow: 0 0 12px rgba(248,113,113,0.6)">${_t('you_passed')}</span></div>` : ''}
+          ${autoPlayed ? `<div class="text-center mb-1"><span class="text-yellow-400 font-bold text-sm" style="text-shadow: 0 0 10px rgba(250,204,21,0.5)">${_t('you')} ${_t('opened_with')} [${currentGame.autoTile.left}|${currentGame.autoTile.right}]</span></div>` : ''}
           <div class="flex flex-wrap gap-1.5 justify-center min-h-[72px]">
             ${hand.map(t => tileHTML(t, '', 'v', getTileCls(t), getTileClick(t))).join('')}
           </div>
           ${quizWaiting && !quizSidePick ? (() => {
             const hasPlayable = hand.some(t => canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length));
             return hasPlayable
-              ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">Click a tile to play it</span></div>`
-              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
+              ? `<div class="text-center mt-1"><span class="text-xs text-purple-400 pulse font-bold">${_t('click_tile')}</span></div>`
+              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">${_t('pass')}</button><div class="text-xs text-red-400 mt-1">${_t('no_playable')}</div></div>`;
           })() : ''}
           ${playWaiting && gameMode === 'play' && !playSidePick ? (() => {
             const hasPlayable = hand.some(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length));
-            const hintBtn = `<button class="btn text-xs px-3 py-0.5 ml-2" style="background:#6366f1;color:#fff" onclick="showPlayHint()">Hint</button>`;
+            const hintBtn = `<button class="btn text-xs px-3 py-0.5 ml-2" style="background:#6366f1;color:#fff" onclick="showPlayHint()">${_t('hint')}</button>`;
             const hintDisplay = playHint ? `<div class="text-center mt-1 bg-indigo-950 rounded px-2 py-1 border border-indigo-500">
-              <span class="text-xs text-indigo-300">${playHint.tileId ? `AI suggests: <b>[${playHint.tileId}] ${playHint.side}</b>` : 'Pass'}</span>
+              <span class="text-xs text-indigo-300">${playHint.tileId ? `AI: <b>[${playHint.tileId}] ${playHint.side}</b>` : _t('pass')}</span>
               ${playHint.reasons.length ? `<div class="text-xs text-indigo-400 mt-0.5">${playHint.reasons.map(r => '- ' + r).join('<br>')}</div>` : ''}
             </div>` : '';
             return hasPlayable
-              ? `<div class="text-center mt-1"><span class="text-xs text-yellow-400 pulse font-bold">Click a tile to play it</span>${!playHint ? hintBtn : ''}</div>${hintDisplay}`
-              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="playPass()">Pass</button><div class="text-xs text-red-400 mt-1">No playable tiles!</div></div>`;
+              ? `<div class="text-center mt-1"><span class="text-xs text-yellow-400 pulse font-bold">${_t('click_tile')}</span>${!playHint ? hintBtn : ''}</div>${hintDisplay}`
+              : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="playPass()">${_t('pass')}</button><div class="text-xs text-red-400 mt-1">${_t('no_playable')}</div></div>`;
           })() : ''}
           ${quizSidePick ? renderSidePickOverlay() : ''}
           ${playSidePick ? renderPlaySidePickOverlay() : ''}
@@ -4960,10 +5227,10 @@
     function renderSidePickOverlay() {
       const t = quizSidePick.tile;
       return `<div class="text-center mt-2 bg-slate-900 rounded-lg p-2 border border-purple-500">
-        <div class="text-xs text-purple-300 mb-1">[${t.left}|${t.right}] can play on both ends. Which side?</div>
+        <div class="text-xs text-purple-300 mb-1">[${t.left}|${t.right}] ${_t('which_side')}</div>
         <div class="flex justify-center gap-3">
-          <button class="side-pick-btn bg-blue-600 text-white" onclick="quizPickSide('left')">Left End</button>
-          <button class="side-pick-btn bg-red-600 text-white" onclick="quizPickSide('right')">Right End</button>
+          <button class="side-pick-btn bg-blue-600 text-white" onclick="quizPickSide('left')">${_t('left_end')}</button>
+          <button class="side-pick-btn bg-red-600 text-white" onclick="quizPickSide('right')">${_t('right_end')}</button>
         </div>
       </div>`;
     }
@@ -5187,10 +5454,10 @@
       const pips = hand.reduce((s, t) => s + t.left + t.right, 0);
 
       const borderCls = justPassed ? 'border-red-500' : highlight ? 'border-yellow-500' : isActive ? 'active-turn border-emerald-500' : 'border-slate-700';
-      const statusText = autoPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">OPENED</div>`
-        : justPassed ? `<div class="text-xs text-red-400 text-center mt-1 font-bold animate-pulse">PASSED!</div>`
-        : justPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">PLAYED</div>`
-        : isActive ? '<div class="text-xs text-emerald-400 text-center mt-1 font-bold">Playing</div>' : '';
+      const statusText = autoPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">${_t('opened_lbl')}</div>`
+        : justPassed ? `<div class="text-xs text-red-400 text-center mt-1 font-bold animate-pulse">${_t('passed_lbl')}</div>`
+        : justPlayed ? `<div class="text-xs text-yellow-400 text-center mt-1 font-bold">${_t('played_lbl')}</div>`
+        : isActive ? `<div class="text-xs text-emerald-400 text-center mt-1 font-bold">${_t('playing_lbl')}</div>` : '';
 
       return `
         <div class="player-area bg-slate-800 rounded-xl p-2 border-2 h-full flex flex-col ${borderCls}">
@@ -5205,9 +5472,67 @@
         </div>`;
     }
 
+    // ========== SCORING DIALS (fan-shaped, like real Pernambuco board) ==========
+    function renderScoringDial(teamScore, teamIdx, position) {
+      // SVG semicircular dial showing scores 0-6 with pointer
+      const score = Math.min(teamScore, 6);
+      const r = 32; // radius
+      const cx = 38, cy = 38; // center
+      const color = teamIdx === 0 ? '#3b82f6' : '#ef4444';
+      const bgColor = teamIdx === 0 ? 'rgba(59,130,246,0.15)' : 'rgba(239,68,68,0.15)';
+      const label = teamIdx === 0 ? 'T1' : 'T2';
+      // Fan from -90deg to +90deg (semicircle pointing up for top, down for bottom)
+      const isTop = position === 'top';
+      const startAngle = isTop ? Math.PI : 0; // top dial: fan pointing down, bottom: fan pointing up
+      const endAngle = isTop ? 2 * Math.PI : Math.PI;
+
+      let ticks = '';
+      for (let i = 0; i <= 6; i++) {
+        const frac = i / 6;
+        const angle = startAngle + frac * (endAngle - startAngle);
+        const x1 = cx + (r - 6) * Math.cos(angle);
+        const y1 = cy + (r - 6) * Math.sin(angle);
+        const x2 = cx + r * Math.cos(angle);
+        const y2 = cy + r * Math.sin(angle);
+        const tx = cx + (r + 8) * Math.cos(angle);
+        const ty = cy + (r + 8) * Math.sin(angle);
+        const isActive = i <= score;
+        const isCurrent = i === score;
+        ticks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${isActive ? color : '#475569'}" stroke-width="${isCurrent ? 3 : 1.5}" />`;
+        ticks += `<text x="${tx}" y="${ty}" fill="${isCurrent ? '#fff' : isActive ? color : '#64748b'}" font-size="${isCurrent ? 10 : 8}" font-weight="${isCurrent ? 700 : 400}" text-anchor="middle" dominant-baseline="central">${i}</text>`;
+      }
+      // Pointer arc showing filled portion
+      const pointerAngle = startAngle + (score / 6) * (endAngle - startAngle);
+      const px = cx + (r - 12) * Math.cos(pointerAngle);
+      const py = cy + (r - 12) * Math.sin(pointerAngle);
+
+      // Arc path for filled portion
+      const arcStart = startAngle;
+      const arcEnd = pointerAngle;
+      const sx = cx + (r - 3) * Math.cos(arcStart);
+      const sy = cy + (r - 3) * Math.sin(arcStart);
+      const ex = cx + (r - 3) * Math.cos(arcEnd);
+      const ey = cy + (r - 3) * Math.sin(arcEnd);
+      const largeArc = (arcEnd - arcStart) > Math.PI ? 1 : 0;
+      const arcPath = score > 0 ? `<path d="M${sx},${sy} A${r-3},${r-3} 0 ${largeArc} 1 ${ex},${ey}" fill="none" stroke="${color}" stroke-width="3" opacity="0.6" />` : '';
+
+      return `<svg width="76" height="52" viewBox="0 0 76 52" style="position:absolute;${position==='top'?'top:2px':'bottom:2px'};${teamIdx===0?'left:2px':'right:2px'};opacity:0.85;pointer-events:none">
+        ${arcPath}${ticks}
+        <circle cx="${px}" cy="${py}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1" />
+        <text x="${cx}" y="${isTop ? cy + 12 : cy - 8}" fill="${color}" font-size="8" font-weight="700" text-anchor="middle" opacity="0.7">${label}</text>
+      </svg>`;
+    }
+
+    // ========== FACE-DOWN REMOVED TILES ==========
+    function renderRemovedTiles() {
+      return `<div style="position:absolute;bottom:4px;left:50%;transform:translateX(-50%);display:flex;gap:2px;opacity:0.5" title="${_t('removed')} (4 ${_t('tiles')})">
+        ${[0,1,2,3].map(() => `<div style="width:16px;height:28px;border-radius:3px;background:linear-gradient(135deg,#1e3a5f,#0f2847);border:1px solid #334155;box-shadow:inset 0 1px 2px rgba(0,0,0,0.3)"></div>`).join('')}
+      </div>`;
+    }
+
     function renderBoard(snap) {
       if (!snap.board || snap.board.length === 0)
-        return '<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">Empty board</div>';
+        return `<div class="text-green-700 text-sm" style="display:flex;align-items:center;justify-content:center;height:100%">${_t('empty_board')}</div>`;
 
       // Build tile→player map from snapshot history
       const tilePlayerMap = {};
@@ -5255,7 +5580,7 @@
       const RB = endBadge(snap.rightEnd);
 
       const PLAYER_CLS = ['board-tile-p0', 'board-tile-p1', 'board-tile-p2', 'board-tile-p3'];
-      const PLAYER_LABELS = ['You', 'Opp Left', 'Partner', 'Opp Right'];
+      const PLAYER_LABELS = PLAYER_NAMES;
       const playGameOver = gameMode === 'play' && snap.outcome;
       const showBorders = gameMode !== 'play' || playGameOver; // no borders during live play, show after game over
 
@@ -7948,12 +8273,12 @@
       return `
         <div class="flex items-center justify-center min-h-screen">
           <div class="text-center max-w-lg">
-            <h1 class="text-3xl font-bold text-yellow-400 mb-2">Play vs AI</h1>
-            <p class="text-slate-400 mb-1">You (P0) + AI Partner (P2) vs AI Opponents (P1 & P3)</p>
-            <p class="text-slate-500 text-xs mb-6">Your moves shape the game. Test your real skill.</p>
+            <h1 class="text-3xl font-bold text-yellow-400 mb-2">${_t('play_vs_ai')}</h1>
+            <p class="text-slate-400 mb-1">${_t('you_p0_desc')}</p>
+            <p class="text-slate-500 text-xs mb-6">${_t('your_moves')}</p>
 
             <div class="bg-slate-800 rounded-xl p-5 mb-4 text-left">
-              <div class="text-sm font-bold text-red-400 mb-2">Opponent Strength (P1 & P3)</div>
+              <div class="text-sm font-bold text-red-400 mb-2">${_t('opp_strength')}</div>
               <div class="flex gap-2 mb-4">
                 ${presets.map(([key, p]) => `
                   <button class="btn text-xs flex-1 ${currentOpp === key ? 'font-bold ring-2 ring-white' : 'btn-gray'}"
@@ -7964,7 +8289,7 @@
                 `).join('')}
               </div>
 
-              <div class="text-sm font-bold text-blue-400 mb-2">Partner Strength (P2)</div>
+              <div class="text-sm font-bold text-blue-400 mb-2">${_t('part_strength')}</div>
               <div class="flex gap-2 mb-3">
                 ${presets.map(([key, p]) => `
                   <button class="btn text-xs flex-1 ${currentPart === key ? 'font-bold ring-2 ring-white' : 'btn-gray'}"
@@ -7975,33 +8300,33 @@
                 `).join('')}
               </div>
 
-              <div class="text-sm font-bold text-emerald-400 mb-2 mt-1">AI Speed</div>
+              <div class="text-sm font-bold text-emerald-400 mb-2 mt-1">${_t('ai_speed')}</div>
               <div class="flex items-center gap-3 mb-3">
-                <span class="text-xs text-slate-400 w-10">Fast</span>
+                <span class="text-xs text-slate-400 w-10">${_t('fast')}</span>
                 <input type="range" min="0.3" max="5" step="0.1" value="${playAIDelay}"
                        oninput="setPlayAIDelay(parseFloat(this.value))"
                        class="flex-1 h-2 accent-emerald-500 cursor-pointer">
-                <span class="text-xs text-slate-400 w-10 text-right">Slow</span>
+                <span class="text-xs text-slate-400 w-10 text-right">${_t('slow')}</span>
                 <span class="text-sm font-mono text-emerald-400 w-12 text-right">${playAIDelay.toFixed(1)}s</span>
               </div>
 
-              <div class="text-sm font-bold text-indigo-400 mb-2 mt-1">\u{1F9E0} Coach Mode</div>
+              <div class="text-sm font-bold text-indigo-400 mb-2 mt-1">\u{1F9E0} ${_t('coach_mode')}</div>
               <div class="flex items-center gap-3 mb-3">
-                <span class="text-xs text-slate-400">Real-time strategic narration as you play</span>
-                <button class="ml-auto px-3 py-1 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">${coachEnabled ? 'ON' : 'OFF'}</button>
+                <span class="text-xs text-slate-400">${_t('coach_desc')}</span>
+                <button class="ml-auto px-3 py-1 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">${coachEnabled ? _t('on') : _t('off')}</button>
               </div>
 
               <div class="text-xs text-slate-500 mt-2">
-                <strong>Beginner</strong>: Nearly random &middot;
-                <strong>Intermediate</strong>: Decent, mistakes &middot;
-                <strong>Advanced</strong>: Strong, rare errors &middot;
-                <strong>Expert</strong>: Always optimal
+                <strong>${_t('beginner')}</strong>: ${_t('beginner_d')} &middot;
+                <strong>${_t('intermediate')}</strong>: ${_t('intermediate_d')} &middot;
+                <strong>${_t('advanced')}</strong>: ${_t('advanced_d')} &middot;
+                <strong>${_t('expert')}</strong>: ${_t('expert_d')}
               </div>
             </div>
 
             <div class="flex gap-3 justify-center">
-              <button class="btn text-lg px-8 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="confirmStartPlay()">Start Game</button>
-              <button class="btn btn-gray text-lg px-6 py-3" onclick="cancelDiffPicker()">Back</button>
+              <button class="btn text-lg px-8 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="confirmStartPlay()">${_t('start_game')}</button>
+              <button class="btn btn-gray text-lg px-6 py-3" onclick="cancelDiffPicker()">${_t('back')}</button>
             </div>
           </div>
         </div>`;
@@ -8039,58 +8364,61 @@
       return `
         <div class="flex items-center justify-center min-h-screen">
           <div class="text-center max-w-lg">
-            <h1 class="text-4xl font-bold text-emerald-400 mb-3">Domino Pernambucano</h1>
-            <p class="text-slate-400 mb-1">Strategy Trainer & Simulator</p>
-            <p class="text-sm text-slate-500 mb-6">Learn optimal play through AI reasoning, quizzes, and card tracking</p>
+            <div class="flex justify-end mb-2">
+              <button class="btn btn-gray text-sm px-4 py-1" onclick="setAppLang(appLang==='en'?'pt':'en')">${appLang === 'en' ? '🇧🇷 Português' : '🇺🇸 English'}</button>
+            </div>
+            <h1 class="text-4xl font-bold text-emerald-400 mb-3">${_t('title')}</h1>
+            <p class="text-slate-400 mb-1">${_t('subtitle')}</p>
+            <p class="text-sm text-slate-500 mb-6">${_t('tagline')}</p>
             <div class="flex gap-4 justify-center flex-wrap mb-6">
-              <button class="btn btn-green text-lg px-6 py-3" onclick="setMode('watch'); newGame();">Watch AI Play</button>
-              <button class="btn btn-purple text-lg px-6 py-3" onclick="setMode('quiz'); newGame();">Quiz Mode</button>
-              <button class="btn text-lg px-6 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="showDifficultyPicker();">Play vs AI</button>
-              <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">Strategy Puzzles</button>
-              <button class="btn text-lg px-6 py-3" style="background:#06b6d4;color:#0f172a;font-weight:bold" onclick="startOpeningQuiz();">Opening Quiz</button>
-              <button class="btn text-lg px-6 py-3" style="background:#818cf8;color:white;font-weight:bold" onclick="startDeepStudy();">Deep Study</button>
-              <button class="btn text-lg px-6 py-3" style="background:#0891b2;color:white;font-weight:bold" onclick="startProAnalytics();">Pro Analytics</button>
+              <button class="btn btn-green text-lg px-6 py-3" onclick="setMode('watch'); newGame();">${_t('watch_ai')}</button>
+              <button class="btn btn-purple text-lg px-6 py-3" onclick="setMode('quiz'); newGame();">${_t('quiz_mode')}</button>
+              <button class="btn text-lg px-6 py-3" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="showDifficultyPicker();">${_t('play_vs_ai')}</button>
+              <button class="btn text-lg px-6 py-3" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">${_t('strat_puzzles')}</button>
+              <button class="btn text-lg px-6 py-3" style="background:#06b6d4;color:#0f172a;font-weight:bold" onclick="startOpeningQuiz();">${_t('opening_quiz')}</button>
+              <button class="btn text-lg px-6 py-3" style="background:#818cf8;color:white;font-weight:bold" onclick="startDeepStudy();">${_t('deep_study')}</button>
+              <button class="btn text-lg px-6 py-3" style="background:#0891b2;color:white;font-weight:bold" onclick="startProAnalytics();">${_t('pro_analytics')}</button>
             </div>
             <div class="grid grid-cols-4 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
-                <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
+                <div class="text-emerald-400 font-bold text-sm mb-1">${_t('watch_mode')}</div>
+                <div class="text-xs text-slate-400">${_t('watch_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-purple-400 font-bold text-sm mb-1">Quiz Mode</div>
-                <div class="text-xs text-slate-400">Pick tiles at your turns. Get graded against the AI's optimal choice.</div>
+                <div class="text-purple-400 font-bold text-sm mb-1">${_t('quiz_mode')}</div>
+                <div class="text-xs text-slate-400">${_t('quiz_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-yellow-400 font-bold text-sm mb-1">Play vs AI</div>
-                <div class="text-xs text-slate-400">Play real games vs AI with adjustable difficulty. Coach overlay narrates strategy live.</div>
+                <div class="text-yellow-400 font-bold text-sm mb-1">${_t('play_vs_ai')}</div>
+                <div class="text-xs text-slate-400">${_t('play_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-amber-400 font-bold text-sm mb-1">Strategy Puzzles</div>
-                <div class="text-xs text-slate-400">Curated positions where many tiles look good but only one is perfect.</div>
+                <div class="text-amber-400 font-bold text-sm mb-1">${_t('strat_puzzles')}</div>
+                <div class="text-xs text-slate-400">${_t('puzzle_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-blue-400 font-bold text-sm mb-1">Card Tracker</div>
-                <div class="text-xs text-slate-400">Visual grid showing which tiles each opponent could hold.</div>
+                <div class="text-blue-400 font-bold text-sm mb-1">${_t('card_tracker')}</div>
+                <div class="text-xs text-slate-400">${_t('tracker_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-cyan-400 font-bold text-sm mb-1">Opening Quiz</div>
-                <div class="text-xs text-slate-400">Practice whether to open or let partner open, validated by MC rollouts.</div>
+                <div class="text-cyan-400 font-bold text-sm mb-1">${_t('opening_quiz')}</div>
+                <div class="text-xs text-slate-400">${_t('oq_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-indigo-400 font-bold text-sm mb-1">Deep Study</div>
-                <div class="text-xs text-slate-400">MC evaluation, tile probabilities, and strategic analysis for every move.</div>
+                <div class="text-indigo-400 font-bold text-sm mb-1">${_t('deep_study')}</div>
+                <div class="text-xs text-slate-400">${_t('ds_desc')}</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
-                <div class="text-cyan-400 font-bold text-sm mb-1">Pro Analytics</div>
-                <div class="text-xs text-slate-400">Quant-grade dashboard: OPP/PPP flow, trap radar, go-out threats, mistake classification.</div>
+                <div class="text-cyan-400 font-bold text-sm mb-1">${_t('pro_analytics')}</div>
+                <div class="text-xs text-slate-400">${_t('pa_desc')}</div>
               </div>
             </div>
             ${hasStats ? `
             <div class="bg-slate-800 rounded-lg p-3 inline-block">
-              <div class="text-xs text-slate-400">Your accuracy: <span class="text-emerald-400 font-bold">${(stats.optimalMoves / stats.totalMoves * 100).toFixed(1)}%</span> perfect over ${stats.totalMoves} moves</div>
+              <div class="text-xs text-slate-400">${_t('accuracy')}: <span class="text-emerald-400 font-bold">${(stats.optimalMoves / stats.totalMoves * 100).toFixed(1)}%</span> ${_t('perfect_over')} ${stats.totalMoves} ${_t('moves')}</div>
             </div>` : ''}
             <div class="mt-4 text-xs text-slate-600">
-              Keyboard: Arrow keys to navigate, N for new game, Space for next, P for auto-play
+              ${_t('keyboard_help')}
             </div>
           </div>
         </div>`;
