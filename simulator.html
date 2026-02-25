@@ -2213,6 +2213,7 @@
       playStarterPending = false;
       playMatchWinner = null;
       coachMessages = [];
+      stopCoachMC();
       mcResults = null;
       quizWaiting = false;
       quizResult = null;
@@ -2583,6 +2584,7 @@
 
     function stopPlayAI() {
       if (playAITimer) { clearTimeout(playAITimer); playAITimer = null; }
+      stopCoachMC();
     }
 
     // ========== COACH OVERLAY ENGINE ==========
@@ -2712,6 +2714,56 @@
       }
 
       if (msgs.length > 0) addCoachMsg('think', msgs.join(' '));
+
+      // Opponent hand intel (only after a few moves when there are meaningful deductions)
+      if (liveMoveNum >= 3) generateCoachOpponentIntel();
+    }
+
+    function generateCoachOpponentIntel() {
+      // Compute tiles that are unaccounted for (not played, not in our hand)
+      const myHand = new Set(liveHands[0].map(t => t.id));
+      const played = liveKnowledge.played;
+      const remaining = ALL_TILES.filter(t => !played.has(t.id) && !myHand.has(t.id));
+
+      // For each opponent (and partner), compute possible tiles they could hold
+      const intel = [];
+      for (const p of [1, 3, 2]) {
+        const voids = liveKnowledge.cantHave[p];
+        const estHand = Math.max(0, 6 - liveKnowledge.playsBy[p].length - liveKnowledge.passedOn[p].length + liveKnowledge.passedOn[p].length);
+        const tilesPlayed = liveKnowledge.playsBy[p].length;
+        const handSize = Math.max(0, 6 - tilesPlayed);
+        if (handSize === 0) continue;
+
+        // Tiles this player could possibly hold
+        const possible = remaining.filter(t => !voids.has(t.left) && !voids.has(t.right));
+
+        // Group by number to find likely strong suits
+        const numCounts = {};
+        for (let n = 0; n <= 6; n++) {
+          if (voids.has(n)) continue;
+          numCounts[n] = possible.filter(t => t.left === n || t.right === n).length;
+        }
+
+        // Format: show possible tiles as compact list
+        const name = pn(p);
+        const voidStr = voids.size > 0 ? `void in ${[...voids].join(',')}` : 'no known voids';
+        const tileStrs = possible.map(t => `[${t.left}|${t.right}]`);
+
+        if (possible.length <= 12) {
+          // Few enough to list — very useful intel
+          intel.push(`<b>${name}</b> (${handSize} tiles, ${voidStr}): could hold ${tileStrs.join(' ')}`);
+        } else {
+          // Too many to list — show strong suits instead
+          const strong = Object.entries(numCounts).filter(([_, c]) => c >= 3).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${c}x ${n}s`);
+          if (strong.length > 0) {
+            intel.push(`<b>${name}</b> (${handSize} tiles, ${voidStr}): likely has ${strong.join(', ')}`);
+          }
+        }
+      }
+
+      if (intel.length > 0) {
+        addCoachMsg('deduction', intel.join(' | '));
+      }
     }
 
     function generateCoachOnYourPlay(tile, side, allOptions) {
@@ -2721,19 +2773,40 @@
                   || allOptions.find(o => o.tile.id === tile.id);
       const playedIdx = played ? allOptions.indexOf(played) : -1;
 
+      // Build "your reasons" summary for non-perfect plays
+      const yourReasons = played && played.reasons.length > 0 ? played.reasons.slice(0, 2).join('; ') : '';
+
+      // Detect partner opening suit protection (user avoids changing partner's opening number on the board)
+      let partnerSuitNote = '';
+      if (currentGame && currentGame.autoPlayedBy === 2 && currentGame.autoTile) {
+        const openNum = currentGame.autoTile.left; // doubles: left === right
+        // Did user's play preserve the partner's opening number on the board?
+        const preservesOpen = (side === 'left' && liveLeftEnd === openNum) || (side === 'right' && liveRightEnd === openNum) ||
+          (tile.left === openNum || tile.right === openNum);
+        // Would the best play have removed it?
+        if (preservesOpen && playedIdx > 0 && best.side) {
+          const bestChangesEnd = best.side === 'left'
+            ? (liveLeftEnd === openNum && best.tile.left !== openNum && best.tile.right !== openNum)
+            : (liveRightEnd === openNum && best.tile.left !== openNum && best.tile.right !== openNum);
+          if (bestChangesEnd) {
+            partnerSuitNote = ` Smart to protect partner's opening suit (${openNum}s) — they likely have more.`;
+          }
+        }
+      }
+
       if (playedIdx === 0) {
-        addCoachMsg('good', `Good choice! [${tile.left}|${tile.right}] ${side} was the strongest play.`);
+        const why = best.reasons.length > 0 ? ' — ' + best.reasons.slice(0, 2).join('; ') : '';
+        addCoachMsg('good', `Good choice! You played [${tile.left}|${tile.right}] ${side} — the strongest play${why}.${partnerSuitNote}`);
       } else if (playedIdx >= 1 && playedIdx <= 2) {
-        // Find a differential reason
-        const bestReasons = new Set(best.reasons);
-        const playedReasons = new Set(played ? played.reasons : []);
-        const diff = best.reasons.filter(r => !playedReasons.has(r));
+        const diff = best.reasons.filter(r => !(played && played.reasons.includes(r)));
         const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
-        addCoachMsg('ok', `Reasonable. Top pick was [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}`);
+        const yourPart = yourReasons ? ` Your play: ${yourReasons}.` : '';
+        addCoachMsg('ok', `You played [${tile.left}|${tile.right}] ${side} — reasonable.${yourPart}${partnerSuitNote} Top pick was [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}.`);
       } else if (playedIdx > 2 || playedIdx === -1) {
         const diff = best.reasons.filter(r => !(played && played.reasons.includes(r)));
         const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
-        addCoachMsg('warn', `Consider: [${best.tile.left}|${best.tile.right}] ${best.side || ''} scored higher — ${hint}`);
+        const yourPart = yourReasons ? ` Your play: ${yourReasons}.` : '';
+        addCoachMsg('warn', `You played [${tile.left}|${tile.right}] ${side}.${yourPart}${partnerSuitNote} Consider: [${best.tile.left}|${best.tile.right}] ${best.side || ''} scored higher — ${hint}.`);
       }
     }
 
@@ -2742,6 +2815,144 @@
         ? `${liveLeftEnd}`
         : `${liveLeftEnd} and ${liveRightEnd}`;
       addCoachMsg('think', `Forced to pass — no tiles match ${voidNums}. Opponents now know you're void. Your partner should try to change the board ends for you.`);
+    }
+
+    function stopCoachMC() {
+      if (coachMCTimer) { clearTimeout(coachMCTimer); coachMCTimer = null; }
+      coachMCRunning = false;
+    }
+
+    function runCoachMC(snapBeforePlay, playerTile, playerSide) {
+      // Run async MC evaluation on the position BEFORE user played
+      // to get ground-truth expected points for all tile options
+      stopCoachMC();
+      const snap = snapBeforePlay;
+      const player = 0;
+      const hand = snap.hands[player];
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const board = snap.board;
+      const knowledge = snap.knowledge;
+      const handSizes = snap.hands.map(h => h.length);
+      const myTeam = player % 2;
+
+      const playable = hand.filter(t => canPlay(t, lE, rE, board.length));
+      if (playable.length <= 1) return; // no comparison needed
+
+      // Build option list: each playable tile × each valid side
+      const options = [];
+      for (const tile of playable) {
+        const sides = [];
+        if (board.length === 0) { sides.push(null); }
+        else {
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+        }
+        for (const side of sides) {
+          // Pre-compute new board state after this play
+          let newLE = lE, newRE = rE;
+          if (board.length === 0) { newLE = tile.left; newRE = tile.right; }
+          else if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+          else { newRE = tile.right === rE ? tile.left : tile.right; }
+          const newHS = [...handSizes]; newHS[player]--;
+          // Instant win check
+          if (newHS[player] === 0) {
+            const w = scoreWin(tile, lE, rE, board.length + 1);
+            options.push({ tile, side, ep: w.pts, wr: 1.0, ci95: 0, sims: COACH_MC_SIMS, done: true });
+            continue;
+          }
+          const newK = knowledge.clone();
+          newK.recordPlay(player, tile);
+          const myNewHand = hand.filter(t => t.id !== tile.id);
+          options.push({ tile, side, ep: 0, wr: 0, wins: 0, totalPts: 0, sumSq: 0, sims: 0, done: false,
+                         newLE, newRE, newHS, newK, myNewHand, newBLen: board.length + 1 });
+        }
+      }
+
+      const pending = options.filter(o => !o.done);
+      if (pending.length === 0) { finishCoachMC(options, playerTile, playerSide); return; }
+
+      coachMCRunning = true;
+      let simsDone = 0;
+      const BATCH = 10; // sims per option per batch
+
+      function mcBatch() {
+        for (const opt of pending) {
+          for (let i = 0; i < BATCH && opt.sims < COACH_MC_SIMS; i++) {
+            try {
+              const simHands = generateConsistentDeal(opt.myNewHand, opt.newHS, opt.newK, player);
+              const result = simulateFromPosition(simHands, null, opt.newLE, opt.newRE, (player + 1) % 4, opt.newK, opt.newBLen);
+              const signedPts = result.winnerTeam === myTeam ? result.points :
+                                result.winnerTeam >= 0 ? -result.points : 0;
+              if (result.winnerTeam === myTeam) opt.wins++;
+              opt.totalPts += signedPts;
+              opt.sumSq += signedPts * signedPts;
+              opt.sims++;
+            } catch(e) { opt.sims = COACH_MC_SIMS; } // skip on error
+          }
+        }
+        simsDone += BATCH;
+
+        // Update progress in coach
+        const totalNeeded = pending.length * COACH_MC_SIMS;
+        const totalDone = pending.reduce((s, o) => s + o.sims, 0);
+
+        if (totalDone < totalNeeded) {
+          coachMCTimer = setTimeout(mcBatch, 0);
+        } else {
+          // Finalize
+          for (const opt of pending) {
+            opt.ep = opt.sims > 0 ? opt.totalPts / opt.sims : 0;
+            opt.wr = opt.sims > 0 ? opt.wins / opt.sims : 0.5;
+            const variance = opt.sims > 1 ? (opt.sumSq / opt.sims) - opt.ep * opt.ep : 0;
+            opt.ci95 = opt.sims > 1 ? 1.96 * Math.sqrt(Math.max(0, variance) / opt.sims) : 0;
+            opt.done = true;
+          }
+          finishCoachMC(options, playerTile, playerSide);
+        }
+      }
+
+      coachMCTimer = setTimeout(mcBatch, 10);
+    }
+
+    function finishCoachMC(options, playerTile, playerSide) {
+      coachMCRunning = false;
+      coachMCTimer = null;
+      // Sort by expected points
+      options.sort((a, b) => b.ep - a.ep);
+      const mcBest = options[0];
+      const mcPlayed = options.find(o => o.tile.id === playerTile.id && o.side === playerSide)
+                    || options.find(o => o.tile.id === playerTile.id);
+
+      if (!mcPlayed || !mcBest) return;
+
+      const ranking = options.indexOf(mcPlayed) + 1;
+      const diff = mcBest.ep - mcPlayed.ep;
+      const lines = [];
+
+      // Build MC ranking table for top options
+      const top = options.slice(0, Math.min(5, options.length));
+      const table = top.map((o, i) => {
+        const marker = o.tile.id === playerTile.id ? '\u25B6' : ` ${i + 1}`;
+        const epStr = o.ep >= 0 ? `+${o.ep.toFixed(2)}` : o.ep.toFixed(2);
+        const wrStr = `${(o.wr * 100).toFixed(0)}%`;
+        return `${marker} [${o.tile.left}|${o.tile.right}] ${o.side || ''} EP: <b>${epStr}</b> \u00B1${o.ci95.toFixed(2)} WR: ${wrStr}`;
+      }).join(' | ');
+      lines.push(table);
+
+      // Verdict
+      if (ranking === 1) {
+        lines.push(`\u2705 MC confirms: your play was the best! (+${mcPlayed.ep.toFixed(2)} EP)`);
+      } else if (diff < 0.15) {
+        lines.push(`\u2248 Very close to optimal (${diff.toFixed(2)} EP difference — within noise).`);
+      } else if (diff < 0.40) {
+        lines.push(`\u{1F4CA} Slight edge to [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} (+${diff.toFixed(2)} EP). Your play was fine.`);
+      } else {
+        lines.push(`\u{1F4CA} [${mcBest.tile.left}|${mcBest.tile.right}] ${mcBest.side || ''} was stronger by ${diff.toFixed(2)} EP (${(mcBest.wr*100).toFixed(0)}% vs ${(mcPlayed.wr*100).toFixed(0)}% win rate).`);
+      }
+
+      addCoachMsg('deduction', `<b>MC Analysis (${COACH_MC_SIMS} rollouts):</b> ${lines.join('<br>')}`);
+      render();
     }
 
     function toggleCoach() {
@@ -2802,8 +3013,15 @@
       const reasons = chosen ? chosen.reasons : ['Player choice'];
       const score = chosen ? chosen.score : 0;
 
-      if (coachEnabled) generateCoachOnYourPlay(tile, side, allOptions);
-      recordLivePlay(0, tile, side, reasons, score, allOptions);
+      if (coachEnabled) {
+        generateCoachOnYourPlay(tile, side, allOptions);
+        // Capture pre-play snapshot for async MC evaluation
+        const snapForMC = currentGame.snapshots[currentGame.snapshots.length - 1];
+        recordLivePlay(0, tile, side, reasons, score, allOptions);
+        runCoachMC(snapForMC, tile, side);
+      } else {
+        recordLivePlay(0, tile, side, reasons, score, allOptions);
+      }
       render();
       scheduleNextMove();
     }
@@ -2851,7 +3069,7 @@
       const icons = { observation: '\u{1F440}', think: '\u{1F9E0}', good: '\u2705', ok: '\u{1F44D}', warn: '\u26A0\uFE0F', deduction: '\u{1F4DD}' };
       const colors = { observation: '#94a3b8', think: '#38bdf8', good: '#22c55e', ok: '#86efac', warn: '#fbbf24', deduction: '#a78bfa' };
       const phaseBadge = { opening: ['OPN','#475569'], midgame: ['MID','#475569'], endgame: ['END','#dc2626'] };
-      const recent = coachMessages.slice(-5).reverse();
+      const recent = [...coachMessages].reverse();
       if (coachCollapsed) {
         return `<div class="mt-2 bg-slate-900/80 rounded-lg px-3 py-1.5 border border-slate-600 cursor-pointer flex items-center justify-between" onclick="toggleCoachCollapse()">
           <span class="text-xs text-slate-400">\u{1F9E0} Coach <span class="text-slate-600">(${coachMessages.length} messages)</span></span>
@@ -2863,7 +3081,7 @@
           <span class="text-xs font-bold text-indigo-300">\u{1F9E0} Coach</span>
           <span class="text-xs text-slate-500">\u25BC</span>
         </div>
-        <div style="max-height:160px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5">
+        <div style="max-height:240px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5">
           ${recent.map(m => {
             const [pLabel, pColor] = phaseBadge[m.phase] || ['','#475569'];
             return `<div class="flex items-start gap-1.5 text-xs leading-snug">
@@ -3462,6 +3680,9 @@
     let coachEnabled = (() => { try { const v = localStorage.getItem('pernambuco_coach'); return v === null ? true : v === '1'; } catch(e) { return true; } })();
     let coachMessages = []; // [{type, text, phase, turn}]
     let coachCollapsed = (() => { try { return localStorage.getItem('pernambuco_coach_collapsed') === '1'; } catch(e) { return false; } })();
+    let coachMCTimer = null;      // setTimeout handle for async MC batches
+    let coachMCRunning = false;   // true while MC eval is in progress
+    const COACH_MC_SIMS = 500;    // rollouts per tile option
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
@@ -7655,7 +7876,7 @@
               <button class="btn text-lg px-6 py-3" style="background:#818cf8;color:white;font-weight:bold" onclick="startDeepStudy();">Deep Study</button>
               <button class="btn text-lg px-6 py-3" style="background:#0891b2;color:white;font-weight:bold" onclick="startProAnalytics();">Pro Analytics</button>
             </div>
-            <div class="grid grid-cols-8 gap-3 text-left mb-6">
+            <div class="grid grid-cols-4 gap-3 text-left mb-6">
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-emerald-400 font-bold text-sm mb-1">Watch Mode</div>
                 <div class="text-xs text-slate-400">Step through AI games with full reasoning for every move.</div>
@@ -7666,7 +7887,7 @@
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-yellow-400 font-bold text-sm mb-1">Play vs AI</div>
-                <div class="text-xs text-slate-400">Play real games against AI opponents with configurable difficulty. Coach mode narrates strategy in real-time.</div>
+                <div class="text-xs text-slate-400">Play real games vs AI with adjustable difficulty. Coach overlay narrates strategy live.</div>
               </div>
               <div class="bg-slate-800 rounded-lg p-3">
                 <div class="text-amber-400 font-bold text-sm mb-1">Strategy Puzzles</div>
