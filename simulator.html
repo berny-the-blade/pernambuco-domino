@@ -4476,7 +4476,7 @@
               ${renderPlayerAreaP0(snap, pNames, pTeams, teamColors, shouldQuiz)}
 
               <!-- Coach Overlay -->
-              ${coachEnabled && gameMode === 'play' && !currentGame?.outcome ? renderCoachOverlay() : ''}
+              ${coachEnabled && gameMode === 'play' ? renderCoachOverlay() : ''}
 
               <!-- Hand Strength Meter -->
               ${renderHandStrength(handStrength, snap.hands[0].length)}
