@@ -287,6 +287,48 @@
       win_prob: { en: 'Win Probability', pt: 'Probabilidade de Vitória' },
       your_team: { en: 'Your Team', pt: 'Sua Equipe' },
       opp_team: { en: 'Opponents', pt: 'Oponentes' },
+      // Analysis panel labels
+      why_tile: { en: 'Why this tile:', pt: 'Por que esta pedra:' },
+      all_opts: { en: 'All options (best to worst):', pt: 'Todas as opções (melhor a pior):' },
+      intelligence: { en: 'Intelligence', pt: 'Inteligência' },
+      no_intel: { en: 'No intelligence yet', pt: 'Sem inteligência ainda' },
+      cant_have: { en: "can't have", pt: 'não pode ter' },
+      situation: { en: 'Situation:', pt: 'Situação:' },
+      rule_mem: { en: 'Rule to memorize:', pt: 'Regra para memorizar:' },
+      passes_lbl: { en: 'PASSES', pt: 'PASSOU' },
+      plays_lbl: { en: 'plays', pt: 'joga' },
+      on_side: { en: 'on', pt: 'no' },
+      auto_plays: { en: 'auto-plays', pt: 'joga automaticamente' },
+      highest_dbl_rule: { en: 'highest double — first round rule', pt: 'carroça mais alta — regra da primeira rodada' },
+      pick_best: { en: 'Pick the best tile from your hand.', pt: 'Escolha a melhor pedra da sua mão.' },
+      board_ends_lbl: { en: 'Board ends:', pt: 'Pontas do tabuleiro:' },
+      playable_lbl: { en: 'playable tile', pt: 'pedra jogável' },
+      playable_pl: { en: 'playable tiles', pt: 'pedras jogáveis' },
+      out_of: { en: 'out of', pt: 'de' },
+      key_info: { en: 'Key info:', pt: 'Info chave:' },
+      void_in: { en: 'void in', pt: 'sem' },
+      early_game: { en: 'Early game — prioritize suit control. Which play leaves you with the most matching tiles for next turn?', pt: 'Início — priorize controle de naipe. Qual jogada deixa mais pedras compatíveis para o próximo turno?' },
+      endgame_think: { en: 'Endgame — think about going out. Can you set up your last tile(s)? Watch for stranding risk.', pt: 'Final — pense em bater. Pode preparar sua(s) última(s) pedra(s)? Cuidado com o risco de trancar.' },
+      keep_void: { en: "Can you keep an opponent's void number on the board to force another pass?", pt: 'Pode manter um número que o adversário não tem no tabuleiro para forçar outro passe?' },
+      multiple_opts: { en: 'Multiple options — which play keeps the most flexibility for your next turn?', pt: 'Múltiplas opções — qual jogada mantém mais flexibilidade?' },
+      forced_pass: { en: 'Forced to pass — no tiles match', pt: 'Forçado a passar — nenhuma pedra combina com' },
+      opps_learn: { en: 'Opponents now know you\'re void.', pt: 'Oponentes agora sabem que você não tem.' },
+      partner_change: { en: 'Your partner should try to change the board ends for you.', pt: 'Seu parceiro deve tentar mudar as pontas para você.' },
+      good_choice: { en: 'Good choice!', pt: 'Boa jogada!' },
+      strongest: { en: 'the strongest play', pt: 'a jogada mais forte' },
+      reasonable: { en: 'reasonable', pt: 'razoável' },
+      your_play: { en: 'Your play:', pt: 'Sua jogada:' },
+      top_pick: { en: 'Top pick was', pt: 'Melhor opção era' },
+      consider: { en: 'Consider:', pt: 'Considere:' },
+      scored_higher: { en: 'scored higher', pt: 'pontuou mais' },
+      tiles_lbl: { en: 'tiles', pt: 'pedras' },
+      tile_lbl: { en: 'tile', pt: 'pedra' },
+      no_known_voids: { en: 'no known voids', pt: 'sem vazios conhecidos' },
+      could_hold: { en: 'could hold', pt: 'pode ter' },
+      likely_has: { en: 'likely has', pt: 'provável que tenha' },
+      left_lbl: { en: 'left', pt: 'restante' },
+      // Continue button
+      continue_btn: { en: 'Continue', pt: 'Continuar' },
     };
 
     function _t(key) { const e = TR[key]; return e ? (e[appLang] || e.en || key) : key; }
@@ -300,6 +342,48 @@
       PLAYER_NAMES_FULL[0] = _t('you_p0'); PLAYER_NAMES_FULL[1] = _t('opp_left_p1');
       PLAYER_NAMES_FULL[2] = _t('partner_p2'); PLAYER_NAMES_FULL[3] = _t('opp_right_p3');
       render();
+    }
+
+    // Translate AI reason strings for display
+    function _tr(r) {
+      if (appLang !== 'pt') return r;
+      // Pass reasons
+      if (r.match(/^No tiles matching/)) return r.replace('No tiles matching', 'Nenhuma pedra com').replace(' or ', ' ou ');
+      if (r.match(/^Known dead:/)) return r.replace('Known dead:', 'Mortos conhecidos:');
+      // Play reasons
+      let m;
+      if ((m = r.match(/^(\d+) more tiles? match new ends \[(.+)\]$/))) return `${m[1]} pedra${parseInt(m[1])>1?'s combinam':'combina'} com novas pontas [${m[2]}]`;
+      if ((m = r.match(/^Blocks (.+)$/))) return `Bloqueia ${m[1]}`;
+      if ((m = r.match(/^Partner played (.+) — may have more$/))) return `Parceiro jogou ${m[1]} — pode ter mais`;
+      if ((m = r.match(/^Partner can't have (\d+)$/))) return `Parceiro não tem ${m[1]}`;
+      if ((m = r.match(/^Dump heavy tile \((\d+) pips\)$/))) return `Descarta pedra pesada (${m[1]} pontos)`;
+      if ((m = r.match(/^Sheds (\d+) pips$/))) return `Descarta ${m[1]} pontos`;
+      if (r === 'Clear inflexible double') return 'Descarta carroça inflexível';
+      if ((m = r.match(/^Sets up isolated \[(\d+)\|(\d+)\]$/))) return `Prepara carroça isolada [${m[1]}|${m[2]}]`;
+      if ((m = r.match(/^(\d+)s nearly exhausted \((\d+) out\)$/))) return `${m[1]}s quase esgotados (${m[2]} restam)`;
+      if ((m = r.match(/^(\d+)s heavy — (\d+) still out for opponents$/))) return `${m[1]}s pesados — ${m[2]} ainda com adversários`;
+      if ((m = r.match(/^GO OUT! Win (\d+)pt(.*)$/))) return `BATEU! Ganha ${m[1]}pt${m[2]||''}`;
+      if ((m = r.match(/^Sets up going out next turn with \[(.+)\]$/))) return `Prepara bater no próximo turno com [${m[1]}]`;
+      if ((m = r.match(/^STRANDS last tile \[(.+)\]/))) return `TRANCA última pedra [${m[1]}]`;
+      if (r === 'Both remaining tiles playable on new ends') return 'Ambas pedras restantes jogáveis nas novas pontas';
+      if (r === 'Neither remaining tile matches new ends') return 'Nenhuma pedra restante combina com novas pontas';
+      if ((m = r.match(/^Open: suit (\d)=(\d), suit (\d)=(\d)(.*double bonus.*)?$/))) return `Abre: naipe ${m[1]}=${m[2]}, naipe ${m[3]}=${m[4]}${m[5]?' bônus carroça':''}`;
+      // Coach differential reasons
+      if (r.match(/^<b>Suit control/)) return r.replace('Suit control:', 'Controle de naipe:').replace('leaves', 'deixa').replace('tiles matching the new board ends', 'pedras combinando com novas pontas').replace('vs only', 'vs apenas').replace('for your play', 'na sua jogada').replace('More matching tiles = more options next turn.', 'Mais pedras = mais opções no próximo turno.');
+      if (r.match(/^<b>Blocking/)) return r.replace('Blocking:', 'Bloqueio:').replace("keeps board ends on numbers that", "mantém pontas em números que").replace("can't play (void), forcing them to pass. Your play opens a number they can match.", "não pode jogar, forçando-os a passar. Sua jogada abre um número que podem combinar.");
+      if (r.match(/^<b>Partner support/)) return r.replace('Partner support:', 'Apoio ao parceiro:').replace("Your play puts both board ends on numbers your partner is void in", "Sua jogada coloca ambas pontas em números que seu parceiro não tem").replace("they'll be forced to pass.", "será forçado a passar.").replace("keeps at least one end playable for partner.", "mantém pelo menos uma ponta jogável para o parceiro.");
+      if (r.match(/^<b>Double management/)) return r.replace('Double management:', 'Gestão de carroça:').replace("Holding onto double", "Segurar a carroça").replace("for now might be better", "pode ser melhor agora").replace("doubles are inflexible and can strand you later.", "carroças são inflexíveis.").replace("is more versatile.", "é mais versátil.");
+      if (r.match(/^<b>Clear double early/)) return r.replace('Clear double early:', 'Descarte carroça cedo:').replace("clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.", "descarta carroça inflexível enquanto tem opções.");
+      if (r.match(/^<b>Go-out setup/)) return r.replace('Go-out setup:', 'Preparação para bater:').replace("sets up your remaining tile(s) to go out next turn.", "prepara para bater no próximo turno.").replace("Your play strands your last tiles", "Sua jogada tranca suas últimas pedras").replace("they don't match the new board ends.", "não combinam com as novas pontas.");
+      if (r.match(/^<b>Dump heavy tile/)) return r.replace('Dump heavy tile:', 'Descarte pesado:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('In case of a block, lower pip count wins.', 'Em caso de tranca, menos pontos ganha.');
+      if (r.match(/^<b>Why better/)) return r.replace('Why better:', 'Por que é melhor:');
+      // MC reasons
+      if (r.match(/blocks/i)) return r.replace(/blocks/gi, 'bloqueia');
+      if (r.includes("feeds partner's strong suit")) return 'alimenta o naipe forte do parceiro';
+      if (r.includes('keeps hand flexible')) return 'mantém a mão flexível';
+      if (r.includes('squeezes opponents')) return 'espreme os adversários';
+      if (r.includes('highest expected equity')) return 'maior equidade esperada';
+      return r;
     }
 
     // ========== DOMINO DOT PATTERNS ==========
@@ -2837,16 +2921,21 @@
       const name = pn(player);
       const isPartner = player === 2;
       const isOpp = player === 1 || player === 3;
+      const pt = appLang === 'pt';
 
       if (wasPass) {
         const voids = [];
         if (liveLeftEnd !== null) voids.push(liveLeftEnd);
         if (liveRightEnd !== null && liveRightEnd !== liveLeftEnd) voids.push(liveRightEnd);
-        const voidStr = voids.join(' and ');
+        const voidStr = voids.join(pt ? ' e ' : ' and ');
         if (isOpp) {
-          addCoachMsg('deduction', `${name} passed — they have no ${voidStr}. Remember this! Keep those numbers on the board to block them.`);
+          addCoachMsg('deduction', pt
+            ? `${name} passou — não tem ${voidStr}. Lembre-se! Mantenha esses números no tabuleiro para bloqueá-lo.`
+            : `${name} passed — they have no ${voidStr}. Remember this! Keep those numbers on the board to block them.`);
         } else {
-          addCoachMsg('deduction', `Your partner ${name} passed — void in ${voidStr}. Try to change board ends to numbers they might have.`);
+          addCoachMsg('deduction', pt
+            ? `Seu parceiro ${name} passou — sem ${voidStr}. Tente mudar as pontas para números que possa ter.`
+            : `Your partner ${name} passed — void in ${voidStr}. Try to change board ends to numbers they might have.`);
         }
         return;
       }
@@ -2857,49 +2946,57 @@
       const prevLeft = currentGame.snapshots.length >= 2 ? currentGame.snapshots[currentGame.snapshots.length - 2].leftEnd : null;
       const prevRight = currentGame.snapshots.length >= 2 ? currentGame.snapshots[currentGame.snapshots.length - 2].rightEnd : null;
 
-      // Double play commentary
       if (isDouble) {
-        msgs.push(`${name} played double [${tile.left}|${tile.right}] — clearing doubles early is smart since they're inflexible (only match one number).`);
+        msgs.push(pt
+          ? `${name} jogou carroça [${tile.left}|${tile.right}] — descartar carroças cedo é inteligente pois são inflexíveis.`
+          : `${name} played double [${tile.left}|${tile.right}] — clearing doubles early is smart since they're inflexible (only match one number).`);
       }
 
-      // Board end changed?
       const newEnd = side === 'left' ? liveLeftEnd : liveRightEnd;
       const oldEnd = side === 'left' ? prevLeft : prevRight;
       if (oldEnd !== null && newEnd !== oldEnd && !isDouble) {
         if (isOpp) {
-          // Check if they avoided the other end
           const otherEnd = side === 'left' ? liveRightEnd : liveLeftEnd;
           const oppVoids = liveKnowledge.cantHave[player];
           if (oppVoids.has(otherEnd)) {
-            msgs.push(`${name} played on the ${side} (avoiding ${otherEnd}-end) — confirmed void in ${otherEnd}s.`);
+            msgs.push(pt
+              ? `${name} jogou no ${side} (evitando ponta ${otherEnd}) — confirmado sem ${otherEnd}s.`
+              : `${name} played on the ${side} (avoiding ${otherEnd}-end) — confirmed void in ${otherEnd}s.`);
           } else {
-            msgs.push(`${name} changed the ${side} end from ${oldEnd} to ${newEnd}. Watch if they're building strength in ${newEnd}s.`);
+            msgs.push(pt
+              ? `${name} mudou a ponta ${side} de ${oldEnd} para ${newEnd}. Observe se está acumulando ${newEnd}s.`
+              : `${name} changed the ${side} end from ${oldEnd} to ${newEnd}. Watch if they're building strength in ${newEnd}s.`);
           }
         } else {
-          msgs.push(`Partner played [${tile.left}|${tile.right}] ${side}, changing end to ${newEnd}. They may be strong in ${newEnd}s — try to keep it on the board.`);
+          msgs.push(pt
+            ? `Parceiro jogou [${tile.left}|${tile.right}] ${side}, mudando ponta para ${newEnd}. Pode ser forte em ${newEnd}s — tente manter no tabuleiro.`
+            : `Partner played [${tile.left}|${tile.right}] ${side}, changing end to ${newEnd}. They may be strong in ${newEnd}s — try to keep it on the board.`);
         }
       }
 
-      // Opponent void-based blocking observation
       if (isOpp && msgs.length === 0) {
         const hasVoid = liveKnowledge.cantHave[player].size > 0;
         if (hasVoid) {
           const voidNums = [...liveKnowledge.cantHave[player]].join(', ');
-          msgs.push(`${name} played [${tile.left}|${tile.right}] ${side}. Remember: they're void in ${voidNums}.`);
+          msgs.push(pt
+            ? `${name} jogou [${tile.left}|${tile.right}] ${side}. Lembre: não tem ${voidNums}.`
+            : `${name} played [${tile.left}|${tile.right}] ${side}. Remember: they're void in ${voidNums}.`);
         } else {
-          msgs.push(`${name} played [${tile.left}|${tile.right}] ${side}.`);
+          msgs.push(`${name} ${pt ? 'jogou' : 'played'} [${tile.left}|${tile.right}] ${side}.`);
         }
       }
 
-      // Partner support observation
       if (isPartner && msgs.length === 0) {
-        msgs.push(`Partner played [${tile.left}|${tile.right}] ${side}.`);
+        msgs.push(pt
+          ? `Parceiro jogou [${tile.left}|${tile.right}] ${side}.`
+          : `Partner played [${tile.left}|${tile.right}] ${side}.`);
       }
 
-      // Endgame alert
       if (liveHands[player].length <= 2 && liveHands[player].length > 0) {
-        const who = isPartner ? 'Your partner' : name;
-        msgs.push(`${who} has only ${liveHands[player].length} tile${liveHands[player].length > 1 ? 's' : ''} left!`);
+        const n = liveHands[player].length;
+        msgs.push(pt
+          ? `${isPartner ? 'Seu parceiro' : name} tem só ${n} pedra${n > 1 ? 's' : ''}!`
+          : `${isPartner ? 'Your partner' : name} has only ${n} tile${n > 1 ? 's' : ''} left!`);
       }
 
       if (msgs.length > 0) addCoachMsg('observation', msgs.join(' '));
@@ -2910,84 +3007,76 @@
       const phase = getGamePhase();
       const playable = hand.filter(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : 0));
       const msgs = [];
+      const pt = appLang === 'pt';
 
-      // Board state
       if (liveBoard && liveBoard.length > 0) {
-        msgs.push(`Board ends: <b>${liveLeftEnd}</b> and <b>${liveRightEnd}</b>. You have ${playable.length} playable tile${playable.length !== 1 ? 's' : ''} out of ${hand.length}.`);
+        msgs.push(pt
+          ? `Pontas: <b>${liveLeftEnd}</b> e <b>${liveRightEnd}</b>. Você tem ${playable.length} pedra${playable.length !== 1 ? 's jogáveis' : ' jogável'} de ${hand.length}.`
+          : `Board ends: <b>${liveLeftEnd}</b> and <b>${liveRightEnd}</b>. You have ${playable.length} playable tile${playable.length !== 1 ? 's' : ''} out of ${hand.length}.`);
       }
 
-      // Key deductions summary
       const oppVoids = [];
       [1, 3].forEach(p => {
         const v = [...liveKnowledge.cantHave[p]];
-        if (v.length > 0) oppVoids.push(`${pn(p)} void in ${v.join(',')}`);
+        if (v.length > 0) oppVoids.push(`${pn(p)} ${pt ? 'sem' : 'void in'} ${v.join(',')}`);
       });
       const partnerVoids = [...liveKnowledge.cantHave[2]];
-      if (oppVoids.length > 0) msgs.push(`Key info: ${oppVoids.join('; ')}.`);
-      if (partnerVoids.length > 0) msgs.push(`Partner void in ${partnerVoids.join(',')}.`);
+      if (oppVoids.length > 0) msgs.push(`${pt ? 'Info chave' : 'Key info'}: ${oppVoids.join('; ')}.`);
+      if (partnerVoids.length > 0) msgs.push(`${pt ? 'Parceiro sem' : 'Partner void in'} ${partnerVoids.join(',')}.`);
 
-      // Phase-specific guidance
       if (phase === 'opening') {
-        msgs.push(`Early game — prioritize suit control. Which play leaves you with the most matching tiles for next turn?`);
+        msgs.push(pt ? 'Início — priorize controle de naipe. Qual jogada deixa mais pedras compatíveis?' : _t('early_game'));
       } else if (phase === 'endgame') {
-        msgs.push(`Endgame — think about going out. Can you set up your last tile(s)? Watch for stranding risk.`);
+        msgs.push(pt ? 'Final — pense em bater. Pode preparar sua(s) última(s) pedra(s)?' : _t('endgame_think'));
       } else {
-        // Midgame: context-sensitive tip
         if (oppVoids.length > 0) {
-          msgs.push(`Can you keep an opponent's void number on the board to force another pass?`);
+          msgs.push(pt ? 'Pode manter um número que o adversário não tem no tabuleiro para forçar outro passe?' : _t('keep_void'));
         } else if (playable.length > 1) {
-          msgs.push(`Multiple options — which play keeps the most flexibility for your next turn?`);
+          msgs.push(pt ? 'Múltiplas opções — qual jogada mantém mais flexibilidade?' : _t('multiple_opts'));
         }
       }
 
       if (playable.length === 0) {
-        msgs.push(`No playable tiles — you must pass. Opponents will learn you're void in ${liveLeftEnd}${liveLeftEnd !== liveRightEnd ? ' and ' + liveRightEnd : ''}.`);
+        msgs.push(pt
+          ? `Sem pedras jogáveis — deve passar. Adversários vão saber que você não tem ${liveLeftEnd}${liveLeftEnd !== liveRightEnd ? ' nem ' + liveRightEnd : ''}.`
+          : `No playable tiles — you must pass. Opponents will learn you're void in ${liveLeftEnd}${liveLeftEnd !== liveRightEnd ? ' and ' + liveRightEnd : ''}.`);
       }
 
       if (msgs.length > 0) addCoachMsg('think', msgs.join(' '));
-
-      // Opponent hand intel (only after a few moves when there are meaningful deductions)
       if (liveMoveNum >= 3) generateCoachOpponentIntel();
     }
 
     function generateCoachOpponentIntel() {
-      // Compute tiles that are unaccounted for (not played, not in our hand)
       const myHand = new Set(liveHands[0].map(t => t.id));
       const played = liveKnowledge.played;
       const remaining = ALL_TILES.filter(t => !played.has(t.id) && !myHand.has(t.id));
+      const pt = appLang === 'pt';
 
-      // For each opponent (and partner), compute possible tiles they could hold
       const intel = [];
       for (const p of [1, 3, 2]) {
         const voids = liveKnowledge.cantHave[p];
-        const estHand = Math.max(0, 6 - liveKnowledge.playsBy[p].length - liveKnowledge.passedOn[p].length + liveKnowledge.passedOn[p].length);
         const tilesPlayed = liveKnowledge.playsBy[p].length;
         const handSize = Math.max(0, 6 - tilesPlayed);
         if (handSize === 0) continue;
 
-        // Tiles this player could possibly hold
         const possible = remaining.filter(t => !voids.has(t.left) && !voids.has(t.right));
-
-        // Group by number to find likely strong suits
         const numCounts = {};
         for (let n = 0; n <= 6; n++) {
           if (voids.has(n)) continue;
           numCounts[n] = possible.filter(t => t.left === n || t.right === n).length;
         }
 
-        // Format: show possible tiles as compact list
         const name = pn(p);
-        const voidStr = voids.size > 0 ? `void in ${[...voids].join(',')}` : 'no known voids';
+        const voidStr = voids.size > 0 ? `${pt ? 'sem' : 'void in'} ${[...voids].join(',')}` : (pt ? 'sem vazios conhecidos' : 'no known voids');
         const tileStrs = possible.map(t => `[${t.left}|${t.right}]`);
+        const tLbl = pt ? 'pedras' : 'tiles';
 
         if (possible.length <= 12) {
-          // Few enough to list — very useful intel
-          intel.push(`<b>${name}</b> (${handSize} tiles, ${voidStr}): could hold ${tileStrs.join(' ')}`);
+          intel.push(`<b>${name}</b> (${handSize} ${tLbl}, ${voidStr}): ${pt ? 'pode ter' : 'could hold'} ${tileStrs.join(' ')}`);
         } else {
-          // Too many to list — show strong suits instead
           const strong = Object.entries(numCounts).filter(([_, c]) => c >= 3).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${c}x ${n}s`);
           if (strong.length > 0) {
-            intel.push(`<b>${name}</b> (${handSize} tiles, ${voidStr}): likely has ${strong.join(', ')}`);
+            intel.push(`<b>${name}</b> (${handSize} ${tLbl}, ${voidStr}): ${pt ? 'provável que tenha' : 'likely has'} ${strong.join(', ')}`);
           }
         }
       }
@@ -3003,49 +3092,56 @@
       const played = allOptions.find(o => o.tile.id === tile.id && o.side === side)
                   || allOptions.find(o => o.tile.id === tile.id);
       const playedIdx = played ? allOptions.indexOf(played) : -1;
-
-      // Build "your reasons" summary for non-perfect plays
+      const pt = appLang === 'pt';
       const yourReasons = played && played.reasons.length > 0 ? played.reasons.slice(0, 2).join('; ') : '';
 
-      // Detect partner opening suit protection (user avoids changing partner's opening number on the board)
       let partnerSuitNote = '';
       if (currentGame && currentGame.autoPlayedBy === 2 && currentGame.autoTile) {
-        const openNum = currentGame.autoTile.left; // doubles: left === right
-        // Did user's play preserve the partner's opening number on the board?
+        const openNum = currentGame.autoTile.left;
         const preservesOpen = (side === 'left' && liveLeftEnd === openNum) || (side === 'right' && liveRightEnd === openNum) ||
           (tile.left === openNum || tile.right === openNum);
-        // Would the best play have removed it?
         if (preservesOpen && playedIdx > 0 && best.side) {
           const bestChangesEnd = best.side === 'left'
             ? (liveLeftEnd === openNum && best.tile.left !== openNum && best.tile.right !== openNum)
             : (liveRightEnd === openNum && best.tile.left !== openNum && best.tile.right !== openNum);
           if (bestChangesEnd) {
-            partnerSuitNote = ` Smart to protect partner's opening suit (${openNum}s) — they likely have more.`;
+            partnerSuitNote = pt
+              ? ` Inteligente proteger o naipe de abertura do parceiro (${openNum}s).`
+              : ` Smart to protect partner's opening suit (${openNum}s) — they likely have more.`;
           }
         }
       }
 
       if (playedIdx === 0) {
         const why = best.reasons.length > 0 ? ' — ' + best.reasons.slice(0, 2).join('; ') : '';
-        addCoachMsg('good', `Good choice! You played [${tile.left}|${tile.right}] ${side} — the strongest play${why}.${partnerSuitNote}`);
+        addCoachMsg('good', pt
+          ? `Boa jogada! Você jogou [${tile.left}|${tile.right}] ${side} — a jogada mais forte${why}.${partnerSuitNote}`
+          : `Good choice! You played [${tile.left}|${tile.right}] ${side} — the strongest play${why}.${partnerSuitNote}`);
       } else if (playedIdx >= 1 && playedIdx <= 2) {
         const diff = best.reasons.filter(r => !(played && played.reasons.includes(r)));
         const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
-        const yourPart = yourReasons ? ` Your play: ${yourReasons}.` : '';
-        addCoachMsg('ok', `You played [${tile.left}|${tile.right}] ${side} — reasonable.${yourPart}${partnerSuitNote} Top pick was [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}.`);
+        const yourPart = yourReasons ? (pt ? ` Sua jogada: ${yourReasons}.` : ` Your play: ${yourReasons}.`) : '';
+        addCoachMsg('ok', pt
+          ? `Você jogou [${tile.left}|${tile.right}] ${side} — razoável.${yourPart}${partnerSuitNote} Melhor opção era [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}.`
+          : `You played [${tile.left}|${tile.right}] ${side} — reasonable.${yourPart}${partnerSuitNote} Top pick was [${best.tile.left}|${best.tile.right}] ${best.side || ''} — ${hint}.`);
       } else if (playedIdx > 2 || playedIdx === -1) {
         const diff = best.reasons.filter(r => !(played && played.reasons.includes(r)));
         const hint = diff.length > 0 ? diff[0] : best.reasons[0] || '';
-        const yourPart = yourReasons ? ` Your play: ${yourReasons}.` : '';
-        addCoachMsg('warn', `You played [${tile.left}|${tile.right}] ${side}.${yourPart}${partnerSuitNote} Consider: [${best.tile.left}|${best.tile.right}] ${best.side || ''} scored higher — ${hint}.`);
+        const yourPart = yourReasons ? (pt ? ` Sua jogada: ${yourReasons}.` : ` Your play: ${yourReasons}.`) : '';
+        addCoachMsg('warn', pt
+          ? `Você jogou [${tile.left}|${tile.right}] ${side}.${yourPart}${partnerSuitNote} Considere: [${best.tile.left}|${best.tile.right}] ${best.side || ''} pontuou mais — ${hint}.`
+          : `You played [${tile.left}|${tile.right}] ${side}.${yourPart}${partnerSuitNote} Consider: [${best.tile.left}|${best.tile.right}] ${best.side || ''} scored higher — ${hint}.`);
       }
     }
 
     function generateCoachOnPass() {
+      const pt = appLang === 'pt';
       const voidNums = liveLeftEnd === liveRightEnd
         ? `${liveLeftEnd}`
-        : `${liveLeftEnd} and ${liveRightEnd}`;
-      addCoachMsg('think', `Forced to pass — no tiles match ${voidNums}. Opponents now know you're void. Your partner should try to change the board ends for you.`);
+        : `${liveLeftEnd} ${pt ? 'e' : 'and'} ${liveRightEnd}`;
+      addCoachMsg('think', pt
+        ? `Forçado a passar — nenhuma pedra combina com ${voidNums}. Adversários agora sabem. Seu parceiro deve tentar mudar as pontas para você.`
+        : `Forced to pass — no tiles match ${voidNums}. Opponents now know you're void. Your partner should try to change the board ends for you.`);
     }
 
     function stopCoachMC() {
@@ -3493,7 +3589,8 @@
       if (!coachEnabled || gameMode !== 'play' || coachMessages.length === 0) return '';
       const icons = { observation: '\u{1F440}', think: '\u{1F9E0}', good: '\u2705', ok: '\u{1F44D}', warn: '\u26A0\uFE0F', deduction: '\u{1F4DD}' };
       const colors = { observation: '#94a3b8', think: '#38bdf8', good: '#22c55e', ok: '#86efac', warn: '#fbbf24', deduction: '#a78bfa' };
-      const phaseBadge = { opening: ['OPN','#475569'], midgame: ['MID','#475569'], endgame: ['END','#dc2626'] };
+      const pt = appLang === 'pt';
+      const phaseBadge = { opening: [pt?'INI':'OPN','#475569'], midgame: [pt?'MED':'MID','#475569'], endgame: [pt?'FIM':'END','#dc2626'] };
       const recent = [...coachMessages].reverse();
       if (coachCollapsed) {
         return `<div class="mt-2 bg-slate-900/80 rounded-lg px-3 py-1.5 border border-slate-600 cursor-pointer flex items-center justify-between" onclick="toggleCoachCollapse()">
@@ -4608,34 +4705,32 @@
               aiNewEnds, userNewEnds, hand, knowledge, lE, rE, grade, scoreDiff, allOptions } = ctx;
       const lines = [];
       const pNames = PLAYER_NAMES_FULL;
+      const pt = appLang === 'pt';
 
       if (grade === 'perfect') {
         if (userTile.id === aiTile.id) {
-          lines.push({ type: 'success', text: `You picked the optimal play! [${userTile.left}|${userTile.right}] on ${userSide || aiSide}. Well done.` });
+          lines.push({ type: 'success', text: pt ? `Jogada ótima! [${userTile.left}|${userTile.right}] no ${userSide || aiSide}. Muito bem.` : `You picked the optimal play! [${userTile.left}|${userTile.right}] on ${userSide || aiSide}. Well done.` });
         } else {
-          lines.push({ type: 'success', text: `Great pick! [${userTile.left}|${userTile.right}] on ${userSide} is essentially equal to [${aiTile.left}|${aiTile.right}] (negligible difference).` });
+          lines.push({ type: 'success', text: pt ? `Ótima escolha! [${userTile.left}|${userTile.right}] no ${userSide} é equivalente a [${aiTile.left}|${aiTile.right}] (diferença negligível).` : `Great pick! [${userTile.left}|${userTile.right}] on ${userSide} is essentially equal to [${aiTile.left}|${aiTile.right}] (negligible difference).` });
         }
         if (aiReasons.length > 0) {
-          lines.push({ type: 'info', text: `Why it's best: ${aiReasons.join('. ')}` });
+          lines.push({ type: 'info', text: `${pt ? 'Por que é melhor' : "Why it's best"}: ${aiReasons.map(r => _tr(r)).join('. ')}` });
         }
         return lines;
       }
 
-      // === HEADER: What AI chose and why ===
-      lines.push({ type: 'header', text: `Better play: [${aiTile.left}|${aiTile.right}] on ${aiSide}` });
+      lines.push({ type: 'header', text: pt ? `Melhor jogada: [${aiTile.left}|${aiTile.right}] no ${aiSide}` : `Better play: [${aiTile.left}|${aiTile.right}] on ${aiSide}` });
 
-      // AI's reasons
       if (aiReasons.length > 0) {
         for (const r of aiReasons) {
-          lines.push({ type: 'ai-reason', text: r });
+          lines.push({ type: 'ai-reason', text: _tr(r) });
         }
       }
 
-      // === What you chose and its shortcomings ===
-      lines.push({ type: 'header2', text: `Your pick: [${userTile.left}|${userTile.right}]${userSide ? ' on ' + userSide : ''}` });
+      lines.push({ type: 'header2', text: pt ? `Sua escolha: [${userTile.left}|${userTile.right}]${userSide ? ' no ' + userSide : ''}` : `Your pick: [${userTile.left}|${userTile.right}]${userSide ? ' on ' + userSide : ''}` });
       if (userReasons.length > 0) {
         for (const r of userReasons) {
-          lines.push({ type: 'user-reason', text: r });
+          lines.push({ type: 'user-reason', text: _tr(r) });
         }
       }
 
@@ -4655,11 +4750,13 @@
 
           if (aiMyFollow > userMyFollow) {
             lines.push({ type: 'compare',
-              text: `Board ends: AI leaves ${aiEnds} (you have ${aiMyFollow} follow-up tiles) vs your pick leaves ${userEnds} (only ${userMyFollow} follow-ups). More follow-ups = you stay in control.`
+              text: pt ? `Pontas: IA deixa ${aiEnds} (você tem ${aiMyFollow} pedras de seguimento) vs sua escolha ${userEnds} (só ${userMyFollow}). Mais seguimentos = mais controle.`
+                : `Board ends: AI leaves ${aiEnds} (you have ${aiMyFollow} follow-up tiles) vs your pick leaves ${userEnds} (only ${userMyFollow} follow-ups). More follow-ups = you stay in control.`
             });
           } else if (aiMyFollow < userMyFollow) {
             lines.push({ type: 'compare',
-              text: `Board ends: Your pick leaves ${userEnds} (${userMyFollow} follow-ups) vs AI's ${aiEnds} (${aiMyFollow}). Your ends are actually better for suit control, but other factors matter more here.`
+              text: pt ? `Pontas: Sua escolha ${userEnds} (${userMyFollow} seguimentos) vs IA ${aiEnds} (${aiMyFollow}). Suas pontas são melhores para controle, mas outros fatores pesam mais.`
+                : `Board ends: Your pick leaves ${userEnds} (${userMyFollow} follow-ups) vs AI's ${aiEnds} (${aiMyFollow}). Your ends are actually better for suit control, but other factors matter more here.`
             });
           }
         }
@@ -4676,7 +4773,8 @@
 
           if (aiBlocksOpp && !userBlocksOpp) {
             lines.push({ type: 'opponent',
-              text: `${pNames[oppIdx]} passed and can't have {${dead.join(', ')}}. The AI's play leaves ends ${aiNewEnds.newLeft}/${aiNewEnds.newRight} which BLOCKS them completely — they'll pass again. Your pick doesn't achieve this.`
+              text: pt ? `${pNames[oppIdx]} passou e não tem {${dead.join(', ')}}. A IA deixa pontas ${aiNewEnds.newLeft}/${aiNewEnds.newRight} que BLOQUEIAM completamente — vai passar de novo. Sua escolha não consegue isso.`
+                : `${pNames[oppIdx]} passed and can't have {${dead.join(', ')}}. The AI's play leaves ends ${aiNewEnds.newLeft}/${aiNewEnds.newRight} which BLOCKS them completely — they'll pass again. Your pick doesn't achieve this.`
             });
           }
         }
@@ -4695,7 +4793,8 @@
 
           if (userPartnerHurt && aiPartnerHelp) {
             lines.push({ type: 'partner',
-              text: `Partner can't have {${partnerDead.join(', ')}}. Your pick leaves ends ${userNewEnds.newLeft}/${userNewEnds.newRight} which blocks your own partner! The AI avoids this.`
+              text: pt ? `Parceiro não tem {${partnerDead.join(', ')}}. Sua escolha deixa pontas ${userNewEnds.newLeft}/${userNewEnds.newRight} que bloqueiam seu próprio parceiro! A IA evita isso.`
+                : `Partner can't have {${partnerDead.join(', ')}}. Your pick leaves ends ${userNewEnds.newLeft}/${userNewEnds.newRight} which blocks your own partner! The AI avoids this.`
             });
           }
 
@@ -4711,7 +4810,8 @@
               const userHasPartnerSuit = userNewEnds.newLeft === topSuit || userNewEnds.newRight === topSuit;
               if (aiHasPartnerSuit && !userHasPartnerSuit) {
                 lines.push({ type: 'partner',
-                  text: `Partner played ${strongSuits[0].count} tiles with ${topSuit}s and ${othersCouldHave} tiles with ${topSuit} are still unaccounted for (not in your hand or played). AI leaves a ${topSuit}-end so partner can likely play. Your pick doesn't.`
+                  text: pt ? `Parceiro jogou ${strongSuits[0].count} pedras com ${topSuit} e ${othersCouldHave} pedras com ${topSuit} ainda não apareceram. IA deixa ponta ${topSuit} para parceiro jogar. Sua escolha não.`
+                    : `Partner played ${strongSuits[0].count} tiles with ${topSuit}s and ${othersCouldHave} tiles with ${topSuit} are still unaccounted for (not in your hand or played). AI leaves a ${topSuit}-end so partner can likely play. Your pick doesn't.`
                 });
               }
             }
@@ -4722,7 +4822,8 @@
         const estPartnerHand = Math.max(0, 6 - partnerPlays.length);
         if (estPartnerHand <= 2 && estPartnerHand > 0) {
           lines.push({ type: 'partner',
-            text: `Partner has ~${estPartnerHand} tile${estPartnerHand > 1 ? 's' : ''} left — they're close to winning! Prioritize leaving ends they can play, even at your own expense.`
+            text: pt ? `Parceiro tem ~${estPartnerHand} pedra${estPartnerHand > 1 ? 's' : ''} — está perto de ganhar! Priorize pontas que possa jogar.`
+              : `Partner has ~${estPartnerHand} tile${estPartnerHand > 1 ? 's' : ''} left — they're close to winning! Prioritize leaving ends they can play, even at your own expense.`
           });
         }
       }
@@ -4733,11 +4834,13 @@
         const support = hand.filter(t => t.id !== aiTile.id && (t.left === aiDblNum || t.right === aiDblNum)).length;
         if (support === 0) {
           lines.push({ type: 'strategy',
-            text: `The AI plays the isolated double [${aiDblNum}|${aiDblNum}] now while it can. Doubles only match one number and become harder to play later. If you hold it and the board moves away from ${aiDblNum}s, you're stuck with it.`
+            text: pt ? `A IA joga a carroça isolada [${aiDblNum}|${aiDblNum}] agora. Carroças só combinam com um número e ficam mais difíceis depois. Se segurar e o tabuleiro mudar, fica travado.`
+              : `The AI plays the isolated double [${aiDblNum}|${aiDblNum}] now while it can. Doubles only match one number and become harder to play later. If you hold it and the board moves away from ${aiDblNum}s, you're stuck with it.`
           });
         } else {
           lines.push({ type: 'strategy',
-            text: `The AI clears the double [${aiDblNum}|${aiDblNum}] early — doubles are inflexible (only connect to one number). Better to play them when the opportunity is there.`
+            text: pt ? `A IA descarta a carroça [${aiDblNum}|${aiDblNum}] cedo — carroças são inflexíveis (conectam a um número só). Melhor jogar quando a oportunidade existe.`
+              : `The AI clears the double [${aiDblNum}|${aiDblNum}] early — doubles are inflexible (only connect to one number). Better to play them when the opportunity is there.`
           });
         }
       }
@@ -4745,7 +4848,8 @@
       // 5. Heavy tile dumping
       if (aiTile.left + aiTile.right > userTile.left + userTile.right + 3) {
         lines.push({ type: 'strategy',
-          text: `The AI dumps the heavier tile (${aiTile.left + aiTile.right} pips vs your ${userTile.left + userTile.right} pips). If the game blocks, your team's total pips decide who loses. Getting rid of heavy tiles early is safer.`
+          text: pt ? `A IA descarta a pedra mais pesada (${aiTile.left + aiTile.right} pontos vs seus ${userTile.left + userTile.right}). Se trancar, o total de pontos decide quem perde.`
+            : `The AI dumps the heavier tile (${aiTile.left + aiTile.right} pips vs your ${userTile.left + userTile.right} pips). If the game blocks, your team's total pips decide who loses. Getting rid of heavy tiles early is safer.`
         });
       }
 
@@ -4759,7 +4863,8 @@
           if ((userLeftRem <= 1 || userRightRem <= 1) && aiLeftRem > 1 && aiRightRem > 1) {
             const scarce = userLeftRem <= 1 ? userNewEnds.newLeft : userNewEnds.newRight;
             lines.push({ type: 'warning',
-              text: `Your pick creates a near-dead end: only ${knowledge.remainingWithNumber(scarce)} tile(s) left with ${scarce}. The board could stall. The AI avoids scarce numbers as ends.`
+              text: pt ? `Sua escolha cria uma ponta quase morta: só ${knowledge.remainingWithNumber(scarce)} pedra(s) restam com ${scarce}. O tabuleiro pode travar. A IA evita números escassos.`
+                : `Your pick creates a near-dead end: only ${knowledge.remainingWithNumber(scarce)} tile(s) left with ${scarce}. The board could stall. The AI avoids scarce numbers as ends.`
             });
           }
         }
@@ -4767,7 +4872,7 @@
 
       // If no detailed lines beyond header, add a generic one
       if (lines.filter(l => !l.type.includes('header') && l.type !== 'user-reason').length === 0) {
-        lines.push({ type: 'info', text: `The AI's choice is stronger due to a combination of suit control, blocking opponents, and/or supporting your partner.` });
+        lines.push({ type: 'info', text: pt ? 'A escolha da IA é mais forte por combinar controle de naipe, bloqueio de adversários e/ou apoio ao parceiro.' : `The AI's choice is stronger due to a combination of suit control, blocking opponents, and/or supporting your partner.` });
       }
 
       return lines;
@@ -4863,8 +4968,8 @@
                   ${renderSidePlayer(1, snap, pNames, pTeams, teamColors)}
                 </div>
                 <div class="flex-1 bg-green-950 rounded-xl border-2 border-green-800 p-2 min-h-[280px] relative overflow-auto" id="board-area">
-                  ${renderScoringDial(matchScore[0], 0, 'top')}
-                  ${renderScoringDial(matchScore[1], 1, 'top')}
+                  ${renderScoringDial(matchScore[0], 0)}
+                  ${renderScoringDial(matchScore[1], 1)}
                   ${renderRemovedTiles()}
                   <div class="board-snake" id="board-snake" style="padding-bottom:32px">
                     ${renderBoard(snap)}
@@ -5212,7 +5317,7 @@
             const hintBtn = `<button class="btn text-xs px-3 py-0.5 ml-2" style="background:#6366f1;color:#fff" onclick="showPlayHint()">${_t('hint')}</button>`;
             const hintDisplay = playHint ? `<div class="text-center mt-1 bg-indigo-950 rounded px-2 py-1 border border-indigo-500">
               <span class="text-xs text-indigo-300">${playHint.tileId ? `AI: <b>[${playHint.tileId}] ${playHint.side}</b>` : _t('pass')}</span>
-              ${playHint.reasons.length ? `<div class="text-xs text-indigo-400 mt-0.5">${playHint.reasons.map(r => '- ' + r).join('<br>')}</div>` : ''}
+              ${playHint.reasons.length ? `<div class="text-xs text-indigo-400 mt-0.5">${playHint.reasons.map(r => '- ' + _tr(r)).join('<br>')}</div>` : ''}
             </div>` : '';
             return hasPlayable
               ? `<div class="text-center mt-1"><span class="text-xs text-yellow-400 pulse font-bold">${_t('click_tile')}</span>${!playHint ? hintBtn : ''}</div>${hintDisplay}`
@@ -5432,13 +5537,13 @@
 
         ${puzzleMode && puzzleDef ? `
         <div class="border-t border-amber-700 pt-2 mt-2 bg-amber-950/30 rounded p-2">
-          <div class="text-xs text-amber-400 font-bold mb-1">&#127891; Puzzle Lesson: ${puzzleDef.title}</div>
+          <div class="text-xs text-amber-400 font-bold mb-1">&#127891; ${appLang==='pt'?'Lição do Puzzle':'Puzzle Lesson'}: ${puzzleDef.title}</div>
           <div class="text-xs text-amber-200 mb-1">${puzzleDef.hint}</div>
           ${puzzleDef.explanation ? `<div class="text-xs text-slate-300 mt-1">${puzzleDef.explanation}</div>` : ''}
         </div>` : ''}
 
         <div class="text-center mt-2">
-          <button class="btn btn-green text-xs" onclick="quizContinue()">Continue</button>
+          <button class="btn btn-green text-xs" onclick="quizContinue()">${_t('continue_btn')}</button>
         </div>
       </div>`;
     }
@@ -5473,53 +5578,57 @@
     }
 
     // ========== SCORING DIALS (fan-shaped, like real Pernambuco board) ==========
-    function renderScoringDial(teamScore, teamIdx, position) {
-      // SVG semicircular dial showing scores 0-6 with pointer
+    // Blue (T1) = top-left corner, Red (T2) = bottom-right corner
+    function renderScoringDial(teamScore, teamIdx) {
       const score = Math.min(teamScore, 6);
-      const r = 32; // radius
-      const cx = 38, cy = 38; // center
+      const r = 36; // radius
+      const W = 88, H = 56;
       const color = teamIdx === 0 ? '#3b82f6' : '#ef4444';
-      const bgColor = teamIdx === 0 ? 'rgba(59,130,246,0.15)' : 'rgba(239,68,68,0.15)';
       const label = teamIdx === 0 ? 'T1' : 'T2';
-      // Fan from -90deg to +90deg (semicircle pointing up for top, down for bottom)
-      const isTop = position === 'top';
-      const startAngle = isTop ? Math.PI : 0; // top dial: fan pointing down, bottom: fan pointing up
-      const endAngle = isTop ? 2 * Math.PI : Math.PI;
+      // T1 (blue) top-left: fan opens downward-right; T2 (red) bottom-right: fan opens upward-left
+      const isTopLeft = teamIdx === 0;
+      const cx = isTopLeft ? 8 : W - 8;
+      const cy = isTopLeft ? 8 : H - 8;
+      // Angles: T1 fans from 0 (right) to PI/2 (down); T2 fans from PI (left) to 3PI/2 (up)
+      const startAngle = isTopLeft ? 0 : Math.PI;
+      const endAngle = isTopLeft ? Math.PI / 2 : Math.PI * 1.5;
 
       let ticks = '';
       for (let i = 0; i <= 6; i++) {
         const frac = i / 6;
         const angle = startAngle + frac * (endAngle - startAngle);
-        const x1 = cx + (r - 6) * Math.cos(angle);
-        const y1 = cy + (r - 6) * Math.sin(angle);
+        const x1 = cx + (r - 7) * Math.cos(angle);
+        const y1 = cy + (r - 7) * Math.sin(angle);
         const x2 = cx + r * Math.cos(angle);
         const y2 = cy + r * Math.sin(angle);
-        const tx = cx + (r + 8) * Math.cos(angle);
-        const ty = cy + (r + 8) * Math.sin(angle);
+        const tx = cx + (r + 10) * Math.cos(angle);
+        const ty = cy + (r + 10) * Math.sin(angle);
         const isActive = i <= score;
         const isCurrent = i === score;
         ticks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${isActive ? color : '#475569'}" stroke-width="${isCurrent ? 3 : 1.5}" />`;
-        ticks += `<text x="${tx}" y="${ty}" fill="${isCurrent ? '#fff' : isActive ? color : '#64748b'}" font-size="${isCurrent ? 10 : 8}" font-weight="${isCurrent ? 700 : 400}" text-anchor="middle" dominant-baseline="central">${i}</text>`;
+        ticks += `<text x="${tx}" y="${ty}" fill="${isCurrent ? '#fff' : isActive ? color : '#94a3b8'}" font-size="${isCurrent ? 13 : 11}" font-weight="${isCurrent ? 800 : 600}" font-family="monospace" text-anchor="middle" dominant-baseline="central" stroke="${isCurrent ? 'none' : 'none'}">${i}</text>`;
       }
-      // Pointer arc showing filled portion
+      // Pointer dot on current score
       const pointerAngle = startAngle + (score / 6) * (endAngle - startAngle);
-      const px = cx + (r - 12) * Math.cos(pointerAngle);
-      const py = cy + (r - 12) * Math.sin(pointerAngle);
+      const px = cx + (r - 14) * Math.cos(pointerAngle);
+      const py = cy + (r - 14) * Math.sin(pointerAngle);
 
       // Arc path for filled portion
-      const arcStart = startAngle;
       const arcEnd = pointerAngle;
-      const sx = cx + (r - 3) * Math.cos(arcStart);
-      const sy = cy + (r - 3) * Math.sin(arcStart);
+      const sx = cx + (r - 3) * Math.cos(startAngle);
+      const sy = cy + (r - 3) * Math.sin(startAngle);
       const ex = cx + (r - 3) * Math.cos(arcEnd);
       const ey = cy + (r - 3) * Math.sin(arcEnd);
-      const largeArc = (arcEnd - arcStart) > Math.PI ? 1 : 0;
+      const largeArc = (arcEnd - startAngle) > Math.PI ? 1 : 0;
       const arcPath = score > 0 ? `<path d="M${sx},${sy} A${r-3},${r-3} 0 ${largeArc} 1 ${ex},${ey}" fill="none" stroke="${color}" stroke-width="3" opacity="0.6" />` : '';
 
-      return `<svg width="76" height="52" viewBox="0 0 76 52" style="position:absolute;${position==='top'?'top:2px':'bottom:2px'};${teamIdx===0?'left:2px':'right:2px'};opacity:0.85;pointer-events:none">
+      // Position: T1 top-left, T2 bottom-right
+      const posStyle = isTopLeft ? 'top:2px;left:2px' : 'bottom:2px;right:2px';
+
+      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;${posStyle};opacity:0.9;pointer-events:none">
         ${arcPath}${ticks}
-        <circle cx="${px}" cy="${py}" r="3.5" fill="${color}" stroke="#fff" stroke-width="1" />
-        <text x="${cx}" y="${isTop ? cy + 12 : cy - 8}" fill="${color}" font-size="8" font-weight="700" text-anchor="middle" opacity="0.7">${label}</text>
+        <circle cx="${px}" cy="${py}" r="4" fill="${color}" stroke="#fff" stroke-width="1.5" />
+        <text x="${isTopLeft ? 12 : W - 12}" y="${isTopLeft ? 18 : H - 18}" fill="${color}" font-size="9" font-weight="700" text-anchor="middle" opacity="0.8">${label}</text>
       </svg>`;
     }
 
@@ -5671,18 +5780,18 @@
           <div class="flex items-center gap-2 mb-1">
             <span class="text-xs font-bold px-2 py-0.5 rounded" style="background:${teamColors[snap.player%2]}">${pn(snap.player)}</span>
             <span class="text-xs font-bold ${snap.action === 'pass' ? 'text-orange-400' : 'text-emerald-400'}">
-              ${snap.action === 'pass' ? 'PASSES' : `plays [${snap.tile.left}|${snap.tile.right}] on ${snap.side}`}
+              ${snap.action === 'pass' ? _t('passes_lbl') : `${_t('plays_lbl')} [${snap.tile.left}|${snap.tile.right}] ${_t('on_side')} ${snap.side}`}
             </span>
           </div>
-          <div class="text-xs text-slate-500 mb-1">Why this tile:</div>
+          <div class="text-xs text-slate-500 mb-1">${_t('why_tile')}</div>
           <div class="space-y-0.5">
             ${(snap.reasons || []).map(r => `<div class="text-xs text-slate-300 flex items-start gap-1">
-              <span class="text-emerald-400 mt-0.5">&#9654;</span> ${r}
+              <span class="text-emerald-400 mt-0.5">&#9654;</span> ${_tr(r)}
             </div>`).join('')}
           </div>
           ${snap.allOptions && snap.allOptions.length > 1 ? `
           <div class="mt-2 pt-1.5 border-t border-slate-700">
-            <div class="text-xs text-slate-500 mb-1">All options (best to worst):</div>
+            <div class="text-xs text-slate-500 mb-1">${_t('all_opts')}</div>
             ${(() => {
               const opts = snap.allOptions.slice(0, 6).map(o => {
                 const mc = mcResults ? mcResults.find(m => m.tile.id === o.tile.id) : null;
@@ -5704,10 +5813,10 @@
                     <span class="w-14">[${o.tile.left}|${o.tile.right}]${o.side ? ' '+o.side : ''}</span>
                     <span class="font-mono font-bold w-7 text-right" style="color:${hCol}">${hPct}</span>
                     ${ep !== null ? `<span class="font-mono font-bold w-12 text-right" style="color:${epCol}">${fmtEP(ep)}</span>
-                    ${tileLoss !== null && tileLoss > 0.01 ? `<span class="font-mono text-red-400 w-10 text-right">-${tileLoss.toFixed(2)}</span>` : `<span class="font-mono text-emerald-400 w-10">BEST</span>`}` :
+                    ${tileLoss !== null && tileLoss > 0.01 ? `<span class="font-mono text-red-400 w-10 text-right">-${tileLoss.toFixed(2)}</span>` : `<span class="font-mono text-emerald-400 w-10">${_t('best')}</span>`}` :
                     `<div class="bg-slate-700 rounded-full h-1.5 mx-1" style="width:50px"><div class="h-1.5 rounded-full" style="width:${hPct}%;background:${hCol}"></div></div>`}
                   </div>
-                  ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + r).join('<br>')}</div>` : ''}
+                  ${o.reasons.length > 0 ? `<div class="ml-4 text-slate-600">${o.reasons.map(r => '· ' + _tr(r)).join('<br>')}</div>` : ''}
                 </div>`;
               }).join('');
             })()}
@@ -5715,11 +5824,11 @@
         </div>` : currentGame.autoTile ? `
         <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-slate-600">
           <div class="text-xs text-slate-400">
-            ${pn(currentGame.autoPlayedBy)} auto-plays [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (highest double — first round rule).
+            ${pn(currentGame.autoPlayedBy)} ${_t('auto_plays')} [${currentGame.autoTile.left}|${currentGame.autoTile.right}] (${_t('highest_dbl_rule')}).
           </div>
         </div>` : puzzleMode ? `
         <div class="bg-slate-900 rounded-lg p-2.5 mb-2 border border-amber-600">
-          <div class="text-xs text-amber-400 font-bold">Pick the best tile from your hand.</div>
+          <div class="text-xs text-amber-400 font-bold">${_t('pick_best')}</div>
         </div>` : ''}
 
         <!-- Monte Carlo Analysis -->
@@ -5730,13 +5839,13 @@
 
         <!-- Knowledge panel -->
         <div class="bg-slate-900 rounded-lg p-2 mb-2">
-          <div class="text-xs font-bold text-slate-400 mb-1">Intelligence</div>
+          <div class="text-xs font-bold text-slate-400 mb-1">${_t('intelligence')}</div>
           ${[0,1,2,3].map(p => {
             const dead = snap.knowledge ? snap.knowledge.deadNumbers(p) : [];
             if (dead.length === 0) return '';
-            return `<div class="text-xs mb-0.5"><span style="color:${teamColors[p%2]}">${pn(p)}:</span> can't have <span class="text-red-400 font-mono">{${dead.join(', ')}}</span></div>`;
+            return `<div class="text-xs mb-0.5"><span style="color:${teamColors[p%2]}">${pn(p)}:</span> ${_t('cant_have')} <span class="text-red-400 font-mono">{${dead.join(', ')}}</span></div>`;
           }).join('')}
-          ${snap.knowledge && [0,1,2,3].every(p => snap.knowledge.deadNumbers(p).length === 0) ? '<div class="text-xs text-slate-500">No intelligence yet</div>' : ''}
+          ${snap.knowledge && [0,1,2,3].every(p => snap.knowledge.deadNumbers(p).length === 0) ? `<div class="text-xs text-slate-500">${_t('no_intel')}</div>` : ''}
         </div>
 
         <!-- Move log -->
@@ -5750,7 +5859,7 @@
               <span class="font-mono text-slate-500">#${s.move}</span>
               <span class="font-bold" style="color:${teamColors[s.player%2]}">${pn(s.player)}</span>
               ${s.action === 'pass'
-                ? '<span class="text-orange-400">passes</span>'
+                ? `<span class="text-orange-400">${_t('passed_word')}</span>`
                 : `<span class="text-emerald-400">[${s.tile.left}|${s.tile.right}]</span> <span class="text-slate-400">${s.side}</span>`}
               ${s.outcome ? `<span class="text-yellow-400 ml-1">${s.outcome.winType || s.outcome.type}</span>` : ''}
             </div>`;
@@ -5764,23 +5873,18 @@
       const tips = [];
       const reasons = snap.reasons || [];
       const k = snap.knowledge;
+      const pt = appLang === 'pt';
 
       // --- Analyze game state for context-aware tips ---
       const partner = 2, opp1 = 1, opp3 = 3;
-
-      // Count tiles each player likely has
       const handCounts = snap.hands.map(h => h.length);
       const partnerTiles = handCounts[partner];
       const opp1Tiles = handCounts[opp1];
       const opp3Tiles = handCounts[opp3];
       const myTiles = handCounts[0];
-
-      // Opponent pass data
       const opp1Dead = k ? k.deadNumbers(opp1) : [];
       const opp3Dead = k ? k.deadNumbers(opp3) : [];
       const partnerDead = k ? k.deadNumbers(partner) : [];
-
-      // Partner strength (which numbers they've played a lot)
       const partnerStr = k ? k.inferStrength(partner) : [0,0,0,0,0,0,0];
       const partnerStrongSuits = partnerStr.map((v, i) => ({ num: i, count: v })).filter(x => x.count >= 2).sort((a, b) => b.count - a.count);
 
@@ -5790,156 +5894,174 @@
         const pName = pn(snap.player);
 
         if (snap.player === opp1 || snap.player === opp3) {
-          // Opponent passed
           if (dead.length >= 4) {
             tips.push({ icon: '&#128270;', color: 'text-red-300',
-              text: `${pName} has passed on ${dead.length}/7 numbers — they're badly stuck. Leave board ends on numbers they lack and they'll keep passing.`,
-              rule: 'TRACK PASSES: Every pass reveals 2 numbers an opponent lacks. After 2 passes you know 4 dead numbers — nearly half the suits!'
+              text: pt ? `${pName} já passou em ${dead.length}/7 números — está muito travado. Deixe as pontas em números que faltam e vai continuar passando.`
+                : `${pName} has passed on ${dead.length}/7 numbers — they're badly stuck. Leave board ends on numbers they lack and they'll keep passing.`,
+              rule: pt ? 'RASTREIE PASSES: Cada passe revela 2 números que o adversário não tem. Após 2 passes você sabe 4 números mortos — quase metade dos naipes!'
+                : 'TRACK PASSES: Every pass reveals 2 numbers an opponent lacks. After 2 passes you know 4 dead numbers — nearly half the suits!'
             });
           } else if (dead.length >= 2) {
             tips.push({ icon: '&#128270;', color: 'text-orange-300',
-              text: `${pName} can't have {${dead.join(', ')}}. Try to keep at least one of these numbers as a board end.`,
-              rule: 'MEMORIZE PASSES: In real play, say it in your head: "Left can\'t play 3 or 6." This is the most valuable free information in domino.'
+              text: pt ? `${pName} não tem {${dead.join(', ')}}. Tente manter pelo menos um desses números como ponta.`
+                : `${pName} can't have {${dead.join(', ')}}. Try to keep at least one of these numbers as a board end.`,
+              rule: pt ? 'MEMORIZE PASSES: No jogo real, diga mentalmente: "Esquerda não joga 3 nem 6." Esta é a informação grátis mais valiosa no dominó.'
+                : 'MEMORIZE PASSES: In real play, say it in your head: "Left can\'t play 3 or 6." This is the most valuable free information in domino.'
             });
           } else {
             tips.push({ icon: '&#128270;', color: 'text-yellow-300',
-              text: `${pName}'s first pass — they lack both ${snap.leftEnd} and ${snap.rightEnd}. File this away.`,
-              rule: 'FIRST PASS = GOLD: The first time someone passes, you learn 2 numbers. Keep these in memory for the rest of the round.'
+              text: pt ? `Primeiro passe de ${pName} — não tem ${snap.leftEnd} nem ${snap.rightEnd}. Guarde isso.`
+                : `${pName}'s first pass — they lack both ${snap.leftEnd} and ${snap.rightEnd}. File this away.`,
+              rule: pt ? 'PRIMEIRO PASSE = OURO: Na primeira vez que alguém passa, você aprende 2 números. Guarde na memória para o resto da rodada.'
+                : 'FIRST PASS = GOLD: The first time someone passes, you learn 2 numbers. Keep these in memory for the rest of the round.'
             });
           }
         } else if (snap.player === partner) {
           tips.push({ icon: '&#128153;', color: 'text-blue-300',
-            text: `Partner passed — they can't play ${snap.leftEnd} or ${snap.rightEnd}. On your next turn, try to change the board ends to numbers partner has played before.`,
-            rule: 'HELP YOUR PARTNER: When partner passes, your #1 priority is changing the board to numbers they CAN play. A passing partner is a losing team.'
+            text: pt ? `Parceiro passou — não joga ${snap.leftEnd} nem ${snap.rightEnd}. No seu turno, tente mudar as pontas para números que o parceiro já jogou.`
+              : `Partner passed — they can't play ${snap.leftEnd} or ${snap.rightEnd}. On your next turn, try to change the board ends to numbers partner has played before.`,
+            rule: pt ? 'AJUDE SEU PARCEIRO: Quando parceiro passa, sua prioridade #1 é mudar o tabuleiro para números que ele PODE jogar. Parceiro passando é equipe perdendo.'
+              : 'HELP YOUR PARTNER: When partner passes, your #1 priority is changing the board to numbers they CAN play. A passing partner is a losing team.'
           });
         } else if (snap.player === 0) {
           tips.push({ icon: '&#9888;', color: 'text-yellow-300',
-            text: `You passed — opponents now know you lack ${snap.leftEnd} and ${snap.rightEnd}. They'll try to keep these as ends to lock you out.`,
-            rule: 'YOUR PASSES HURT: Every time you pass, opponents gain intelligence. Play tiles that keep you flexible to avoid passing.'
+            text: pt ? `Você passou — adversários agora sabem que você não tem ${snap.leftEnd} nem ${snap.rightEnd}. Vão tentar manter essas pontas para te trancar.`
+              : `You passed — opponents now know you lack ${snap.leftEnd} and ${snap.rightEnd}. They'll try to keep these as ends to lock you out.`,
+            rule: pt ? 'SEUS PASSES CUSTAM: Cada vez que passa, adversários ganham inteligência. Jogue pedras que te mantêm flexível para evitar passar.'
+              : 'YOUR PASSES HURT: Every time you pass, opponents gain intelligence. Play tiles that keep you flexible to avoid passing.'
           });
         }
       }
 
       // === PLAY TIPS ===
       if (snap.action === 'play') {
-
-        // --- Partner close to winning ---
         if (partnerTiles <= 2 && partnerTiles > 0) {
           tips.push({ icon: '&#127942;', color: 'text-emerald-300',
-            text: `Partner has only ${partnerTiles} tile${partnerTiles > 1 ? 's' : ''} left! Prioritize leaving ends they can play over everything else — even over blocking opponents.`,
-            rule: 'ENDGAME RULE: When partner has 1-2 tiles, helping them go out is almost always the best play. Blocking is pointless if your team can win NOW. Count tiles: started with 6, played X, so they have 6-X.'
+            text: pt ? `Parceiro tem só ${partnerTiles} pedra${partnerTiles > 1 ? 's' : ''}! Priorize deixar pontas que ele possa jogar — mesmo acima de bloquear adversários.`
+              : `Partner has only ${partnerTiles} tile${partnerTiles > 1 ? 's' : ''} left! Prioritize leaving ends they can play over everything else — even over blocking opponents.`,
+            rule: pt ? 'REGRA DO FINAL: Quando parceiro tem 1-2 pedras, ajudá-lo a bater é quase sempre a melhor jogada. Bloquear é inútil se sua equipe pode ganhar AGORA.'
+              : 'ENDGAME RULE: When partner has 1-2 tiles, helping them go out is almost always the best play. Blocking is pointless if your team can win NOW. Count tiles: started with 6, played X, so they have 6-X.'
           });
         }
 
-        // --- Opponent close to winning ---
         if (opp1Tiles <= 2 || opp3Tiles <= 2) {
           const dangerOpp = opp1Tiles <= 2 ? opp1 : opp3;
           const dangerCount = Math.min(opp1Tiles, opp3Tiles);
           tips.push({ icon: '&#9888;', color: 'text-red-300',
-            text: `${pn(dangerOpp)} has only ${dangerCount} tile${dangerCount > 1 ? 's' : ''} left — danger! Block them or they'll win. Leave ends on numbers they've passed on.`,
-            rule: 'COUNT OPPONENT TILES: If an opponent has 1-2 tiles, blocking them becomes critical. Use their pass history to leave ends they can\'t play.'
+            text: pt ? `${pn(dangerOpp)} tem só ${dangerCount} pedra${dangerCount > 1 ? 's' : ''} — perigo! Bloqueie ou vai ganhar. Deixe pontas em números que passou.`
+              : `${pn(dangerOpp)} has only ${dangerCount} tile${dangerCount > 1 ? 's' : ''} left — danger! Block them or they'll win. Leave ends on numbers they've passed on.`,
+            rule: pt ? 'CONTE PEDRAS DO ADVERSÁRIO: Se adversário tem 1-2 pedras, bloqueá-lo é crítico. Use o histórico de passes para deixar pontas que não pode jogar.'
+              : 'COUNT OPPONENT TILES: If an opponent has 1-2 tiles, blocking them becomes critical. Use their pass history to leave ends they can\'t play.'
           });
         }
 
-        // --- Partner suit reading ---
         if (partnerStrongSuits.length > 0 && reasons.some(r => r.includes('Partner played'))) {
           const top = partnerStrongSuits[0];
           tips.push({ icon: '&#128153;', color: 'text-blue-300',
-            text: `Partner has played ${top.count} tiles with ${top.num}s — they likely have more. Leaving a ${top.num}-end lets them play.`,
-            rule: `READ PARTNER'S SUIT: When partner plays 2+ tiles with the same number, they're signaling strength. Keep that number as a board end. In real play: "Partner likes ${top.num}s" — simple but powerful.`
+            text: pt ? `Parceiro jogou ${top.count} pedras com ${top.num} — provavelmente tem mais. Deixar ponta ${top.num} permite que jogue.`
+              : `Partner has played ${top.count} tiles with ${top.num}s — they likely have more. Leaving a ${top.num}-end lets them play.`,
+            rule: pt ? `LEIA O NAIPE DO PARCEIRO: Quando parceiro joga 2+ pedras com o mesmo número, está sinalizando força. Mantenha esse número como ponta. "Parceiro gosta de ${top.num}" — simples mas poderoso.`
+              : `READ PARTNER'S SUIT: When partner plays 2+ tiles with the same number, they're signaling strength. Keep that number as a board end. In real play: "Partner likes ${top.num}s" — simple but powerful.`
           });
         }
 
-        // --- Blocking play ---
         if (reasons.some(r => r.includes('Blocks'))) {
           const blockedOpp = opp1Dead.includes(snap.leftEnd) && opp1Dead.includes(snap.rightEnd) ? opp1 :
                              opp3Dead.includes(snap.leftEnd) && opp3Dead.includes(snap.rightEnd) ? opp3 : -1;
           if (blockedOpp >= 0) {
             const blockedDead = blockedOpp === opp1 ? opp1Dead : opp3Dead;
             tips.push({ icon: '&#128683;', color: 'text-red-300',
-              text: `${pn(blockedOpp)} is fully blocked — both ends (${snap.leftEnd}/${snap.rightEnd}) are in their dead set {${blockedDead.join(', ')}}.`,
-              rule: 'BLOCKING = TEMPO: A blocked opponent loses their turn. That\'s like getting a free extra move for your team. The more passes they make, the more turns your team gets.'
+              text: pt ? `${pn(blockedOpp)} totalmente bloqueado — ambas pontas (${snap.leftEnd}/${snap.rightEnd}) estão no conjunto morto {${blockedDead.join(', ')}}.`
+                : `${pn(blockedOpp)} is fully blocked — both ends (${snap.leftEnd}/${snap.rightEnd}) are in their dead set {${blockedDead.join(', ')}}.`,
+              rule: pt ? 'BLOQUEIO = TEMPO: Adversário bloqueado perde o turno. É como ganhar uma jogada extra grátis para sua equipe.'
+                : 'BLOCKING = TEMPO: A blocked opponent loses their turn. That\'s like getting a free extra move for your team. The more passes they make, the more turns your team gets.'
             });
           }
         }
 
-        // --- Dead blocking (opponent already stuck, blocking is wasteful) ---
         for (const oppIdx of [opp1, opp3]) {
           const oppDead = k ? k.deadNumbers(oppIdx) : [];
           if (oppDead.length >= 5 && handCounts[oppIdx] >= 3) {
             tips.push({ icon: '&#128161;', color: 'text-amber-300',
-              text: `${pn(oppIdx)} is already stuck (can't have ${oppDead.length}/7 numbers, still holding ${handCounts[oppIdx]} tiles). No need to waste moves blocking them further — focus on helping partner or playing your strong suits.`,
-              rule: 'DEAD BLOCKING: If an opponent has passed 3+ times, they\'re stuck regardless. Don\'t waste moves blocking someone who\'s already dead. Help your partner or dump heavy tiles instead.'
+              text: pt ? `${pn(oppIdx)} já está travado (não tem ${oppDead.length}/7 números, ainda com ${handCounts[oppIdx]} pedras). Não gaste jogadas bloqueando mais — foque em ajudar parceiro.`
+                : `${pn(oppIdx)} is already stuck (can't have ${oppDead.length}/7 numbers, still holding ${handCounts[oppIdx]} tiles). No need to waste moves blocking them further — focus on helping partner or playing your strong suits.`,
+              rule: pt ? 'BLOQUEIO MORTO: Se adversário já passou 3+ vezes, está travado de qualquer forma. Ajude seu parceiro ou descarte pedras pesadas.'
+                : 'DEAD BLOCKING: If an opponent has passed 3+ times, they\'re stuck regardless. Don\'t waste moves blocking someone who\'s already dead. Help your partner or dump heavy tiles instead.'
             });
-            break; // only one dead blocking tip
+            break;
           }
         }
 
-        // --- Double management ---
         if (snap.tile.left === snap.tile.right) {
           const dblNum = snap.tile.left;
-          const support = snap.hands[snap.player] ? snap.hands[snap.player].filter(t => t.left === dblNum || t.right === dblNum).length : 0;
-          if (support === 0 && !tips.some(t => t.text.includes('double'))) {
+          const support = snap.hands[snap.player] ? snap.hands[snap.player].filter(tl => tl.left === dblNum || tl.right === dblNum).length : 0;
+          if (support === 0 && !tips.some(tp => tp.text.includes('double') || tp.text.includes('carroça'))) {
             tips.push({ icon: '&#9879;', color: 'text-purple-300',
-              text: `Played the [${dblNum}|${dblNum}] double${snap.hands[snap.player] && snap.hands[snap.player].some(t => t.left === dblNum || t.right === dblNum) ? '' : ' with no backup'}. Doubles only connect to one number — play them early before the board moves away.`,
-              rule: 'DOUBLES ARE TRAPS: A double [X|X] can only connect to X. If you hold it too long and all X-ends disappear, you\'re stuck. Play doubles at the first opportunity unless you have 2+ support tiles with that number.'
+              text: pt ? `Jogou a carroça [${dblNum}|${dblNum}]${snap.hands[snap.player] && snap.hands[snap.player].some(tl => tl.left === dblNum || tl.right === dblNum) ? '' : ' sem backup'}. Carroças só conectam a um número — jogue cedo antes que o tabuleiro mude.`
+                : `Played the [${dblNum}|${dblNum}] double${snap.hands[snap.player] && snap.hands[snap.player].some(tl => tl.left === dblNum || tl.right === dblNum) ? '' : ' with no backup'}. Doubles only connect to one number — play them early before the board moves away.`,
+              rule: pt ? 'CARROÇAS SÃO ARMADILHAS: Uma carroça [X|X] só conecta com X. Se segurar muito tempo e todas as pontas X sumirem, fica travado. Jogue carroças na primeira oportunidade.'
+                : 'DOUBLES ARE TRAPS: A double [X|X] can only connect to X. If you hold it too long and all X-ends disappear, you\'re stuck. Play doubles at the first opportunity unless you have 2+ support tiles with that number.'
             });
           }
         }
 
-        // --- Heavy tile dump ---
         if (snap.tile.left + snap.tile.right >= 10 && reasons.some(r => r.includes('Dump heavy'))) {
           tips.push({ icon: '&#9878;', color: 'text-orange-300',
-            text: `Dumped a heavy tile (${snap.tile.left + snap.tile.right} pips). If the game blocks, the team with fewer total pips wins.`,
-            rule: 'PIP MANAGEMENT: In a blocked game, every pip counts. Dump [6|5]=11, [6|4]=10 early. Keep light tiles [0|1]=1, [0|2]=2 for later. The 4 "dorme" tiles (undealt) average ~14 pips, so a blocked game is common.'
+            text: pt ? `Descartou pedra pesada (${snap.tile.left + snap.tile.right} pontos). Se o jogo trancar, a equipe com menos pontos ganha.`
+              : `Dumped a heavy tile (${snap.tile.left + snap.tile.right} pips). If the game blocks, the team with fewer total pips wins.`,
+            rule: pt ? 'GESTÃO DE PONTOS: Em jogo trancado, cada ponto conta. Descarte [6|5]=11, [6|4]=10 cedo. Guarde pedras leves para depois. As 4 pedras "dorme" não distribuídas fazem trancadas comuns.'
+              : 'PIP MANAGEMENT: In a blocked game, every pip counts. Dump [6|5]=11, [6|4]=10 early. Keep light tiles [0|1]=1, [0|2]=2 for later. The 4 "dorme" tiles (undealt) average ~14 pips, so a blocked game is common.'
           });
         }
 
-        // --- Scarcity awareness ---
         if (reasons.some(r => r.includes('Few tiles left'))) {
           tips.push({ icon: '&#9888;', color: 'text-orange-300',
-            text: 'Created a scarce end — few tiles left with that number. This risks stalling the board.',
-            rule: 'AVOID DEAD ENDS: If 5+ of the 7 tiles with a number are played, that end is nearly dead. Creating it as a board end means nobody can play there. Count played tiles per number to avoid this.'
+            text: pt ? 'Criou uma ponta escassa — poucas pedras restam com esse número. Risco de trancar o tabuleiro.'
+              : 'Created a scarce end — few tiles left with that number. This risks stalling the board.',
+            rule: pt ? 'EVITE PONTAS MORTAS: Se 5+ das 7 pedras de um número foram jogadas, essa ponta está quase morta. Conte as pedras jogadas por número para evitar isso.'
+              : 'AVOID DEAD ENDS: If 5+ of the 7 tiles with a number are played, that end is nearly dead. Creating it as a board end means nobody can play there. Count played tiles per number to avoid this.'
           });
         }
 
-        // --- Opening move tip ---
         if (snap.move <= 2 && !tips.length) {
           tips.push({ icon: '&#127919;', color: 'text-cyan-300',
-            text: 'Early game — focus on playing tiles from your deepest suit (the number you have the most of). This builds suit control for later.',
-            rule: 'OPENING STRATEGY: Play from your strongest suit first. If you have 4 tiles with 3s, play a 3 early to claim that end. Suit depth = control. The player who dominates a suit forces others to play around them.'
+            text: pt ? 'Início de jogo — foque em jogar pedras do seu naipe mais forte (o número que mais tem). Isso constrói controle de naipe.'
+              : 'Early game — focus on playing tiles from your deepest suit (the number you have the most of). This builds suit control for later.',
+            rule: pt ? 'ESTRATÉGIA DE ABERTURA: Jogue do seu naipe mais forte primeiro. Se tem 4 pedras com 3, jogue um 3 cedo para dominar essa ponta. Profundidade = controle.'
+              : 'OPENING STRATEGY: Play from your strongest suit first. If you have 4 tiles with 3s, play a 3 early to claim that end. Suit depth = control. The player who dominates a suit forces others to play around them.'
           });
         }
 
-        // --- Who's winning check ---
         if (snap.move >= 8 && !tips.length) {
           const myTeamTiles = myTiles + partnerTiles;
           const oppTeamTiles = opp1Tiles + opp3Tiles;
           if (myTeamTiles < oppTeamTiles - 2) {
             tips.push({ icon: '&#128640;', color: 'text-emerald-300',
-              text: `Your team has ${myTeamTiles} tiles vs opponents' ${oppTeamTiles} — you're ahead! Play aggressively to help partner finish.`,
-              rule: '"WHO\'S WINNING?" CHECK: Before each play, quickly count: my tiles + partner\'s tiles vs both opponents. If your team has fewer tiles, play to help partner close out. If behind, slow down and block.'
+              text: pt ? `Sua equipe tem ${myTeamTiles} pedras vs ${oppTeamTiles} dos adversários — vocês estão na frente! Jogue agressivamente para ajudar parceiro a bater.`
+                : `Your team has ${myTeamTiles} tiles vs opponents' ${oppTeamTiles} — you're ahead! Play aggressively to help partner finish.`,
+              rule: pt ? '"QUEM ESTÁ GANHANDO?": Antes de cada jogada, conte: minhas pedras + parceiro vs ambos adversários. Se sua equipe tem menos, ajude parceiro a fechar.'
+                : '"WHO\'S WINNING?" CHECK: Before each play, quickly count: my tiles + partner\'s tiles vs both opponents. If your team has fewer tiles, play to help partner close out. If behind, slow down and block.'
             });
           } else if (oppTeamTiles < myTeamTiles - 2) {
             tips.push({ icon: '&#9888;', color: 'text-red-300',
-              text: `Opponents have ${oppTeamTiles} tiles vs your team's ${myTeamTiles} — they're ahead. Focus on blocking and dumping heavy tiles in case it blocks.`,
-              rule: '"WHO\'S WINNING?" CHECK: When opponents have fewer tiles, the game might end soon in their favor. Shift to blocking (leave ends they can\'t play) and dump heavy tiles (reduce pip count for blocked game).'
+              text: pt ? `Adversários têm ${oppTeamTiles} pedras vs ${myTeamTiles} da sua equipe — estão na frente. Foque em bloquear e descartar pedras pesadas.`
+                : `Opponents have ${oppTeamTiles} tiles vs your team's ${myTeamTiles} — they're ahead. Focus on blocking and dumping heavy tiles in case it blocks.`,
+              rule: pt ? '"QUEM ESTÁ GANHANDO?": Quando adversários têm menos pedras, o jogo pode acabar a favor deles. Mude para bloqueio e descarte pedras pesadas.'
+                : '"WHO\'S WINNING?" CHECK: When opponents have fewer tiles, the game might end soon in their favor. Shift to blocking (leave ends they can\'t play) and dump heavy tiles (reduce pip count for blocked game).'
             });
           }
         }
       }
 
-      // Nothing to show
       if (tips.length === 0) return '';
 
-      // Show up to 2 tips
-      return tips.slice(0, 2).map(t => `
+      return tips.slice(0, 2).map(tp => `
         <div class="bg-indigo-950 rounded-lg p-2 mb-2 border border-indigo-700">
           <div class="text-xs text-indigo-300 mb-1">
-            <span>${t.icon}</span> <span class="font-bold">Situation:</span> ${t.text}
+            <span>${tp.icon}</span> <span class="font-bold">${_t('situation')}</span> ${tp.text}
           </div>
-          <div class="text-xs ${t.color} bg-indigo-900/50 rounded px-2 py-1">
-            <span class="font-bold">Rule to memorize:</span> ${t.rule}
+          <div class="text-xs ${tp.color} bg-indigo-900/50 rounded px-2 py-1">
+            <span class="font-bold">${_t('rule_mem')}</span> ${tp.rule}
           </div>
         </div>
       `).join('');
@@ -6993,13 +7115,13 @@
       if (snap.reasons && snap.reasons.length > 0) {
         reasonsHtml = `
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-1">AI Heuristic Reasoning (click to expand)</div>
+            <div class="text-xs font-bold text-slate-400 mb-1">${appLang==='pt'?'Raciocínio Heurístico da IA (clique para expandir)':'AI Heuristic Reasoning (click to expand)'}</div>
             <div class="space-y-1.5">
               ${snap.reasons.map((r, ri) => {
                 const ex = getReasonExplanation(r);
                 return `<div class="border-l-2 ${ex.color} pl-2">
                   <div class="text-xs text-slate-300 cursor-pointer" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
-                    ▸ ${r} <span class="font-mono font-bold ${ex.scoreColor}">${ex.scoreLabel}</span>
+                    ▸ ${_tr(r)} <span class="font-mono font-bold ${ex.scoreColor}">${ex.scoreLabel}</span>
                   </div>
                   <div class="mt-1 text-xs leading-relaxed bg-slate-950/50 rounded p-1.5" style="display:none">
                     <div class="text-slate-300 mb-1">${ex.what}</div>
@@ -7579,8 +7701,9 @@
         // Mistake type breakdown
         const typeEntries = Object.entries(mistakeTypes).filter(([,v]) => v > 0);
         if (typeEntries.length > 0) {
-          b6 += `<div class="text-xs text-slate-400 font-bold mb-0.5">Mistake Types</div>`;
-          const typeLabels = { feeding: 'Feeding', starvation: 'Partner Starve', trap_blind: 'Trap Blind', risk_blind: 'Risk Blind', positional: 'Positional' };
+          b6 += `<div class="text-xs text-slate-400 font-bold mb-0.5">${appLang==='pt'?'Tipos de Erro':'Mistake Types'}</div>`;
+          const typeLabels = appLang==='pt' ? { feeding: 'Alimentou', starvation: 'Parceiro Fome', trap_blind: 'Armadilha', risk_blind: 'Risco Cego', positional: 'Posicional' }
+            : { feeding: 'Feeding', starvation: 'Partner Starve', trap_blind: 'Trap Blind', risk_blind: 'Risk Blind', positional: 'Positional' };
           const typeColors = { feeding: '#f87171', starvation: '#fb923c', trap_blind: '#f472b6', risk_blind: '#c084fc', positional: '#94a3b8' };
           for (const [type, count] of typeEntries.sort((a,b) => b[1] - a[1])) {
             const pct = (count / totalDecisions * 100).toFixed(0);
@@ -7624,20 +7747,20 @@
             <div class="text-xs text-slate-400">Avg Equity Loss (pts/move)</div>
             <div class="text-xs text-slate-500 mt-1">
               ${parseFloat(avgEL) < 0.05 ? 'Expert level' :
-                parseFloat(avgEL) < 0.10 ? 'Advanced' :
-                parseFloat(avgEL) < 0.20 ? 'Intermediate' : 'Beginner — focus on big blunders'}
+                parseFloat(avgEL) < 0.10 ? (appLang==='pt'?'Avançado':'Advanced') :
+                parseFloat(avgEL) < 0.20 ? (appLang==='pt'?'Intermediário':'Intermediate') : (appLang==='pt'?'Iniciante — foque nos erros grandes':'Beginner — focus on big blunders')}
             </div>
             <div class="text-xs text-slate-600 mt-1">Match: ${matchScore[0]}-${matchScore[1]} | ME: ${(getMatchEquity(matchScore[0], matchScore[1]) * 100).toFixed(0)}%</div>
           </div>
 
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-2">Breakdown (${total} moves, ${stats.games} games)</div>
+            <div class="text-xs font-bold text-slate-400 mb-2">${appLang==='pt'?`Detalhes (${total} jogadas, ${stats.games} jogos)`:`Breakdown (${total} moves, ${stats.games} games)`}</div>
             <div class="space-y-1.5">
               ${[
-                { label: 'Perfect', count: stats.optimalMoves, color: '#22c55e', cls: 'grade-perfect' },
-                { label: 'Inaccuracy', count: stats.goodMoves, color: '#86efac', cls: 'grade-good' },
-                { label: 'Mistake', count: stats.okMoves, color: '#eab308', cls: 'grade-ok' },
-                { label: 'Blunder', count: stats.badMoves, color: '#ef4444', cls: 'grade-bad' }
+                { label: _t('perfect'), count: stats.optimalMoves, color: '#22c55e', cls: 'grade-perfect' },
+                { label: appLang==='pt'?'Imprecisão':'Inaccuracy', count: stats.goodMoves, color: '#86efac', cls: 'grade-good' },
+                { label: _t('mistake'), count: stats.okMoves, color: '#eab308', cls: 'grade-ok' },
+                { label: _t('blunder'), count: stats.badMoves, color: '#ef4444', cls: 'grade-bad' }
               ].map(g => {
                 const pct = total > 0 ? (g.count / total * 100).toFixed(0) : 0;
                 return `<div class="flex items-center gap-2">
@@ -7653,7 +7776,7 @@
 
           <!-- Recent decisions -->
           <div class="bg-slate-900 rounded-lg p-2">
-            <div class="text-xs font-bold text-slate-400 mb-1">Recent Decisions</div>
+            <div class="text-xs font-bold text-slate-400 mb-1">${appLang==='pt'?'Decisões Recentes':'Recent Decisions'}</div>
             <div class="space-y-0.5 max-h-[200px] overflow-y-auto">
               ${stats.history.length === 0 ? '<div class="text-xs text-slate-500">Play quiz mode to track decisions</div>' : ''}
               ${[...stats.history].reverse().map((h, i) => {
@@ -7723,7 +7846,7 @@
 
         aggHTML = `
           <div class="bg-slate-900 rounded-lg p-3 mb-3">
-            <div class="text-xs font-bold text-slate-400 mb-2">Performance Overview (${agg.totalGames} games)</div>
+            <div class="text-xs font-bold text-slate-400 mb-2">${appLang==='pt'?`Resumo de Desempenho (${agg.totalGames} jogos)`:`Performance Overview (${agg.totalGames} games)`}</div>
             <div class="grid grid-cols-3 gap-2 text-center mb-2">
               <div>
                 <div class="text-lg font-bold font-mono" style="color:${elColor}">${agg.avgEL.toFixed(3)}</div>
@@ -7731,24 +7854,24 @@
               </div>
               <div>
                 <div class="text-lg font-bold text-emerald-400">${agg.wins}</div>
-                <div class="text-xs text-slate-500">Wins</div>
+                <div class="text-xs text-slate-500">${appLang==='pt'?'Vitórias':'Wins'}</div>
               </div>
               <div>
                 <div class="text-lg font-bold text-red-400">${agg.losses}</div>
-                <div class="text-xs text-slate-500">Losses</div>
+                <div class="text-xs text-slate-500">${appLang==='pt'?'Derrotas':'Losses'}</div>
               </div>
             </div>
-            ${agg.recentAvgEL !== null ? `<div class="text-xs text-slate-400 text-center">Last 5 avg: <span class="font-mono">${agg.recentAvgEL.toFixed(3)}</span> ${trendArrow}</div>` : ''}
+            ${agg.recentAvgEL !== null ? `<div class="text-xs text-slate-400 text-center">${appLang==='pt'?'Últimos 5 avg':'Last 5 avg'}: <span class="font-mono">${agg.recentAvgEL.toFixed(3)}</span> ${trendArrow}</div>` : ''}
             <div class="grid grid-cols-4 gap-1 mt-2 text-center text-xs">
-              <div><span class="text-emerald-400 font-bold">${agg.totalPerfect}</span><br><span class="text-slate-600">Perfect</span></div>
-              <div><span class="text-green-300 font-bold">${agg.totalGood}</span><br><span class="text-slate-600">Inacc</span></div>
-              <div><span class="text-yellow-400 font-bold">${agg.totalOk}</span><br><span class="text-slate-600">Mistake</span></div>
-              <div><span class="text-red-400 font-bold">${agg.totalBad}</span><br><span class="text-slate-600">Blunder</span></div>
+              <div><span class="text-emerald-400 font-bold">${agg.totalPerfect}</span><br><span class="text-slate-600">${_t('perfect')}</span></div>
+              <div><span class="text-green-300 font-bold">${agg.totalGood}</span><br><span class="text-slate-600">${appLang==='pt'?'Imprec':'Inacc'}</span></div>
+              <div><span class="text-yellow-400 font-bold">${agg.totalOk}</span><br><span class="text-slate-600">${_t('mistake')}</span></div>
+              <div><span class="text-red-400 font-bold">${agg.totalBad}</span><br><span class="text-slate-600">${_t('blunder')}</span></div>
             </div>
           </div>
 
           <div class="bg-slate-900 rounded-lg p-2 mb-3">
-            <div class="text-xs font-bold text-slate-400 mb-1">Weakness Areas</div>
+            <div class="text-xs font-bold text-slate-400 mb-1">${appLang==='pt'?'Áreas de Fraqueza':'Weakness Areas'}</div>
             <div class="space-y-1 text-xs">
               <div class="flex justify-between" title="Avg equity loss on your first 2 moves each game. High = poor opening tile selection or early suit management.">
                 <span class="text-slate-300">Opening moves <span class="text-slate-600 cursor-help">&#9432;</span></span>
@@ -7863,7 +7986,7 @@
       }
 
       const diffLabel = (v) => {
-        const p = Object.values(DIFFICULTY_PRESETS).find(p => p.value === v);
+        const p = Object.values(getDifficultyPresets()).find(p => p.value === v);
         return p ? p.label : v;
       };
 
@@ -8266,7 +8389,7 @@
     // ========== DIFFICULTY PICKER ==========
 
     function renderDifficultyPicker() {
-      const presets = Object.entries(DIFFICULTY_PRESETS);
+      const presets = Object.entries(getDifficultyPresets());
       const currentOpp = presets.find(([_, p]) => p.value === playDifficulty.opponents)?.[0] || '';
       const currentPart = presets.find(([_, p]) => p.value === playDifficulty.partner)?.[0] || '';
 
