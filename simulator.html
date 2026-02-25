@@ -1668,7 +1668,17 @@
 
     function couldPlayBothEnds(t, l, r) {
       if (l === null || r === null) return false;
-      return (t.left === l || t.right === l) && (t.left === r || t.right === r);
+      if (l === r) {
+        // Both ends same number: only a double of that number plays both ends
+        return t.left === l && t.right === l;
+      }
+      // Different ends: tile must match left end with one pip and right end with the other
+      const matchesL = t.left === l || t.right === l;
+      const matchesR = t.left === r || t.right === r;
+      if (!matchesL || !matchesR) return false;
+      // Make sure it's not the SAME pip value matching both (e.g. tile [3|5] with ends 3,5 is la-e-lo,
+      // but tile [3|3] with ends 3,5 matches left with 3 and right only if 3===5 which is false — handled above)
+      return true;
     }
 
     function canPlayOnSide(tile, end) {
