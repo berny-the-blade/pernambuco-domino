@@ -533,25 +533,27 @@
           return;
         }
 
-        const deck = shuffleDeck(createDeck());
-        const hands = [[], [], [], []];
-        for (let i = 0; i < 24; i++) {
-          hands[i % 4].push(deck[i]);
-        }
-
-        // Find highest double for first game and auto-play it
-        let startPlayer = 0;
-        let highestDouble = -1;
-        let highestDoubleTile = null;
-        for (let p = 0; p < 4; p++) {
-          for (let tile of hands[p]) {
-            if (tile.left === tile.right && tile.left > highestDouble) {
-              highestDouble = tile.left;
-              startPlayer = p;
-              highestDoubleTile = tile;
+        // Deal with safety redeal if no doubles (virtually impossible: 7 doubles, 4 dormidas)
+        let hands, startPlayer, highestDouble, highestDoubleTile;
+        do {
+          const deck = shuffleDeck(createDeck());
+          hands = [[], [], [], []];
+          for (let i = 0; i < 24; i++) {
+            hands[i % 4].push(deck[i]);
+          }
+          startPlayer = 0;
+          highestDouble = -1;
+          highestDoubleTile = null;
+          for (let p = 0; p < 4; p++) {
+            for (let tile of hands[p]) {
+              if (tile.left === tile.right && tile.left > highestDouble) {
+                highestDouble = tile.left;
+                startPlayer = p;
+                highestDoubleTile = tile;
+              }
             }
           }
-        }
+        } while (highestDoubleTile === null);
 
         // Remove the highest double from the starter's hand and place it on the board
         hands[startPlayer] = hands[startPlayer].filter(t => t.id !== highestDoubleTile.id);
@@ -567,7 +569,8 @@
           currentPlayer: nextPlayer,
           passCount: 0,
           teamScores: [0, 0],
-          extraPoints: 0,
+          scoreMultiplier: 1,
+          moveHistory: [{p: startPlayer, t: 'play', tile: highestDoubleTile}],
           message: gameState.players[startPlayer].name + ' jogou a carroca ' + highestDouble + '-' + highestDouble + '! Vez de ' + gameState.players[nextPlayer].name + '!',
           matchTarget: 6
         };
@@ -585,7 +588,9 @@
       const canPlayOnBothEnds = (tile) => {
         if (!gameState || !gameState.board || gameState.board.length === 0) return false;
         const { leftEnd, rightEnd } = gameState;
-        if (leftEnd === rightEnd) return false;
+        if (leftEnd === rightEnd) {
+          return tile.left === leftEnd && tile.right === leftEnd;
+        }
         const canLeft = tile.left === leftEnd || tile.right === leftEnd;
         const canRight = tile.left === rightEnd || tile.right === rightEnd;
         return canLeft && canRight;
@@ -593,30 +598,185 @@
 
       const couldPlayOnBothEnds = (tile, left, right) => {
         if (left === null || right === null) return false;
-        if (left === right) return false;
+        if (left === right) {
+          return tile.left === left && tile.right === left;
+        }
         const canLeft = tile.left === left || tile.right === left;
         const canRight = tile.left === right || tile.right === right;
         return canLeft && canRight;
       };
 
-      const findBestBotMove = (hand, leftEnd, rightEnd, boardLen) => {
-        const playable = hand.filter(t => {
-          if (boardLen === 0) return true;
-          return t.left === leftEnd || t.right === leftEnd || t.left === rightEnd || t.right === rightEnd;
-        });
-        if (playable.length === 0) return null;
-        
-        let bestTile = playable[0];
-        let bestScore = -1;
-        for (let tile of playable) {
-          let score = tile.left + tile.right;
-          if (tile.left === tile.right) score += 10;
-          if (score > bestScore) {
-            bestScore = score;
-            bestTile = tile;
+      // === Knowledge builder: reconstructs game knowledge from move history ===
+      const buildKnowledge = (moveHistory) => {
+        const cantHave = [new Set(), new Set(), new Set(), new Set()];
+        const played = new Set();
+        const playsBy = [[], [], [], []];
+        const remainingCount = [7, 7, 7, 7, 7, 7, 7];
+        for (const move of (moveHistory || [])) {
+          if (move.t === 'play') {
+            if (!played.has(move.tile.id)) {
+              played.add(move.tile.id);
+              remainingCount[move.tile.left]--;
+              if (move.tile.left !== move.tile.right) remainingCount[move.tile.right]--;
+            }
+            playsBy[move.p].push(move.tile);
+          } else if (move.t === 'pass') {
+            cantHave[move.p].add(move.lE);
+            cantHave[move.p].add(move.rE);
           }
         }
-        return bestTile;
+        const strengthCache = [null, null, null, null];
+        return {
+          cantHave, played, playsBy,
+          remainingWithNumber: (n) => remainingCount[n],
+          inferStrength: (p) => {
+            if (strengthCache[p]) return strengthCache[p];
+            const s = [0,0,0,0,0,0,0];
+            for (const t of playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+            strengthCache[p] = s;
+            return s;
+          }
+        };
+      };
+
+      // === Expert bot AI ported from simulator ===
+      const smartAI = (hand, lE, rE, bLen, player, knowledge) => {
+        const canPlay = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
+        const playable = hand.filter(canPlay);
+        if (playable.length === 0) return null;
+
+        // Opening move: prefer doubles, deep suits, high pips
+        if (bLen === 0) {
+          const sc = [0,0,0,0,0,0,0];
+          for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+          const scored = playable.map(t => ({
+            tile: t, side: null,
+            score: sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2
+          }));
+          scored.sort((a, b) => b.score - a.score);
+          return scored[0];
+        }
+
+        const partner = (player + 2) % 4;
+        const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+
+        const suitCount = new Array(7).fill(0);
+        const tilesByNum = Array.from({length: 7}, () => []);
+        for (const t of hand) {
+          suitCount[t.left]++;
+          if (t.left !== t.right) suitCount[t.right]++;
+          tilesByNum[t.left].push(t);
+          if (t.left !== t.right) tilesByNum[t.right].push(t);
+        }
+
+        const scored = playable.flatMap(tile => {
+          const options = [];
+          for (const side of ['left', 'right']) {
+            const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
+            if (!cS) continue;
+
+            let newEnd;
+            if (side === 'left') newEnd = tile.left === lE ? tile.right : tile.left;
+            else newEnd = tile.right === rE ? tile.left : tile.right;
+
+            const otherEnd = side === 'left' ? rE : lE;
+            let ss = 0;
+
+            // Suit control
+            const endSet = new Set([newEnd, otherEnd]);
+            let myCount = 0;
+            for (const n of endSet) {
+              for (const x of tilesByNum[n]) { if (x.id !== tile.id) myCount++; }
+            }
+            if (endSet.size === 2) {
+              for (const x of tilesByNum[newEnd]) {
+                if (x.id !== tile.id && (x.left === otherEnd || x.right === otherEnd)) myCount--;
+              }
+            }
+            ss += myCount * 15;
+
+            // Blocking opponents
+            if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 25;
+            if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) ss += 25;
+
+            // Partner support
+            const pStr = knowledge.inferStrength(partner);
+            let pAff = 0;
+            const endNums = newEnd === otherEnd ? [newEnd] : [newEnd, otherEnd];
+            for (const endNum of endNums) {
+              const played = pStr[endNum] || 0;
+              if (played > 0) {
+                const remaining = knowledge.remainingWithNumber(endNum);
+                let weHold = 0;
+                for (const x of tilesByNum[endNum]) { if (x.id !== tile.id) weHold++; }
+                const tileHasEnd = (tile.left === endNum || tile.right === endNum) ? 1 : 0;
+                const unknownWithEnd = Math.max(0, remaining - weHold - tileHasEnd);
+                const tUnk = 28 - knowledge.played.size - hand.length;
+                const othersCouldHave = tUnk > 4 ? Math.round(unknownWithEnd * (tUnk - 4) / tUnk) : 0;
+                if (othersCouldHave > 0 && !knowledge.cantHave[partner].has(endNum)) pAff += played;
+              }
+            }
+            if (pAff > 0) ss += pAff * 8;
+            if (knowledge.cantHave[partner].has(newEnd)) ss -= 10;
+
+            // Pip weight — dump heavy tiles early
+            ss += (tile.left + tile.right) * 2;
+
+            // Play doubles early (inflexible)
+            if (tile.left === tile.right) ss += 12;
+
+            // Isolated double setup
+            for (const h of hand) {
+              if (h.id === tile.id || h.left !== h.right) continue;
+              let sup = 0;
+              for (const x of tilesByNum[h.left]) { if (x.id !== h.id && x.id !== tile.id) sup++; }
+              if (sup === 0 && (newEnd === h.left || otherEnd === h.left)) ss += 20;
+            }
+
+            // Board counting — prefer ends with numbers mostly played
+            const remNew = knowledge.remainingWithNumber(newEnd);
+            let weHoldNew = 0;
+            for (const x of tilesByNum[newEnd]) { if (x.id !== tile.id) weHoldNew++; }
+            const unknownWithNew = Math.max(0, remNew - weHoldNew - 1);
+            const totalUnknown = 28 - knowledge.played.size - hand.length;
+            const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
+            ss += (2 - oppCouldHaveNew) * 6;
+
+            // Partner close to winning
+            const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
+            if (estPHand <= 2 && estPHand > 0) ss += 15;
+
+            // Go-out bonus
+            const remainAfter = hand.length - 1;
+            if (remainAfter === 0) {
+              const isD = tile.left === tile.right;
+              const wasBoth = couldPlayOnBothEnds(tile, lE, rE);
+              const pts = isD && wasBoth ? 4 : isD ? 2 : wasBoth ? 3 : 1;
+              ss += 200 + pts * 30;
+            } else if (remainAfter === 1) {
+              const lastTile = hand.find(t => t.id !== tile.id);
+              if (lastTile) {
+                const canPlayLast = (lastTile.left === newEnd || lastTile.right === newEnd ||
+                                     lastTile.left === otherEnd || lastTile.right === otherEnd);
+                if (canPlayLast) ss += 80;
+                else ss -= 30;
+              }
+            } else if (remainAfter === 2) {
+              const others = hand.filter(t => t.id !== tile.id);
+              const coverCount = others.filter(t =>
+                t.left === newEnd || t.right === newEnd || t.left === otherEnd || t.right === otherEnd
+              ).length;
+              if (coverCount === 2) ss += 25;
+              else if (coverCount === 0) ss -= 15;
+            }
+
+            options.push({ tile, score: ss, side });
+          }
+          return options;
+        });
+
+        scored.sort((a, b) => b.score - a.score);
+        return scored[0] || null;
       };
 
       const executeTilePlay = async (tile, slot, side = null) => {
@@ -679,7 +839,8 @@
           rightEnd: newRightEnd,
           currentPlayer: nextPlayer,
           passCount: 0,
-          message: 'Vez de ' + gameState.players[nextPlayer].name + '!'
+          message: 'Vez de ' + gameState.players[nextPlayer].name + '!',
+          moveHistory: [...(gameState.moveHistory || []), {p: slot, t: 'play', tile: {left: tile.left, right: tile.right, id: tile.id}}]
         };
 
         await db.ref('rooms/' + roomCode).update(updates);
@@ -716,12 +877,12 @@
           scoreName = 'normal';
         }
 
-        const points = basePoints + (gameState.extraPoints || 0);
+        const points = basePoints * (gameState.scoreMultiplier || 1);
         const winningTeam = winner % 2;
         const newScores = [...gameState.teamScores];
         newScores[winningTeam] += points;
 
-        const extraMsg = (gameState.extraPoints || 0) > 0 ? ' (' + basePoints + ' + ' + gameState.extraPoints + ' extra)' : '';
+        const extraMsg = (gameState.scoreMultiplier || 1) > 1 ? ' (' + basePoints + ' x' + (gameState.scoreMultiplier || 1) + ' dobrada)' : '';
         
         const updates = {
           hands: hands,
@@ -729,7 +890,7 @@
           leftEnd: leftEnd,
           rightEnd: rightEnd,
           teamScores: newScores,
-          extraPoints: 0,
+          scoreMultiplier: 1,
           gameEnded: newScores[winningTeam] >= gameState.matchTarget,
           lastWinningTeam: winningTeam,
           message: gameState.players[winner].name + ' bateu ' + scoreName + '! Time ' + (winningTeam + 1) + ' marcou ' + points + ' ponto(s)' + extraMsg + '!',
@@ -764,7 +925,8 @@
         await db.ref('rooms/' + roomCode).update({
           passCount: newPassCount,
           currentPlayer: nextPlayer,
-          message: gameState.players[playerSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!'
+          message: gameState.players[playerSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!',
+          moveHistory: [...(gameState.moveHistory || []), {p: playerSlot, t: 'pass', lE: gameState.leftEnd, rE: gameState.rightEnd}]
         });
       };
 
@@ -780,7 +942,8 @@
         await db.ref('rooms/' + roomCode).update({
           passCount: newPassCount,
           currentPlayer: nextPlayer,
-          message: gameState.players[botSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!'
+          message: gameState.players[botSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!',
+          moveHistory: [...(gameState.moveHistory || []), {p: botSlot, t: 'pass', lE: gameState.leftEnd, rE: gameState.rightEnd}]
         });
       };
 
@@ -795,23 +958,25 @@
         const handSummary = handValues.map(h => gameState.players[h.player].name + ': ' + h.points).join(' | ');
 
         if (winners.length > 1 && winners.some(w => w.player % 2 === 0) && winners.some(w => w.player % 2 === 1)) {
+          const newMultiplier = (gameState.scoreMultiplier || 1) * 2;
           await db.ref('rooms/' + roomCode).update({
-            extraPoints: (gameState.extraPoints || 0) + 1,
+            scoreMultiplier: newMultiplier,
+            isDobrada: true,
             currentPlayer: -1,
-            message: 'Jogo travado! ' + handSummary + '. Empate! Proximo jogo +' + ((gameState.extraPoints || 0) + 1) + ' extra!'
+            message: 'Jogo travado! ' + handSummary + '. Empate! Dobrada! Proximo jogo vale ' + newMultiplier + 'x!'
           });
           return;
         }
 
         const winner = winners[0].player;
-        const points = 1 + (gameState.extraPoints || 0);
+        const points = 1 * (gameState.scoreMultiplier || 1);
         const winningTeam = winner % 2;
         const newScores = [...gameState.teamScores];
         newScores[winningTeam] += points;
 
         await db.ref('rooms/' + roomCode).update({
           teamScores: newScores,
-          extraPoints: 0,
+          scoreMultiplier: 1,
           currentPlayer: -1,
           lastWinningTeam: winningTeam,
           gameEnded: newScores[winningTeam] >= gameState.matchTarget,
@@ -820,52 +985,76 @@
       };
 
       const newRound = async () => {
-        const winTeam = gameState.lastWinningTeam;
-        const winTeamSlots = winTeam === 0 ? [0, 2] : [1, 3];
-        const winTeamHasHuman = winTeamSlots.some(s => gameState.players[s]?.isHuman);
-
-        // Deal tiles for the new round
         const deck = shuffleDeck(createDeck());
         const hands = [[], [], [], []];
         for (let i = 0; i < 24; i++) {
           hands[i % 4].push(deck[i]);
         }
 
-        if (winTeamHasHuman) {
-          // Deal first so players can see their tiles, then let team choose
-          await db.ref('rooms/' + roomCode).update({
-            hands: hands,
-            board: [],
-            leftEnd: null,
-            rightEnd: null,
-            currentPlayer: -1,
-            passCount: 0,
-            waitingForStarterChoice: true,
-            starterChoiceDeadline: Date.now() + 30000,
-            message: 'Time ' + (winTeam + 1) + ' venceu! Veja suas pecas e escolha quem comeca (30s)!'
-          });
-        } else {
-          // Winning team is all bots - use highest double
-          let startPlayer = 0;
-          let highestDouble = -1;
+        // After dobrada (tie): highest double holder starts, auto-play it
+        if (gameState.isDobrada) {
+          let startPlayer = 0, highestDouble = -1, highestDoubleTile = null;
           for (let p = 0; p < 4; p++) {
             for (let tile of hands[p]) {
               if (tile.left === tile.right && tile.left > highestDouble) {
                 highestDouble = tile.left;
                 startPlayer = p;
+                highestDoubleTile = tile;
               }
             }
           }
-
+          if (!highestDoubleTile) {
+            // Safety redeal (virtually impossible)
+            await newRound();
+            return;
+          }
+          hands[startPlayer] = hands[startPlayer].filter(t => t.id !== highestDoubleTile.id);
+          const nextPlayer = (startPlayer + 1) % 4;
           await db.ref('rooms/' + roomCode).update({
-            hands: hands,
-            board: [],
-            leftEnd: null,
-            rightEnd: null,
-            currentPlayer: startPlayer,
-            passCount: 0,
+            hands, board: [highestDoubleTile],
+            leftEnd: highestDoubleTile.left, rightEnd: highestDoubleTile.right,
+            currentPlayer: nextPlayer, passCount: 0,
+            isDobrada: false,
             waitingForStarterChoice: false,
-            message: gameState.players[startPlayer].name + ' tem a carroca ' + highestDouble + '-' + highestDouble + ' e comeca!'
+            moveHistory: [{p: startPlayer, t: 'play', tile: highestDoubleTile}],
+            message: gameState.players[startPlayer].name + ' jogou a carroca ' + highestDouble + '-' + highestDouble + '! Vez de ' + gameState.players[nextPlayer].name + '!'
+          });
+          return;
+        }
+
+        // Normal win: winning team chooses starter
+        const winTeam = gameState.lastWinningTeam;
+        const winTeamSlots = winTeam === 0 ? [0, 2] : [1, 3];
+        const winTeamHasHuman = winTeamSlots.some(s => gameState.players[s]?.isHuman);
+
+        if (winTeamHasHuman) {
+          await db.ref('rooms/' + roomCode).update({
+            hands, board: [], leftEnd: null, rightEnd: null,
+            currentPlayer: -1, passCount: 0,
+            isDobrada: false,
+            waitingForStarterChoice: true,
+            starterChoiceDeadline: Date.now() + 30000,
+            moveHistory: [],
+            message: 'Time ' + (winTeam + 1) + ' venceu! Veja suas pecas e escolha quem comeca (30s)!'
+          });
+        } else {
+          // Bot winning team — pick best opener from winning team only
+          let bestSlot = winTeamSlots[0], bestScore = -1;
+          for (const s of winTeamSlots) {
+            const sc = [0,0,0,0,0,0,0];
+            for (const t of hands[s]) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+            for (const t of hands[s]) {
+              let tScore = (t.left === t.right ? 100 : 0) + Math.max(sc[t.left], sc[t.right]) * 10 + t.left + t.right;
+              if (tScore > bestScore) { bestScore = tScore; bestSlot = s; }
+            }
+          }
+          await db.ref('rooms/' + roomCode).update({
+            hands, board: [], leftEnd: null, rightEnd: null,
+            currentPlayer: bestSlot, passCount: 0,
+            isDobrada: false,
+            waitingForStarterChoice: false,
+            moveHistory: [],
+            message: gameState.players[bestSlot].name + ' comeca!'
           });
         }
       };
@@ -886,19 +1075,11 @@
 
         const timeout = setTimeout(async () => {
           const botHand = gameState.hands[currentSlot];
-          const botMove = findBestBotMove(botHand, gameState.leftEnd, gameState.rightEnd, gameState.board?.length || 0);
+          const knowledge = buildKnowledge(gameState.moveHistory);
+          const result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, gameState.board?.length || 0, currentSlot, knowledge);
 
-          if (botMove) {
-            // Determine side if can play both
-            let side = null;
-            if (gameState.board && gameState.board.length > 0) {
-              const canLeft = botMove.left === gameState.leftEnd || botMove.right === gameState.leftEnd;
-              const canRight = botMove.left === gameState.rightEnd || botMove.right === gameState.rightEnd;
-              if (canLeft && !canRight) side = 'left';
-              else if (canRight && !canLeft) side = 'right';
-              else if (canLeft && canRight) side = Math.random() > 0.5 ? 'left' : 'right';
-            }
-            await executeTilePlay(botMove, currentSlot, side);
+          if (result) {
+            await executeTilePlay(result.tile, currentSlot, result.side);
           } else {
             await botPass(currentSlot);
           }
