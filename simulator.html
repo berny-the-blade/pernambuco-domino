@@ -418,6 +418,10 @@
       if (r.includes('keeps hand flexible')) return 'mantém a mão flexível';
       if (r.includes('squeezes opponents')) return 'espreme os adversários';
       if (r.includes('highest expected equity')) return 'maior equidade esperada';
+      // Opponent style reasons
+      if ((m = r.match(/^(.+) is a blocker — priority target$/))) return `${m[1]} é bloqueador — alvo prioritário`;
+      // Search engine override reasons
+      if ((m = r.match(/^(ISMCTS|MC) override \(E\[pts\]:(.+)\)$/))) return `${m[1]} escolheu (E[pts]:${m[2]})`;
       return r;
     }
 
@@ -469,6 +473,56 @@
     const ALL_TILES = createDeck(); // shared immutable deck — never mutate
     const TILE_INDEX = {}; // tile.id → integer index (0..27) for bitfield cache keys
     ALL_TILES.forEach((t, i) => { TILE_INDEX[t.id] = i; });
+
+    // ========== BITSET (dual 32-bit, supports up to 64 bits) ==========
+    class BitSet {
+      constructor(lo = 0, hi = 0) { this.lo = lo >>> 0; this.hi = hi >>> 0; }
+      has(i) { return i < 32 ? !!(this.lo & (1 << i)) : !!(this.hi & (1 << (i - 32))); }
+      set(i) { if (i < 32) this.lo = (this.lo | (1 << i)) >>> 0; else this.hi = (this.hi | (1 << (i - 32))) >>> 0; return this; }
+      clear(i) { if (i < 32) this.lo = (this.lo & ~(1 << i)) >>> 0; else this.hi = (this.hi & ~(1 << (i - 32))) >>> 0; return this; }
+      or(o) { return new BitSet(this.lo | o.lo, this.hi | o.hi); }
+      and(o) { return new BitSet(this.lo & o.lo, this.hi & o.hi); }
+      xor(o) { return new BitSet(this.lo ^ o.lo, this.hi ^ o.hi); }
+      not() { return new BitSet(~this.lo, ~this.hi); }
+      isEmpty() { return (this.lo | this.hi) === 0; }
+      clone() { return new BitSet(this.lo, this.hi); }
+      popcount() {
+        let v = this.lo >>> 0;
+        v = v - ((v >>> 1) & 0x55555555);
+        v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+        let c = ((v + (v >>> 4)) & 0x0F0F0F0F) * 0x01010101 >>> 24;
+        v = this.hi >>> 0;
+        v = v - ((v >>> 1) & 0x55555555);
+        v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+        c += ((v + (v >>> 4)) & 0x0F0F0F0F) * 0x01010101 >>> 24;
+        return c;
+      }
+      forEach(fn) {
+        let lo = this.lo >>> 0, hi = this.hi >>> 0;
+        while (lo) { const b = lo & (-lo); fn(Math.log2(b) | 0); lo ^= b; }
+        while (hi) { const b = hi & (-hi); fn((Math.log2(b) | 0) + 32); hi ^= b; }
+      }
+      toString() {
+        // Compact hex representation
+        return (this.hi ? this.hi.toString(16) + ':' : '') + this.lo.toString(16);
+      }
+    }
+
+    // Helpers: convert tile arrays / knowledge to BitSets
+    function tileBits(tiles) {
+      const bs = new BitSet();
+      for (const t of tiles) bs.set(TILE_INDEX[t.id]);
+      return bs;
+    }
+    function handBits(hand) { return tileBits(hand); }
+    function cantHaveBits(knowledge) {
+      // Encode all 4 players' cantHave as a single bitfield: player*7 + number
+      const bs = new BitSet();
+      for (let p = 0; p < 4; p++) {
+        for (const n of knowledge.cantHave[p]) bs.set(p * 7 + n);
+      }
+      return bs;
+    }
 
     // ========== SEEDABLE PRNG (SplitMix64) ==========
     class SplitMix64 {
@@ -693,6 +747,173 @@
 
     // Global belief model — instantiated per game alongside Knowledge
     let belief = null;
+
+    // ========== ENTROPY TRACKER ==========
+    class EntropyTracker {
+      constructor() { this.snapshots = []; }
+      record(moveIndex, beliefModel) {
+        if (!beliefModel) return;
+        const entropy = [0, 1, 2, 3].map(p => beliefModel.getEntropy(p));
+        this.snapshots.push({ moveIndex, entropy, ts: Date.now() });
+      }
+      infoGain(moveIndex) {
+        const idx = this.snapshots.findIndex(s => s.moveIndex === moveIndex);
+        if (idx <= 0) return 0;
+        const prev = this.snapshots[idx - 1].entropy;
+        const cur = this.snapshots[idx].entropy;
+        return prev.reduce((sum, e, i) => sum + (e - cur[i]), 0);
+      }
+      totalInfoGain() {
+        if (this.snapshots.length < 2) return 0;
+        const first = this.snapshots[0].entropy;
+        const last = this.snapshots[this.snapshots.length - 1].entropy;
+        return first.reduce((sum, e, i) => sum + (e - last[i]), 0);
+      }
+      getTimeline() {
+        return this.snapshots.map((s, i) => ({
+          moveIndex: s.moveIndex,
+          entropy: s.entropy.reduce((a, b) => a + b, 0),
+          gain: i > 0 ? this.snapshots[i-1].entropy.reduce((a, b) => a + b, 0) - s.entropy.reduce((a, b) => a + b, 0) : 0
+        }));
+      }
+      reset() { this.snapshots = []; }
+    }
+
+    let entropyTracker = new EntropyTracker();
+
+    // ========== LEAK TAXONOMY ==========
+    const LEAK_TYPES = {
+      BLOCKING_MISS: 'Blocking Miss',
+      FEED_ERROR: 'Feed Error',
+      DOUBLE_TIMING: 'Double Timing',
+      DEAD_END: 'Dead End',
+      PIP_WASTE: 'Pip Waste',
+      PARTNER_IGNORE: 'Partner Ignore'
+    };
+
+    function classifyLeak(move, bestMove, snap, knowledge) {
+      if (!bestMove || !move || move.tile.id === bestMove.tile.id) return null;
+      const lE = snap.leftEnd, rE = snap.rightEnd;
+      const player = 0; // analysis is always for P0
+      const opp1 = 1, opp2 = 3, partner = 2;
+
+      // BLOCKING_MISS: best move blocks an opponent, played move doesn't
+      const bestEnds = _getNewEnds(bestMove.tile, bestMove.side, lE, rE, snap.board.length);
+      const playedEnds = _getNewEnds(move.tile, move.side, lE, rE, snap.board.length);
+      const bestBlocks = _blocksOpp(bestEnds, knowledge, opp1, opp2);
+      const playedBlocks = _blocksOpp(playedEnds, knowledge, opp1, opp2);
+      if (bestBlocks && !playedBlocks) {
+        return { type: 'BLOCKING_MISS', label: LEAK_TYPES.BLOCKING_MISS, severity: 0.7,
+          desc: `Best move blocks opponent; played move leaves them open` };
+      }
+
+      // FEED_ERROR: played a number an opponent wants (they played it before)
+      const playedNums = new Set([move.tile.left, move.tile.right]);
+      for (const opp of [opp1, opp2]) {
+        const oppStr = knowledge.inferStrength(opp);
+        for (const n of playedNums) {
+          if (oppStr[n] >= 2 && (playedEnds.newEnd === n || playedEnds.otherEnd === n)) {
+            const bestNums = new Set([bestMove.tile.left, bestMove.tile.right]);
+            if (!bestNums.has(n) || !(bestEnds.newEnd === n || bestEnds.otherEnd === n)) {
+              return { type: 'FEED_ERROR', label: LEAK_TYPES.FEED_ERROR, severity: 0.6,
+                desc: `Played number ${n} that opponent P${opp} favors (played ${oppStr[n]}x)` };
+            }
+          }
+        }
+      }
+
+      // DOUBLE_TIMING: held a double too long while the number was still alive
+      if (bestMove.tile.left === bestMove.tile.right) {
+        const dblNum = bestMove.tile.left;
+        // Count how many tiles of this number have been played
+        let numPlayed = 0;
+        for (const id of knowledge.played) {
+          const t = ALL_TILES.find(x => x.id === id);
+          if (t && (t.left === dblNum || t.right === dblNum)) numPlayed++;
+        }
+        if (numPlayed >= 3 && move.tile.left !== move.tile.right) {
+          return { type: 'DOUBLE_TIMING', label: LEAK_TYPES.DOUBLE_TIMING, severity: 0.5,
+            desc: `Should play double [${dblNum}|${dblNum}] — ${numPlayed} of 7 ${dblNum}s already out` };
+        }
+      }
+
+      // DEAD_END: played move creates a dead-end number (all tiles with that number played)
+      const remainNew = knowledge.remainingWithNumber(playedEnds.newEnd);
+      if (remainNew === 0 && playedEnds.newEnd !== playedEnds.otherEnd) {
+        const bestRemain = knowledge.remainingWithNumber(bestEnds.newEnd);
+        if (bestRemain > 0) {
+          return { type: 'DEAD_END', label: LEAK_TYPES.DEAD_END, severity: 0.8,
+            desc: `Creates dead end ${playedEnds.newEnd} — no tiles left with that number` };
+        }
+      }
+
+      // PIP_WASTE: played a heavier tile when lighter option had similar strategic value
+      const playedPips = move.tile.left + move.tile.right;
+      const bestPips = bestMove.tile.left + bestMove.tile.right;
+      if (playedPips >= bestPips + 5) {
+        return { type: 'PIP_WASTE', label: LEAK_TYPES.PIP_WASTE, severity: 0.4,
+          desc: `Played ${playedPips} pips vs better's ${bestPips} — wasted ${playedPips - bestPips} pips` };
+      }
+
+      // PARTNER_IGNORE: best move supports partner's suit, played move doesn't
+      const pStr = knowledge.inferStrength(partner);
+      for (let n = 0; n <= 6; n++) {
+        if (pStr[n] >= 2 && !knowledge.cantHave[partner].has(n)) {
+          const bestFeeds = (bestEnds.newEnd === n || bestEnds.otherEnd === n);
+          const playedFeeds = (playedEnds.newEnd === n || playedEnds.otherEnd === n);
+          if (bestFeeds && !playedFeeds) {
+            return { type: 'PARTNER_IGNORE', label: LEAK_TYPES.PARTNER_IGNORE, severity: 0.5,
+              desc: `Best move feeds partner's suit ${n} (played ${pStr[n]}x); played move ignores it` };
+          }
+        }
+      }
+
+      return null; // no clear leak pattern
+    }
+
+    // Helpers for classifyLeak
+    function _getNewEnds(tile, side, lE, rE, bLen) {
+      if (bLen === 0) return { newEnd: tile.left, otherEnd: tile.right };
+      if (side === 'left') {
+        const newEnd = tile.left === lE ? tile.right : tile.left;
+        return { newEnd, otherEnd: rE };
+      }
+      const newEnd = tile.right === rE ? tile.left : tile.right;
+      return { newEnd, otherEnd: lE };
+    }
+    function _blocksOpp(ends, knowledge, opp1, opp2) {
+      return (knowledge.cantHave[opp1].has(ends.newEnd) && knowledge.cantHave[opp1].has(ends.otherEnd)) ||
+             (knowledge.cantHave[opp2].has(ends.newEnd) && knowledge.cantHave[opp2].has(ends.otherEnd));
+    }
+
+    // Leak aggregator — stores cumulative leak stats in localStorage
+    const LeakAggregator = {
+      _key: 'domino-leak-stats',
+      _load() {
+        try { return JSON.parse(localStorage.getItem(this._key)) || {}; }
+        catch(e) { return {}; }
+      },
+      addLeak(type, severity) {
+        const stats = this._load();
+        if (!stats[type]) stats[type] = { count: 0, totalSeverity: 0 };
+        stats[type].count++;
+        stats[type].totalSeverity += severity;
+        try { localStorage.setItem(this._key, JSON.stringify(stats)); } catch(e) {}
+      },
+      getStats() { return this._load(); },
+      getWeakestArea() {
+        const stats = this._load();
+        let worst = null, worstScore = 0;
+        for (const [type, data] of Object.entries(stats)) {
+          if (data.totalSeverity > worstScore) {
+            worst = type;
+            worstScore = data.totalSeverity;
+          }
+        }
+        return worst ? { type: worst, label: LEAK_TYPES[worst] || worst, ...stats[worst] } : null;
+      },
+      reset() { try { localStorage.removeItem(this._key); } catch(e) {} }
+    };
 
     // ========== BELIEF SAMPLER ==========
     function logCombination(n, k) {
@@ -1284,6 +1505,125 @@
       },
     ];
 
+    // ========== AUTO-PUZZLE GENERATION ==========
+
+    function loadGeneratedPuzzles() {
+      try {
+        return JSON.parse(localStorage.getItem('domino-generated-puzzles')) || [];
+      } catch(e) { return []; }
+    }
+    function saveGeneratedPuzzles(puzzles) {
+      try {
+        // Keep max 20, FIFO
+        const trimmed = puzzles.slice(-20);
+        localStorage.setItem('domino-generated-puzzles', JSON.stringify(trimmed));
+      } catch(e) {}
+    }
+
+    function extractPuzzleFromAnalysis(snapshots, analysisEntry) {
+      const s = snapshots[analysisEntry.stepIdx];
+      const prevSnap = snapshots[analysisEntry.stepIdx - 1];
+      if (!prevSnap || !s) return null;
+
+      const hand = prevSnap.hands[0].map(t => t.id);
+      const board = prevSnap.board.map(t => t.id);
+      const lE = prevSnap.leftEnd, rE = prevSnap.rightEnd;
+      const knowledge = prevSnap.knowledge;
+
+      // Build otherHands from the snapshot
+      const otherHands = {};
+      for (let p = 1; p <= 3; p++) {
+        otherHands[p] = prevSnap.hands[p].map(t => t.id);
+      }
+
+      // Build voids from knowledge
+      const voids = {};
+      for (let p = 1; p <= 3; p++) {
+        const v = [...knowledge.cantHave[p]];
+        if (v.length > 0) voids[p] = v;
+      }
+
+      // Build pass history from knowledge
+      const passHistory = [];
+      for (let p = 1; p <= 3; p++) {
+        for (const ph of knowledge.passedOn[p]) {
+          passHistory.push({ player: p, leftEnd: ph.lE, rightEnd: ph.rE });
+        }
+      }
+
+      const bestTile = analysisEntry.bestTile;
+      const bestSide = analysisEntry.bestSide;
+      if (!bestTile) return null;
+
+      const difficultyFromEL = analysisEntry.eqLoss > 0.6 ? 5 :
+                               analysisEntry.eqLoss > 0.4 ? 4 :
+                               analysisEntry.eqLoss > 0.2 ? 3 : 2;
+
+      return {
+        id: `gen-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title: `Mistake #${analysisEntry.move}`,
+        difficulty: difficultyFromEL,
+        category: 'generated',
+        description: `Position from game — equity loss ${analysisEntry.eqLoss.toFixed(2)}`,
+        hint: `The best play was [${bestTile.left}|${bestTile.right}] ${bestSide || 'either side'}`,
+        myHand: hand,
+        board: board,
+        leftEnd: lE,
+        rightEnd: rE,
+        otherHands,
+        voids,
+        passHistory,
+        correctTile: bestTile.id,
+        correctSide: bestSide,
+        explanation: `<b>[${bestTile.left}|${bestTile.right}] ${bestSide || ''}</b> was the best play (E[pts]: ${analysisEntry.bestEP.toFixed(2)} vs ${analysisEntry.playedEP.toFixed(2)} for your choice). ` +
+          (analysisEntry.bestReasons && analysisEntry.bestReasons.length > 0
+            ? `Key reasons: ${analysisEntry.bestReasons.join('; ')}.`
+            : `MC evaluation strongly favors this move.`),
+        source: 'generated',
+        eqLoss: analysisEntry.eqLoss
+      };
+    }
+
+    function validatePuzzle(puzzle) {
+      // Reject trivial puzzles — must have at least 2 legal moves
+      const hand = puzzle.myHand.map(parseTileId);
+      const playable = hand.filter(t => canPlay(t, puzzle.leftEnd, puzzle.rightEnd, puzzle.board.length));
+      if (playable.length < 2) return false;
+      // Equity gap must be meaningful
+      if (puzzle.eqLoss < 0.15) return false;
+      return true;
+    }
+
+    function scanGameForPuzzles(analysisCache, snapshots) {
+      if (!analysisCache || !snapshots) return [];
+      const puzzles = [];
+      for (const entry of analysisCache) {
+        if (entry.eqLoss < 0.3) continue; // only significant mistakes
+        if (entry.grade === 'perfect' || entry.grade === 'good') continue;
+        const puzzle = extractPuzzleFromAnalysis(snapshots, entry);
+        if (puzzle && validatePuzzle(puzzle)) {
+          puzzles.push(puzzle);
+        }
+      }
+      return puzzles;
+    }
+
+    function generatePuzzlesFromLastGame() {
+      if (!currentGame || !currentGame._analysisCache) return 0;
+      const newPuzzles = scanGameForPuzzles(currentGame._analysisCache, currentGame.snapshots);
+      if (newPuzzles.length === 0) return 0;
+      const existing = loadGeneratedPuzzles();
+      existing.push(...newPuzzles);
+      saveGeneratedPuzzles(existing);
+      return newPuzzles.length;
+    }
+
+    function getAllPuzzles() {
+      // Combine curated + generated puzzles
+      const generated = loadGeneratedPuzzles();
+      return [...PUZZLES, ...generated];
+    }
+
     function loadPuzzle(def) {
       // Parse tiles
       const myHand = def.myHand.map(parseTileId);
@@ -1389,7 +1729,7 @@
     }
 
     function startPuzzle(id) {
-      const p = PUZZLES.find(x => x.id === id);
+      const p = getAllPuzzles().find(x => x.id === id);
       if (p) loadPuzzle(p);
     }
 
@@ -1406,9 +1746,10 @@
 
     function nextPuzzle() {
       if (!puzzleDef) return;
-      const idx = PUZZLES.findIndex(p => p.id === puzzleDef.id);
-      if (idx >= 0 && idx < PUZZLES.length - 1) {
-        loadPuzzle(PUZZLES[idx + 1]);
+      const allP = getAllPuzzles();
+      const idx = allP.findIndex(p => p.id === puzzleDef.id);
+      if (idx >= 0 && idx < allP.length - 1) {
+        loadPuzzle(allP[idx + 1]);
       } else {
         showPuzzleBrowser();
       }
@@ -1421,22 +1762,31 @@
         { key: 'doubles', name: 'Clearing Doubles', icon: '\u{1F3B2}', color: 'amber' },
         { key: 'endgame', name: 'Endgame', icon: '\u{1F3C1}', color: 'emerald' },
         { key: 'reading', name: 'Reading / Deduction', icon: '\u{1F50D}', color: 'purple' },
-        { key: 'tempo', name: 'Tempo & Control', icon: '\u26A1', color: 'yellow' }
+        { key: 'tempo', name: 'Tempo & Control', icon: '\u26A1', color: 'yellow' },
+        { key: 'generated', name: 'From Your Games', icon: '\u{1F4A1}', color: 'cyan' }
       ];
+      const allP = getAllPuzzles();
       const completed = Object.keys(puzzleCompletion).length;
       const perfect = Object.values(puzzleCompletion).filter(g => g === 'perfect').length;
+      const genCount = loadGeneratedPuzzles().length;
       return `<div class="flex items-center justify-center min-h-screen">
         <div class="max-w-4xl w-full p-4">
           <div class="flex items-center justify-between mb-4">
             <h1 class="text-3xl font-bold text-purple-400">Strategy Puzzles</h1>
-            <div class="text-sm text-slate-400">${perfect}/${PUZZLES.length} perfect | ${completed}/${PUZZLES.length} attempted</div>
+            <div class="text-sm text-slate-400">${perfect}/${allP.length} perfect | ${completed}/${allP.length} attempted</div>
           </div>
           <p class="text-slate-400 text-sm mb-6">Curated positions where multiple tiles look good but only one is truly optimal. Like chess tactics for dominos.</p>
           ${categories.map(cat => {
-            const cp = PUZZLES.filter(p => p.category === cat.key);
-            if (cp.length === 0) return '';
+            const cp = allP.filter(p => p.category === cat.key);
+            if (cp.length === 0 && cat.key !== 'generated') return '';
+            if (cat.key === 'generated' && cp.length === 0) {
+              return `<div class="mb-5">
+                <h2 class="text-lg font-bold text-${cat.color}-400 mb-2">${cat.icon} ${cat.name}</h2>
+                <div class="text-xs text-slate-500 mb-2">Play games and analyze them to auto-generate puzzles from your mistakes.</div>
+              </div>`;
+            }
             return `<div class="mb-5">
-              <h2 class="text-lg font-bold text-${cat.color}-400 mb-2">${cat.icon} ${cat.name}</h2>
+              <h2 class="text-lg font-bold text-${cat.color}-400 mb-2">${cat.icon} ${cat.name}${cat.key === 'generated' ? ` (${cp.length})` : ''}</h2>
               <div class="grid grid-cols-3 gap-3">${cp.map(p => {
                 const comp = puzzleCompletion[p.id];
                 const stars = Array(p.difficulty).fill('\u2605').join('') + Array(5 - p.difficulty).fill('\u2606').join('');
@@ -2116,6 +2466,72 @@
       }
     }
 
+    // ========== OPPONENT STYLE MODELING ==========
+    class OpponentStyle {
+      constructor() {
+        this.alpha = 0.3; // EMA smoothing factor
+        this.metrics = { heavyDump: 0.5, doubleSpeed: 0.5, blockingFocus: 0.5, suitLoyalty: 0.5, aggressiveness: 0.5 };
+        this.observations = 0;
+        this._lastSuits = new Set(); // track suit continuity for loyalty
+      }
+      update(tile, context) {
+        // context: { hand (estimated size), lE, rE, bLen, knowledge, player }
+        this.observations++;
+        const a = this.alpha;
+        const pips = tile.left + tile.right;
+        // heavyDump: did they play a heavy tile (pips >= 9)?
+        this.metrics.heavyDump = (1 - a) * this.metrics.heavyDump + a * (pips >= 9 ? 1 : 0);
+        // doubleSpeed: did they play a double?
+        this.metrics.doubleSpeed = (1 - a) * this.metrics.doubleSpeed + a * (tile.left === tile.right ? 1 : 0);
+        // blockingFocus: did the played tile create an end that blocks an opponent?
+        const blocking = context.knowledge ? (() => {
+          const opp = (context.player + 2) % 4; // their partner's opponents = our team
+          // Check if the new end matches a number the next player can't have
+          const nextP = (context.player + 1) % 4;
+          const newNums = new Set([tile.left, tile.right]);
+          for (const n of newNums) {
+            if (context.knowledge.cantHave[nextP].has(n)) return 1;
+          }
+          return 0;
+        })() : 0;
+        this.metrics.blockingFocus = (1 - a) * this.metrics.blockingFocus + a * blocking;
+        // suitLoyalty: are they replaying the same suits as last move?
+        const tileSuits = new Set([tile.left, tile.right]);
+        let overlap = 0;
+        if (this._lastSuits.size > 0) {
+          for (const s of tileSuits) { if (this._lastSuits.has(s)) overlap++; }
+          const loyalty = overlap / Math.max(1, tileSuits.size);
+          this.metrics.suitLoyalty = (1 - a) * this.metrics.suitLoyalty + a * loyalty;
+        }
+        this._lastSuits = tileSuits;
+        // aggressiveness: normalized by game phase — playing early in round = more aggressive
+        const aggression = context.bLen < 10 ? 0.7 : 0.4;
+        this.metrics.aggressiveness = (1 - a) * this.metrics.aggressiveness + a * aggression;
+      }
+      getProfile() { return { ...this.metrics, observations: this.observations }; }
+      getLabel() {
+        if (this.observations < 3) return null; // not enough data
+        const m = this.metrics;
+        if (m.heavyDump > 0.65) return 'Heavy Dumper';
+        if (m.blockingFocus > 0.65) return 'Blocker';
+        if (m.aggressiveness > 0.65 && m.doubleSpeed > 0.55) return 'Aggressive';
+        if (m.suitLoyalty > 0.7) return 'Suit Player';
+        return null;
+      }
+      reset() {
+        this.metrics = { heavyDump: 0.5, doubleSpeed: 0.5, blockingFocus: 0.5, suitLoyalty: 0.5, aggressiveness: 0.5 };
+        this.observations = 0;
+        this._lastSuits = new Set();
+      }
+    }
+
+    // Track opponent styles: only P1 (opp left) and P3 (opp right)
+    let opponentStyles = [null, new OpponentStyle(), null, new OpponentStyle()];
+    function resetOpponentStyles() {
+      opponentStyles[1] = new OpponentStyle();
+      opponentStyles[3] = new OpponentStyle();
+    }
+
     // Smart AI - returns all scored options (not just best)
     function smartAI(hand, lE, rE, bLen, player, knowledge, returnAll = false) {
       const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
@@ -2180,6 +2596,16 @@
           // Blocking — opp1 plays next (higher value), opp2 plays after partner (lower)
           if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 30; sr.push(`Blocks ${pn(opp1)} (next player)`); }
           if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 20; sr.push(`Blocks ${pn(opp2)}`); }
+
+          // Opponent style adjustment: block-focused opponents are higher-value targets
+          if (opponentStyles[opp1] && opponentStyles[opp1].observations >= 3) {
+            const bf1 = opponentStyles[opp1].metrics.blockingFocus;
+            if (bf1 > 0.6 && knowledge.cantHave[opp1].has(newEnd)) { ss += 8; sr.push(`${pn(opp1)} is a blocker — priority target`); }
+          }
+          if (opponentStyles[opp2] && opponentStyles[opp2].observations >= 3) {
+            const bf2 = opponentStyles[opp2].metrics.blockingFocus;
+            if (bf2 > 0.6 && knowledge.cantHave[opp2].has(newEnd)) { ss += 5; sr.push(`${pn(opp2)} is a blocker — priority target`); }
+          }
 
           // Partner support — check if partner has played tiles with these numbers
           // Discount: remaining tiles with that number minus tiles WE hold with it
@@ -2657,32 +3083,39 @@
         const allOptions = smartAI(hands[cur], lE, rE, board.length, cur, knowledge, true);
         let decision = allOptions.length > 0 ? allOptions[0] : null;
 
-        // MC-assisted play: when player has ≤3 tiles and multiple options, use MC to pick
-        if (decision && hands[cur].length <= 3 && allOptions.length > 1) {
-          // Compute Bayesian beliefs to improve MC deal generation
+        // MC/ISMCTS-assisted play: when player has ≤4 tiles and multiple options
+        if (decision && hands[cur].length <= 4 && allOptions.length > 1) {
           const handSizes = hands.map(h => h.length);
           computeBeliefs(knowledge, handSizes, hands[cur], cur, 150);
-          const snap = {
-            hands: hands.map(h => [...h]),
-            board: [...board],
-            leftEnd: lE, rightEnd: rE,
-            knowledge: knowledge.clone()
-          };
           try {
-            const mcRes = monteCarloEval(snap, cur, MC_SIMS_GENERATE);
-            if (mcRes.length > 0) {
-              // Find the matching heuristic option for the MC best tile+side
-              const mcBest = mcRes[0];
-              const matched = allOptions.find(o => o.tile.id === mcBest.tile.id && o.side === mcBest.side)
-                           || allOptions.find(o => o.tile.id === mcBest.tile.id);
+            let searchRes;
+            // Use ISMCTS when mid-game (board has 6+ tiles) and enough tiles for meaningful tree
+            if (board.length >= 6 && hands[cur].length >= 2) {
+              searchRes = ismctsEval(hands[cur], lE, rE, board.length, cur, knowledge, belief);
+            }
+            // Fallback to MC if ISMCTS didn't produce results
+            if (!searchRes || searchRes.length === 0) {
+              const snap = {
+                hands: hands.map(h => [...h]),
+                board: [...board],
+                leftEnd: lE, rightEnd: rE,
+                knowledge: knowledge.clone()
+              };
+              searchRes = monteCarloEval(snap, cur, MC_SIMS_GENERATE);
+            }
+            if (searchRes.length > 0) {
+              const best = searchRes[0];
+              const matched = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                           || allOptions.find(o => o.tile.id === best.tile.id);
               if (matched) {
                 decision = matched;
-                if (!decision.reasons.includes('MC override')) {
-                  decision.reasons = [...decision.reasons, `MC override (E[pts]:${mcBest.expectedPoints.toFixed(2)})`];
+                const tag = best.ismcts ? 'ISMCTS' : 'MC';
+                if (!decision.reasons.includes(`${tag} override`)) {
+                  decision.reasons = [...decision.reasons, `${tag} override (E[pts]:${best.expectedPoints.toFixed(2)})`];
                 }
               }
             }
-          } catch(e) { /* MC failed, keep heuristic decision */ }
+          } catch(e) { /* search failed, keep heuristic decision */ }
         }
 
         if (decision) {
@@ -2697,6 +3130,10 @@
           hands[cur] = hands[cur].filter(t => t.id !== tile.id);
           knowledge.recordPlay(cur, tile);
           nb.recordPlay(cur, moveNum, tile, side, lE, rE);
+          // Update opponent style model
+          if (opponentStyles[cur]) {
+            opponentStyles[cur].update(tile, { bLen: board.length, lE, rE, knowledge, player: cur });
+          }
 
           const pL = lE, pR = rE;
 
@@ -3020,16 +3457,22 @@
       const difficulty = getDifficultyForPlayer(player);
       let decision;
       if (difficulty >= 1.0 && allOptions.length > 1) {
-        // Compute Bayesian beliefs before MC — importance-weighted tile probabilities
+        // Compute Bayesian beliefs before search — importance-weighted tile probabilities
         const handSizes = liveHands.map(h => h.length);
         computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
-        // Expert: use MC evaluation for best play by expected points
-        const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
-        const mcResults = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
-        if (mcResults.length > 0) {
-          const mcBest = mcResults[0];
-          decision = allOptions.find(o => o.tile.id === mcBest.tile.id && o.side === mcBest.side)
-                  || allOptions.find(o => o.tile.id === mcBest.tile.id)
+        // Expert: use ISMCTS when mid-game, fall back to MC
+        let searchRes = null;
+        if (liveBoard.length >= 6 && hand.length >= 2) {
+          try { searchRes = ismctsEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, belief); } catch(e) {}
+        }
+        if (!searchRes || searchRes.length === 0) {
+          const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
+          searchRes = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
+        }
+        if (searchRes.length > 0) {
+          const best = searchRes[0];
+          decision = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                  || allOptions.find(o => o.tile.id === best.tile.id)
                   || allOptions[0];
         } else {
           decision = allOptions[0];
@@ -3062,6 +3505,10 @@
       liveHands[player] = liveHands[player].filter(t => t.id !== tile.id);
       liveKnowledge.recordPlay(player, tile);
       liveNotebook.recordPlay(player, liveMoveNum, tile, side, liveLeftEnd, liveRightEnd);
+      // Update opponent style model for opponents in play mode
+      if (opponentStyles[player]) {
+        opponentStyles[player].update(tile, { bLen: liveBoard.length, lE: liveLeftEnd, rE: liveRightEnd, knowledge: liveKnowledge, player });
+      }
       livePassCount = 0;
 
       const pL = liveLeftEnd, pR = liveRightEnd;
@@ -4166,6 +4613,16 @@
           }
         }
       }
+      // (d) Opponent style: heavy dumpers are less likely to still hold heavy tiles
+      for (const p of [1, 3]) {
+        if (!opponentStyles[p] || opponentStyles[p].observations < 3) continue;
+        const prof = opponentStyles[p].metrics;
+        if (prof.heavyDump > 0.6) {
+          for (const t of deal[p]) {
+            if (t.left + t.right >= 9) w *= 0.85; // heavy dumpers shed these early
+          }
+        }
+      }
       return w;
     }
 
@@ -4605,17 +5062,13 @@
                   variance: 0, stdDev: 0, ci95: 0, cvar5: 0 }];
       }
 
-      // Check cache
-      // Bitfield-based cache key: O(n) integer ops instead of sort+join strings
-      let playedBits = 0;
-      for (const id of knowledge.played) playedBits |= (1 << TILE_INDEX[id]);
-      let handBits = 0;
-      for (const t of hand) handBits |= (1 << TILE_INDEX[t.id]);
-      let cantBits = 0;
-      for (let p = 0; p < 4; p++) for (const n of knowledge.cantHave[p]) cantBits |= (1 << (p * 7 + n));
-      // Include playsBy lengths to prevent cache poisoning when same tiles played but different players
+      // Check cache — BitSet-based compact keys
+      const playedBS = new BitSet();
+      for (const id of knowledge.played) playedBS.set(TILE_INDEX[id]);
+      const handBS = handBits(hand);
+      const cantBS = cantHaveBits(knowledge);
       const playsByKey = knowledge.playsBy.map(a => a.length).join(',');
-      const cacheKey = `${lE}:${rE}:${handBits}:${playedBits}:${cantBits}:${playsByKey}`;
+      const cacheKey = `${lE}:${rE}:${handBS}:${playedBS}:${cantBS}:${playsByKey}`;
       if (mcCache.has(cacheKey)) return mcCache.get(cacheKey);
 
       const handSizes = snap.hands.map(h => h.length);
@@ -4737,6 +5190,228 @@
       results.sort((a, b) => b.expectedPoints - a.expectedPoints || b.winRate - a.winRate);
       mcCache.set(cacheKey, results);
       return results;
+    }
+
+    // ========== ISMCTS (Information Set Monte Carlo Tree Search) ==========
+
+    class ISMCTSNode {
+      constructor(move = null, parent = null) {
+        this.move = move;       // { tile, side } or null for root
+        this.parent = parent;
+        this.children = [];
+        this.visits = 0;
+        this.totalReward = 0;
+      }
+      ucb1(C = 1.41) {
+        if (this.visits === 0) return Infinity;
+        return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits);
+      }
+      selectChild(legalMoves) {
+        // Filter children to those whose move is legal in this determinization
+        const legal = this.children.filter(c =>
+          legalMoves.some(m => m.tile.id === c.move.tile.id && m.side === c.move.side)
+        );
+        if (legal.length === 0) return null;
+        let best = legal[0], bestUCB = legal[0].ucb1();
+        for (let i = 1; i < legal.length; i++) {
+          const u = legal[i].ucb1();
+          if (u > bestUCB) { best = legal[i]; bestUCB = u; }
+        }
+        return best;
+      }
+      expand(move) {
+        const child = new ISMCTSNode(move, this);
+        this.children.push(child);
+        return child;
+      }
+      update(reward) {
+        this.visits++;
+        this.totalReward += reward;
+      }
+    }
+
+    function ismctsGetLegalMoves(hand, lE, rE, bLen) {
+      const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
+      const moves = [];
+      for (const tile of playable) {
+        if (bLen === 0) {
+          moves.push({ tile, side: null });
+        } else {
+          if (tile.left === lE || tile.right === lE) moves.push({ tile, side: 'left' });
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) moves.push({ tile, side: 'right' });
+          if (moves.length === 0 || moves[moves.length-1].tile.id !== tile.id) {
+            if (tile.left === rE || tile.right === rE) moves.push({ tile, side: 'right' });
+          }
+        }
+      }
+      return moves;
+    }
+
+    function ismctsApplyMove(tile, side, lE, rE, bLen) {
+      if (bLen === 0) return { newLE: tile.left, newRE: tile.right };
+      if (side === 'left') return { newLE: tile.left === lE ? tile.right : tile.left, newRE: rE };
+      return { newLE: lE, newRE: tile.right === rE ? tile.left : tile.right };
+    }
+
+    function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
+      const MAX_ITERATIONS = 300;
+      const TIME_LIMIT = 150; // ms
+      const MAX_NODES = 5000;
+      const myTeam = player % 2;
+      const handSizes = [6, 6, 6, 6]; // approximate — will be overridden per determinization
+
+      // Compute actual hand sizes from knowledge
+      const totalPlayed = knowledge.played.size;
+      const tilesPerPlayer = Math.max(1, Math.floor((28 - 4 - totalPlayed) / 4)); // rough estimate
+      for (let p = 0; p < 4; p++) {
+        handSizes[p] = p === player ? hand.length : tilesPerPlayer;
+      }
+      // Adjust based on actual played counts
+      const playedPerPlayer = knowledge.playsBy.map(a => a.length);
+      const opening = Math.max(0, bLen > 0 ? 1 : 0);
+      for (let p = 0; p < 4; p++) {
+        if (p === player) continue;
+        handSizes[p] = Math.max(0, 6 - playedPerPlayer[p] + (p === ((player + bLen) % 4) ? 0 : 0));
+        // Better estimate: 6 minus tiles they've played
+        handSizes[p] = Math.max(1, 6 - playedPerPlayer[p]);
+      }
+      handSizes[player] = hand.length;
+
+      const root = new ISMCTSNode();
+      let nodeCount = 1;
+      const startTime = Date.now();
+
+      for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+        if (Date.now() - startTime > TIME_LIMIT) break;
+        if (nodeCount >= MAX_NODES) break;
+
+        // 1. DETERMINIZE: sample a consistent deal for hidden cards
+        const deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+
+        // 2. SELECT + EXPAND + ROLLOUT
+        let node = root;
+        let simHands = deal.map(h => [...h]);
+        simHands[player] = [...hand]; // our hand is known
+        let simLE = lE, simRE = rE, simBLen = bLen;
+        let simKnowledge = knowledge.clone();
+        let curPlayer = player;
+
+        // Selection phase — walk down tree while node has children
+        while (node.children.length > 0) {
+          const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
+          if (legalMoves.length === 0) break; // pass — skip selection
+
+          const child = node.selectChild(legalMoves);
+          if (!child) break;
+
+          // Check progressive widening: should we expand instead?
+          const untriedMoves = legalMoves.filter(m =>
+            !node.children.some(c => c.move.tile.id === m.tile.id && c.move.side === m.side)
+          );
+          if (untriedMoves.length > 0 && node.children.length < Math.ceil(Math.sqrt(node.visits + 1))) {
+            // Expand: pick a random untried move
+            const expandMove = untriedMoves[Math.floor(Math.random() * untriedMoves.length)];
+            node = node.expand(expandMove);
+            nodeCount++;
+            // Apply move
+            const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
+            simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
+            simKnowledge.recordPlay(curPlayer, expandMove.tile);
+            simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+            if (simHands[curPlayer].length === 0) {
+              // Terminal — immediate win
+              const w = scoreWin(expandMove.tile, lE, rE, simBLen);
+              const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+              _ismctsBackprop(node, reward);
+              break;
+            }
+            curPlayer = (curPlayer + 1) % 4;
+            break; // go to rollout
+          }
+
+          // Follow selected child
+          const { tile, side } = child.move;
+          const applied = ismctsApplyMove(tile, side, simLE, simRE, simBLen);
+          simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== tile.id);
+          simKnowledge.recordPlay(curPlayer, tile);
+          simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+          if (simHands[curPlayer].length === 0) {
+            const w = scoreWin(tile, lE, rE, simBLen);
+            const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+            _ismctsBackprop(child, reward);
+            node = null; // signal: already backpropagated
+            break;
+          }
+          curPlayer = (curPlayer + 1) % 4;
+          node = child;
+        }
+
+        if (node === null) continue; // already backpropagated
+
+        // Expansion at leaf with no children
+        if (node.children.length === 0) {
+          const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
+          if (legalMoves.length > 0) {
+            const expandMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+            node = node.expand(expandMove);
+            nodeCount++;
+            const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
+            simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
+            simKnowledge.recordPlay(curPlayer, expandMove.tile);
+            simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+            if (simHands[curPlayer].length === 0) {
+              const w = scoreWin(expandMove.tile, lE, rE, simBLen);
+              const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+              _ismctsBackprop(node, reward);
+              continue;
+            }
+            curPlayer = (curPlayer + 1) % 4;
+          }
+        }
+
+        // 3. ROLLOUT from current position using fastAI
+        const result = simulateFromPosition(simHands, null, simLE, simRE, curPlayer, simKnowledge, simBLen);
+        const reward = result.winnerTeam === myTeam ? result.points / 4 :
+                       result.winnerTeam >= 0 ? -result.points / 4 : 0;
+
+        // 4. BACKPROPAGATE
+        _ismctsBackprop(node, reward);
+      }
+
+      // Extract results from root's children
+      if (root.children.length === 0) return []; // fallback: no tree built
+
+      const results = [];
+      const tileResults = new Map();
+      for (const child of root.children) {
+        if (child.visits === 0) continue;
+        const avgReward = child.totalReward / child.visits;
+        const key = `${child.move.tile.id}:${child.move.side}`;
+        const tileKey = child.move.tile.id;
+        const r = {
+          tile: child.move.tile, side: child.move.side,
+          winRate: (avgReward + 1) / 2, // normalize [-1,1] → [0,1]
+          expectedPoints: avgReward * 4, // scale back
+          visits: child.visits,
+          blockRate: 0, sims: child.visits,
+          outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+          variance: 0, stdDev: 0, ci95: 0, cvar5: 0,
+          ismcts: true
+        };
+        if (!tileResults.has(tileKey) || r.expectedPoints > tileResults.get(tileKey).expectedPoints) {
+          tileResults.set(tileKey, r);
+        }
+      }
+      const finalResults = [...tileResults.values()];
+      finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+      return finalResults;
+    }
+
+    function _ismctsBackprop(node, reward) {
+      while (node) {
+        node.update(reward);
+        node = node.parent;
+      }
     }
 
     // ========== STATE ==========
@@ -5777,6 +6452,7 @@
       scoreMultiplier = 1;
       lastWinTeam = null;
       playMatchWinner = null;
+      resetOpponentStyles();
       if (playAgain) {
         startPlayGame();
       } else {
@@ -7214,20 +7890,32 @@
       const mistakes = analysis.filter(a => a.grade === 'ok').length;
       const perfects = analysis.filter(a => a.grade === 'perfect').length;
 
-      // Leak finder: identify patterns
+      // Leak finder: classify each non-perfect move using taxonomy
       const leaks = [];
-      // Check for systematic issues
-      const earlyMoves = analysis.slice(0, 3);
-      const lateMoves = analysis.slice(-3);
-      const earlyEL = earlyMoves.reduce((s, a) => s + a.eqLoss, 0) / (earlyMoves.length || 1);
-      const lateEL = lateMoves.reduce((s, a) => s + a.eqLoss, 0) / (lateMoves.length || 1);
-      if (earlyEL > 0.2 && analysis.length >= 4) leaks.push({ type: 'Opening', desc: 'High equity loss in early moves — review opening tile selection' });
-      if (lateEL > 0.2 && analysis.length >= 4) leaks.push({ type: 'Endgame', desc: 'High equity loss in late moves — work on endgame precision' });
-      if (blunders >= 2) leaks.push({ type: 'Blunders', desc: `${blunders} blunders this game — focus on eliminating big mistakes first` });
-
-      // Check for double-related errors
-      const doubleErrors = analysis.filter(a => a.grade !== 'perfect' && a.tile.left === a.tile.right);
-      if (doubleErrors.length >= 2) leaks.push({ type: 'Doubles', desc: 'Multiple errors with doubles — review double management strategy' });
+      const leakCounts = {};
+      const snapshots = currentGame.snapshots;
+      for (const a of analysis) {
+        if (a.grade === 'perfect') continue;
+        const moveSnap = a.stepIdx > 0 ? snapshots[a.stepIdx - 1] : null;
+        if (!moveSnap) continue;
+        const playedMove = { tile: a.tile, side: a.side };
+        const bestMoveObj = a.bestTile ? { tile: a.bestTile, side: a.bestSide } : null;
+        const leak = classifyLeak(playedMove, bestMoveObj, moveSnap, moveSnap.knowledge);
+        if (leak) {
+          leaks.push({ type: leak.label, desc: leak.desc, move: a.move, severity: leak.severity });
+          leakCounts[leak.type] = (leakCounts[leak.type] || 0) + 1;
+          LeakAggregator.addLeak(leak.type, leak.severity);
+        }
+      }
+      // Add phase-based leaks (kept from original)
+      if (analysis.length >= 4) {
+        const earlyEL = analysis.slice(0, 3).reduce((s, a) => s + a.eqLoss, 0) / 3;
+        const lateEL = analysis.slice(-3).reduce((s, a) => s + a.eqLoss, 0) / 3;
+        if (earlyEL > 0.2) leaks.push({ type: 'Opening', desc: 'High equity loss in early moves — review opening tile selection', severity: 0.5 });
+        if (lateEL > 0.2) leaks.push({ type: 'Endgame', desc: 'High equity loss in late moves — work on endgame precision', severity: 0.5 });
+      }
+      // Show weakest area across all sessions
+      const weakest = LeakAggregator.getWeakestArea();
 
       // Grade color for the game
       const gameColor = avgEL < 0.05 ? '#22c55e' : avgEL < 0.10 ? '#86efac' : avgEL < 0.20 ? '#eab308' : '#ef4444';
@@ -7274,23 +7962,36 @@
           </div>
 
           ${leaks.length > 0 ? `
-          <!-- Leak Finder -->
+          <!-- Leak Finder (Taxonomy) -->
           <div class="bg-slate-900 rounded-lg p-2 border border-orange-800">
             <div class="text-xs font-bold text-orange-400 mb-1">Leak Finder</div>
             <div class="space-y-1.5">
               ${leaks.map(l => `
                 <div class="text-xs">
-                  <span class="text-orange-300 font-bold">${l.type}:</span>
+                  <span class="text-orange-300 font-bold">${l.type}${l.move ? ` (#${l.move})` : ''}:</span>
                   <span class="text-slate-300">${l.desc}</span>
                 </div>
               `).join('')}
             </div>
+            ${weakest ? `<div class="mt-2 pt-2 border-t border-slate-700 text-xs">
+              <span class="text-red-400 font-bold">Weakest area (all sessions):</span>
+              <span class="text-slate-300">${weakest.label} (${weakest.count} occurrences)</span>
+            </div>` : ''}
           </div>` : `
           <div class="bg-slate-900 rounded-lg p-2 border border-emerald-800">
             <div class="text-xs text-emerald-400">No major leaks detected this game</div>
+            ${weakest ? `<div class="mt-1 text-xs text-slate-500">Historical weak area: ${weakest.label} (${weakest.count}x)</div>` : ''}
           </div>`}
 
           <div class="text-xs text-slate-600 text-center">Click any move to navigate to it</div>
+
+          ${blunders > 0 ? `
+          <div class="text-center mt-2">
+            <button class="text-xs px-3 py-1 bg-cyan-900 hover:bg-cyan-800 text-cyan-300 rounded border border-cyan-700"
+              onclick="const n = generatePuzzlesFromLastGame(); this.textContent = n > 0 ? n + ' puzzle' + (n>1?'s':'') + ' generated!' : 'No significant mistakes found'; this.disabled = true; this.classList.add('opacity-50');">
+              Generate Puzzles from Mistakes
+            </button>
+          </div>` : ''}
         </div>
       `;
     }
