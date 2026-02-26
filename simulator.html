@@ -353,6 +353,7 @@
       // Play reasons
       let m;
       if ((m = r.match(/^(\d+) more tiles? match new ends \[(.+)\]$/))) return `${m[1]} pedra${parseInt(m[1])>1?'s combinam':'combina'} com novas pontas [${m[2]}]`;
+      if ((m = r.match(/^Blocks (.+) \(next player\)$/))) return `Bloqueia ${m[1]} (próximo jogador)`;
       if ((m = r.match(/^Blocks (.+)$/))) return `Bloqueia ${m[1]}`;
       if ((m = r.match(/^Partner played (.+) — may have more$/))) return `Parceiro jogou ${m[1]} — pode ter mais`;
       if ((m = r.match(/^Partner can't have (\d+)$/))) return `Parceiro não tem ${m[1]}`;
@@ -360,6 +361,8 @@
       if (r === 'Partner has good coverage on both ends') return 'Parceiro tem boa cobertura em ambas pontas';
       if ((m = r.match(/^Few tiles left with (\d+) for partner$/))) return `Poucas pedras com ${m[1]} para o parceiro`;
       if (r === 'Exposes strongest suit — opponents may target') return 'Expõe naipe mais forte — adversários podem visar';
+      if ((m = r.match(/^Sacrifice for partner — (\d+) is their strong suit \(1 tile left\)$/))) return `Sacrifício pelo parceiro — ${m[1]} é naipe forte dele (1 pedra)`;
+      if (r === 'Partner close — their suit still on board') return 'Parceiro perto — naipe dele ainda no tabuleiro';
       if (r === 'Diversifies board — hides hand composition') return 'Diversifica o tabuleiro — esconde a mão';
       // Dead number & trancar translations
       if ((m = r.match(/^Dead end — all (\d+)s played, board stalls$/))) return `Ponta morta — todos os ${m[1]}s jogados, tabuleiro trava`;
@@ -375,7 +378,8 @@
       if ((m = r.match(/^Opponent holds chicote for (\d+) — they'll kill it$/))) return `Adversário tem chicote do ${m[1]} — vai matar`;
       if ((m = r.match(/^Chicote for (\d+) is in dorme — end will die$/))) return `Chicote do ${m[1]} está no dorme — ponta vai morrer`;
       if ((m = r.match(/^Near-dead (\d+) — chicote (\d+)% with opponent$/))) return `Quase morta ${m[1]} — chicote ${m[2]}% com adversário`;
-      // Suit exhaustion translations
+      // Suit exhaustion / monopoly translations
+      if ((m = r.match(/^Near-monopoly on (\d+)s \((\d+)\/(\d+) remaining\)$/))) return `Quase-monopólio em ${m[1]}s (${m[2]}/${m[3]} restantes)`;
       if ((m = r.match(/^Exhausting (\d+)s — (\d+) left, we hold (\d+)$/))) return `Esgotando ${m[1]}s — ${m[2]} restam, temos ${m[3]}`;
       if ((m = r.match(/^Dump heavy tile \((\d+) pips\)$/))) return `Descarta pedra pesada (${m[1]} pontos)`;
       if ((m = r.match(/^Sheds (\d+) pips$/))) return `Descarta ${m[1]} pontos`;
@@ -384,10 +388,12 @@
       if ((m = r.match(/^(\d+)s nearly exhausted \((\d+) out\)$/))) return `${m[1]}s quase esgotados (${m[2]} restam)`;
       if ((m = r.match(/^(\d+)s heavy — (\d+) still out for opponents$/))) return `${m[1]}s pesados — ${m[2]} ainda com adversários`;
       if ((m = r.match(/^GO OUT! Win (\d+)pt(.*)$/))) return `BATEU! Ganha ${m[1]}pt${m[2]||''}`;
-      if ((m = r.match(/^Sets up going out next turn with \[(.+)\]$/))) return `Prepara bater no próximo turno com [${m[1]}]`;
-      if ((m = r.match(/^STRANDS last tile \[(.+)\]/))) return `TRANCA última pedra [${m[1]}]`;
+      if ((m = r.match(/^Sets up going out next turn with \[(\d+\|\d+)\]$/))) return `Prepara bater no próximo turno com [${m[1]}]`;
+      if ((m = r.match(/^STRANDS last tile \[(\d+\|\d+)\]/))) return `TRANCA última pedra [${m[1]}]`;
       if (r === 'Both remaining tiles playable on new ends') return 'Ambas pedras restantes jogáveis nas novas pontas';
       if (r === 'Neither remaining tile matches new ends') return 'Nenhuma pedra restante combina com novas pontas';
+      if (r === 'Match point — keep options open') return 'Match point — manter opções abertas';
+      if (r === 'Behind — play double for carroca potential') return 'Atrás — jogar carroça para potencial de carroça';
       if ((m = r.match(/^Open: suit (\d)=(\d), suit (\d)=(\d)(.*double bonus.*)?$/))) return `Abre: naipe ${m[1]}=${m[2]}, naipe ${m[3]}=${m[4]}${m[5]?' bônus carroça':''}`;
       // Coach differential reasons
       if (r.match(/^<b>Suit control/)) return r.replace('Suit control:', 'Controle de naipe:').replace('leaves', 'deixa').replace('tiles matching the new board ends', 'pedras combinando com novas pontas').replace('vs only', 'vs apenas').replace('for your play', 'na sua jogada').replace('More matching tiles = more options next turn.', 'Mais pedras = mais opções no próximo turno.');
@@ -404,8 +410,8 @@
       if (r.match(/^<b>Avoid dead end/)) return r.replace('Avoid dead end:', 'Evite ponta morta:').replace('Your play creates end', 'Sua jogada cria ponta').replace(/with only (\d+) tiles? left/, 'com só $1 pedra(s)').replace("it's nearly dead.", 'quase morta.').replace('keeps end', 'mantém ponta').replace('alive', 'viva').replace('tiles still out', 'pedras ainda em jogo');
       if (r.match(/^<b>Pip insurance/)) return r.replace('Pip insurance:', 'Seguro de pontos:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('If the game blocks, the team with lowest individual pip count wins', 'Se o jogo trancar, o time com menos pontos individuais ganha').replace('shedding heavy tiles early is insurance.', 'descartar pedras pesadas cedo é um seguro.');
       if (r.match(/^<b>Why better/)) return r.replace('Why better:', 'Por que é melhor:');
-      // MC reasons
-      if (r.match(/blocks/i)) return r.replace(/blocks/gi, 'bloqueia');
+      // MC reasons — use word boundary to avoid corrupting words like "unblocks"
+      if (r.match(/\bblocks\b/i)) return r.replace(/\bblocks\b/gi, 'bloqueia');
       if (r.includes("feeds partner's strong suit")) return 'alimenta o naipe forte do parceiro';
       if (r.includes('keeps hand flexible')) return 'mantém a mão flexível';
       if (r.includes('squeezes opponents')) return 'espreme os adversários';
@@ -2169,9 +2175,9 @@
           ss += myCount * 15;
           if (myCount > 0) sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]`);
 
-          // Blocking
-          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp1)}`); }
-          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp2)}`); }
+          // Blocking — opp1 plays next (higher value), opp2 plays after partner (lower)
+          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 30; sr.push(`Blocks ${pn(opp1)} (next player)`); }
+          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 20; sr.push(`Blocks ${pn(opp2)}`); }
 
           // Partner support — check if partner has played tiles with these numbers
           // Discount: remaining tiles with that number minus tiles WE hold with it
@@ -2355,6 +2361,22 @@
             }
           }
 
+          // Near-monopoly: we hold 2+ of last 3-4 tiles of an end number (strong positional control)
+          for (const endN of [newEnd, otherEnd]) {
+            const remEnd = knowledge.remainingWithNumber(endN);
+            if (remEnd >= 2 && remEnd <= 4) {
+              let weHoldEnd = 0;
+              for (const h of hand) {
+                if (h.id === tile.id) continue;
+                if (h.left === endN || h.right === endN) weHoldEnd++;
+              }
+              if (weHoldEnd >= 2 && weHoldEnd >= remEnd - 1) {
+                const monoBonus = Math.round((weHoldEnd / remEnd) * 12 * deadMul);
+                ss += monoBonus; sr.push(`Near-monopoly on ${endN}s (${weHoldEnd}/${remEnd} remaining)`);
+              }
+            }
+          }
+
           // Information hiding — opening only
           if (bLen >= 1 && bLen <= 6 && hand.length >= 4) {
             const maxSC = Math.max(...suitCount);
@@ -2365,13 +2387,40 @@
             }
           }
 
-          // Partner close to winning — boost moves that keep partner-friendly ends
+          // Partner close to winning — boost moves that create partner-friendly ends
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
           if (estPHand <= 2 && estPHand > 0) {
             const partStr = knowledge.inferStrength(partner);
-            if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) {
-              ss += 15; sr.push('Partner close — keeping their suit on board');
+            if (estPHand === 1) {
+              // Partner has 1 tile — sacrifice to create their strong suit end
+              // This is a team play: partner going out wins the round for us
+              if (partStr[newEnd] >= 2) {
+                ss += 25; sr.push(`Sacrifice for partner — ${newEnd} is their strong suit (1 tile left)`);
+              } else if (partStr[otherEnd] >= 2) {
+                ss += 10; sr.push('Partner close — their suit still on board');
+              } else if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) {
+                ss += 15; sr.push('Partner close — keeping their suit on board');
+              }
+            } else {
+              // Partner has 2 tiles
+              if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) {
+                ss += 15; sr.push('Partner close — keeping their suit on board');
+              }
             }
+          }
+
+          // === MATCH SCORE AWARENESS ===
+          // At match point (5 pts), any win wins the match — prioritize safe plays
+          // When behind, swing for high-variance plays (carroca/cruzada potential)
+          const myTeam = player % 2;
+          const ourScore = matchScore[myTeam], oppScore = matchScore[1 - myTeam];
+          if (ourScore >= 5) {
+            // At match point: boost pip dumping and safe plays, reduce risky blocking
+            ss += Math.round(tilePips * 1.5); // extra pip dump weight (wins on block = match win)
+            if (myCount >= 2) { ss += 8; sr.push('Match point — keep options open'); }
+          } else if (oppScore >= 5 && ourScore < 4) {
+            // Opponent at match point, we're behind: prefer aggressive high-impact moves
+            if (tile.left === tile.right) { ss += 8; sr.push('Behind — play double for carroca potential'); }
           }
 
           // === CLOSING BONUS ===
@@ -4142,8 +4191,10 @@
         // Count remaining tiles with those numbers
         const remL = k.remainingWithNumber(lE);
         const remR = k.remainingWithNumber(rE);
-        if (remL <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remL} tiles with ${lE} remain in play — ${lE}s are scarce` });
-        if (rE !== lE && remR <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remR} tiles with ${rE} remain in play — ${rE}s are scarce` });
+        if (remL === 0) bullets.push({ type: 'INFO', icon: '📊', text: `No tiles with ${lE} remain — ${lE}s exhausted` });
+        else if (remL <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remL} tiles with ${lE} remain in play — ${lE}s are scarce` });
+        if (rE !== lE && remR === 0) bullets.push({ type: 'INFO', icon: '📊', text: `No tiles with ${rE} remain — ${rE}s exhausted` });
+        else if (rE !== lE && remR <= 2) bullets.push({ type: 'INFO', icon: '📊', text: `Only ${remR} tiles with ${rE} remain in play — ${rE}s are scarce` });
         if (player % 2 !== 0) {
           bullets.push({ type: 'STRATEGY', icon: '💡', text: `Keep ${lE} and ${rE} on the board to block ${pName}` });
         } else {
@@ -4334,7 +4385,84 @@
       }, 10);
     }
 
-    // Simulate a game from a given position using smartAI for all players
+    // Fast rollout AI for MC simulations — ~5x faster than full smartAI
+    // Uses simplified heuristic: suit control + pips + doubles + instant win
+    function fastAI(hand, lE, rE, bLen, player, knowledge) {
+      const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
+      if (playable.length === 0) return null;
+      if (playable.length === 1) return { tile: playable[0], side: null };
+
+      const partner = (player + 2) % 4;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+
+      // Pre-compute suit counts
+      const sc = new Array(7).fill(0);
+      for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+
+      if (bLen === 0) {
+        // Opening: suit strength + double bonus
+        let best = null, bestS = -Infinity;
+        for (const t of playable) {
+          const s = sc[t.left] * 10 + sc[t.right] * 10 + (t.left === t.right ? 15 : 0) + (t.left + t.right) * 2;
+          if (s > bestS) { bestS = s; best = t; }
+        }
+        return { tile: best, side: null };
+      }
+
+      let bestTile = null, bestSide = null, bestScore = -Infinity;
+      for (const tile of playable) {
+        for (const side of ['left', 'right']) {
+          const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
+          if (!cS) continue;
+
+          let newEnd;
+          if (side === 'left') newEnd = tile.left === lE ? tile.right : tile.left;
+          else newEnd = tile.right === rE ? tile.left : tile.right;
+          const otherEnd = side === 'left' ? rE : lE;
+
+          let ss = 0;
+
+          // Instant win check
+          if (hand.length === 1) { return { tile, side }; }
+
+          // Suit control (fast: just count matching tiles in hand)
+          let mc = 0;
+          for (const h of hand) {
+            if (h.id === tile.id) continue;
+            if (h.left === newEnd || h.right === newEnd || h.left === otherEnd || h.right === otherEnd) mc++;
+          }
+          ss += mc * 12;
+
+          // Blocking (simplified: just cantHave check)
+          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 25;
+          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) ss += 18;
+
+          // Partner void penalty
+          if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) ss -= 15;
+
+          // Pip weight
+          ss += (tile.left + tile.right) * 2;
+
+          // Double clearing
+          if (tile.left === tile.right) ss += 10;
+
+          // Near-close: 2 tiles → check if last tile can play
+          if (hand.length === 2) {
+            const last = hand.find(t => t.id !== tile.id);
+            if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) {
+              ss += 60;
+            } else {
+              ss -= 20;
+            }
+          }
+
+          if (ss > bestScore) { bestScore = ss; bestTile = tile; bestSide = side; }
+        }
+      }
+      return bestTile ? { tile: bestTile, side: bestSide } : { tile: playable[0], side: null };
+    }
+
+    // Simulate a game from a given position using fastAI for rollouts
     // Returns { winnerTeam, points, type } with full scoring
     function simulateFromPosition(hands, board, lE, rE, nextPlayer, knowledge, initBLen) {
       const simHands = hands.map(h => [...h]);
@@ -4346,7 +4474,7 @@
       let prevLE, prevRE; // track ends before last move for scoring
 
       for (let move = 0; move < 100; move++) {
-        const decision = smartAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge, false);
+        const decision = fastAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge);
 
         if (decision) {
           passCount = 0;
@@ -4409,7 +4537,9 @@
       for (const t of hand) handBits |= (1 << TILE_INDEX[t.id]);
       let cantBits = 0;
       for (let p = 0; p < 4; p++) for (const n of knowledge.cantHave[p]) cantBits |= (1 << (p * 7 + n));
-      const cacheKey = `${lE}:${rE}:${handBits}:${playedBits}:${cantBits}`;
+      // Include playsBy lengths to prevent cache poisoning when same tiles played but different players
+      const playsByKey = knowledge.playsBy.map(a => a.length).join(',');
+      const cacheKey = `${lE}:${rE}:${handBits}:${playedBits}:${cantBits}:${playsByKey}`;
       if (mcCache.has(cacheKey)) return mcCache.get(cacheKey);
 
       const handSizes = snap.hands.map(h => h.length);
