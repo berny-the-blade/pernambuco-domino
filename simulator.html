@@ -8942,6 +8942,137 @@
 
     // Initial render
     render();
+
+    // ========== SELF-PLAY AI BENCHMARK ==========
+    // Usage: open browser console, run runAIBenchmark(200)
+    // Plays N games: "Heuristic-only" team vs "MC-Expert" team, then swaps sides and repeats.
+    // Reports win rates, points/game, and estimated Elo difference.
+    window.runAIBenchmark = async function(numGames = 100) {
+      const MC_SIMS_BENCH = MC_SIMS_PLAY_EXPERT; // 200
+      let heuristicWins = 0, mcWins = 0, ties = 0;
+      let heuristicPts = 0, mcPts = 0;
+      const totalGames = numGames * 2; // play both sides
+
+      function benchmarkGame(mcTeam) {
+        // Deal random hands (24 tiles, 4 removed)
+        const deck = shuffleDeck(ALL_TILES);
+        const hands = [[], [], [], []];
+        for (let i = 0; i < 24; i++) hands[i % 4].push(deck[i]);
+
+        // Find highest double for opener
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) return null; // no doubles dealt (rare edge)
+
+        // Play opening tile
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+
+        let cur = (hp + 1) % 4, passCount = 0;
+        for (let move = 0; move < 200; move++) {
+          const isOnMCTeam = (cur % 2) === mcTeam;
+          const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+          let decision = allOpts.length > 0 ? allOpts[0] : null;
+
+          // MC team uses monteCarloEval for all positions with multiple options
+          if (isOnMCTeam && decision && allOpts.length > 1) {
+            try {
+              const snap = { hands, leftEnd: lE, rightEnd: rE, board: new Array(bLen), knowledge };
+              const mcRes = monteCarloEval(snap, cur, MC_SIMS_BENCH);
+              if (mcRes.length > 0) {
+                const best = mcRes[0];
+                const matched = allOpts.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                             || allOpts.find(o => o.tile.id === best.tile.id);
+                if (matched) decision = matched;
+              }
+            } catch (e) { /* keep heuristic */ }
+          }
+
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+
+            const pL = lE, pR = rE;
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+
+            if (hands[cur].length === 0) {
+              const w = scoreWin(tile, pL, pR, bLen);
+              return { winnerTeam: cur % 2, points: w.pts, type: w.type.toLowerCase() };
+            }
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            knowledge.recordPass(cur, lE, rE);
+            if (passCount >= 4) {
+              const b = resolveBlock(hands);
+              return { winnerTeam: b.type === 'tie' ? -1 : b.team, points: b.points, type: b.type };
+            }
+            cur = (cur + 1) % 4;
+          }
+        }
+        return { winnerTeam: -1, points: 0, type: 'tie' };
+      }
+
+      console.log(`%c🎲 AI Benchmark: ${totalGames} games (${numGames} per side)`, 'font-size:14px;font-weight:bold');
+      console.log(`Heuristic-only vs MC-Expert (${MC_SIMS_BENCH} sims/move)`);
+      console.log('Running...');
+      const t0 = performance.now();
+
+      for (let phase = 0; phase < 2; phase++) {
+        const mcTeam = phase; // phase 0: MC=team0, phase 1: MC=team1
+        for (let g = 0; g < numGames; g++) {
+          const result = benchmarkGame(mcTeam);
+          if (!result) continue;
+
+          if (result.winnerTeam === mcTeam) { mcWins++; mcPts += result.points; }
+          else if (result.winnerTeam >= 0) { heuristicWins++; heuristicPts += result.points; }
+          else ties++;
+
+          // Progress every 50 games
+          if ((g + 1) % 50 === 0) {
+            const done = phase * numGames + g + 1;
+            console.log(`  ... ${done}/${totalGames} games`);
+          }
+
+          // Yield to UI every 10 games
+          if (g % 10 === 9) await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const played = mcWins + heuristicWins + ties;
+      const mcWR = played > 0 ? mcWins / (mcWins + heuristicWins) : 0.5;
+      const hWR = 1 - mcWR;
+      // Elo: E_diff = 400 × log10(WR / (1-WR))
+      const eloDiff = mcWR > 0 && mcWR < 1 ? Math.round(400 * Math.log10(mcWR / hWR)) : (mcWR >= 1 ? 999 : -999);
+      const mcPPG = played > 0 ? (mcPts / played).toFixed(2) : '0';
+      const hPPG = played > 0 ? (heuristicPts / played).toFixed(2) : '0';
+
+      console.log(`\n%c📊 BENCHMARK RESULTS (${played} games, ${elapsed}s)`, 'font-size:13px;font-weight:bold;color:#22c55e');
+      console.log(`┌─────────────────────┬────────┬────────┬────────┐`);
+      console.log(`│ AI                  │  Wins  │ Win%   │ Pts/G  │`);
+      console.log(`├─────────────────────┼────────┼────────┼────────┤`);
+      console.log(`│ MC-Expert (${MC_SIMS_BENCH} sims) │ ${String(mcWins).padStart(5)}  │ ${(mcWR*100).toFixed(1).padStart(5)}% │ ${mcPPG.padStart(5)}  │`);
+      console.log(`│ Heuristic-only      │ ${String(heuristicWins).padStart(5)}  │ ${(hWR*100).toFixed(1).padStart(5)}% │ ${hPPG.padStart(5)}  │`);
+      console.log(`│ Ties                │ ${String(ties).padStart(5)}  │        │        │`);
+      console.log(`└─────────────────────┴────────┴────────┴────────┘`);
+      console.log(`%cElo difference: MC-Expert is ~${eloDiff > 0 ? '+' : ''}${eloDiff} Elo stronger`, 'font-weight:bold;color:#eab308');
+      console.log(`(Played both sides to eliminate positional advantage)`);
+
+      return { mcWins, heuristicWins, ties, mcWR, eloDiff, mcPPG, hPPG, elapsed };
+    };
   </script>
 </body>
 </html>
