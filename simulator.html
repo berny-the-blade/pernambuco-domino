@@ -394,6 +394,8 @@
       if (r === 'Neither remaining tile matches new ends') return 'Nenhuma pedra restante combina com novas pontas';
       if (r === 'Match point — keep options open') return 'Match point — manter opções abertas';
       if (r === 'Behind — play double for carroca potential') return 'Atrás — jogar carroça para potencial de carroça';
+      if (r === 'Opponent may go out next (1 tile left)') return 'Adversário pode bater na próxima (1 pedra)';
+      if (r === 'Feeds opponent — both their tiles playable on new ends') return 'Alimenta adversário — ambas pedras jogáveis nas novas pontas';
       if ((m = r.match(/^Open: suit (\d)=(\d), suit (\d)=(\d)(.*double bonus.*)?$/))) return `Abre: naipe ${m[1]}=${m[2]}, naipe ${m[3]}=${m[4]}${m[5]?' bônus carroça':''}`;
       // Coach differential reasons
       if (r.match(/^<b>Suit control/)) return r.replace('Suit control:', 'Controle de naipe:').replace('leaves', 'deixa').replace('tiles matching the new board ends', 'pedras combinando com novas pontas').replace('vs only', 'vs apenas').replace('for your play', 'na sua jogada').replace('More matching tiles = more options next turn.', 'Mais pedras = mais opções no próximo turno.');
@@ -2278,15 +2280,24 @@
             // (dead other end is inherited, not caused by this move)
           } else if (deadNew && deadOther) {
             // Both ends dead — game WILL lock. Evaluate pip advantage.
+            // Use actual average of unseen tiles instead of fixed 5 pips
             const myPipsLock = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
-            const estPartPips = Math.max(0, 6 - knowledge.playsBy[partner].length) * 5;
+            const myIdsLock = new Set(hand.map(h => h.id));
+            let unseenPipLock = 0, unseenCntLock = 0;
+            for (const t of ALL_TILES) {
+              if (knowledge.played.has(t.id) || myIdsLock.has(t.id)) continue;
+              unseenPipLock += t.left + t.right;
+              unseenCntLock++;
+            }
+            const avgPipLock = unseenCntLock > 0 ? unseenPipLock / unseenCntLock : 5;
+            const estPartPips = Math.round(Math.max(0, 6 - knowledge.playsBy[partner].length) * avgPipLock);
             const estOpp1T = Math.max(0, 6 - knowledge.playsBy[opp1].length);
             const estOpp2T = Math.max(0, 6 - knowledge.playsBy[opp2].length);
-            const estOppPips = (estOpp1T + estOpp2T) * 5;
+            const estOppPips = Math.round((estOpp1T + estOpp2T) * avgPipLock);
             const myTeamBest = Math.min(myPipsLock, estPartPips);
-            const oppTeamBest = Math.min(estOpp1T * 5, estOpp2T * 5);
+            const oppTeamBest = Math.min(Math.round(estOpp1T * avgPipLock), Math.round(estOpp2T * avgPipLock));
             if (myTeamBest <= oppTeamBest - 2) {
-              ss += Math.round(40 * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${Math.round(estOppPips)})`);
+              ss += Math.round(40 * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${estOppPips})`);
             } else {
               ss -= Math.round(60 * deadMul); sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
             }
@@ -2327,20 +2338,28 @@
           if (remNewT + remOtherT <= 3 && bLen >= 8 && hand.length >= 2) {
             // Board is heading toward a lock — who wins on pips?
             const myPips = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
-            // Estimate opponent pips: assume average ~5 pips per remaining tile
+            // Better pip estimate: compute average pips of unseen tiles (excl. our hand)
+            const myIds = new Set(hand.map(h => h.id));
+            let unseenPipSum = 0, unseenCount = 0;
+            for (const t of ALL_TILES) {
+              if (knowledge.played.has(t.id) || myIds.has(t.id)) continue;
+              unseenPipSum += t.left + t.right;
+              unseenCount++;
+            }
+            const avgPipPerTile = unseenCount > 0 ? unseenPipSum / unseenCount : 5;
             const estPartnerTiles = Math.max(0, 6 - knowledge.playsBy[partner].length);
             const estOpp1Tiles = Math.max(0, 6 - knowledge.playsBy[opp1].length);
             const estOpp2Tiles = Math.max(0, 6 - knowledge.playsBy[opp2].length);
-            const estOppPips = (estOpp1Tiles + estOpp2Tiles) * 5;
-            const estPartnerPips = estPartnerTiles * 5;
+            const estOppPips = Math.round((estOpp1Tiles + estOpp2Tiles) * avgPipPerTile);
+            const estPartnerPips = Math.round(estPartnerTiles * avgPipPerTile);
             const myTeamMin = Math.min(myPips, estPartnerPips);
-            const oppTeamMin = Math.min(estOpp1Tiles * 5, estOpp2Tiles * 5);
+            const oppTeamMin = Math.min(Math.round(estOpp1Tiles * avgPipPerTile), Math.round(estOpp2Tiles * avgPipPerTile));
             if (myTeamMin < oppTeamMin - 3) {
               // We'd likely win the block — locking is good
-              ss += 20; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
+              ss += 20; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${estOppPips}`);
             } else if (myTeamMin > oppTeamMin + 5) {
               // We'd likely lose the block — avoid locking
-              ss -= 15; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
+              ss -= 15; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${estOppPips}`);
             }
           }
 
@@ -2477,6 +2496,43 @@
       });
 
       scored.sort((a, b) => b.score - a.score);
+
+      // Two-ply lookahead: in endgame (≤3 tiles), simulate opponent best response
+      // Penalize moves where opponent can go out or gain significant advantage
+      if (hand.length <= 3 && scored.length >= 2 && bLen >= 10) {
+        for (const opt of scored) {
+          const { tile: oTile, side: oSide } = opt;
+          let oppNewEnd;
+          if (oSide === 'left') oppNewEnd = oTile.left === lE ? oTile.right : oTile.left;
+          else oppNewEnd = oTile.right === rE ? oTile.left : oTile.right;
+          const oppOtherEnd = oSide === 'left' ? rE : lE;
+
+          // Check if opponent (opp1, next player) can go out
+          const oppPossible = knowledge.possibleTilesFor(opp1);
+          const estOpp1Hand = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+          if (estOpp1Hand === 1) {
+            // Opponent has 1 tile — can they play it on the new board?
+            const oppCanGo = oppPossible.some(t =>
+              t.left === oppNewEnd || t.right === oppNewEnd || t.left === oppOtherEnd || t.right === oppOtherEnd
+            );
+            if (oppCanGo) {
+              opt.score -= 25;
+              opt.reasons.push(`Opponent may go out next (1 tile left)`);
+            }
+          } else if (estOpp1Hand === 2) {
+            // Opponent has 2 tiles — check if new ends feed them
+            const oppPlayable = oppPossible.filter(t =>
+              t.left === oppNewEnd || t.right === oppNewEnd || t.left === oppOtherEnd || t.right === oppOtherEnd
+            ).length;
+            if (oppPlayable >= 2) {
+              opt.score -= 10;
+              opt.reasons.push('Feeds opponent — both their tiles playable on new ends');
+            }
+          }
+        }
+        // Re-sort after two-ply adjustments
+        scored.sort((a, b) => b.score - a.score);
+      }
 
       if (returnAll) return scored;
       return scored[0] || null;
@@ -3984,9 +4040,9 @@
 
     // Generate a belief-consistent deal (Phase 1 upgrade)
     // Uses BeliefSampler when belief model available, else rejection + backtracking (no greedy fallback)
-    function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
+    function generateConsistentDeal(myHand, handSizes, knowledge, myIdx, useBelief = true) {
       // If we have belief model + seedable RNG, use importance-weighted sampler
-      if (belief && solverRng) {
+      if (useBelief && belief && solverRng) {
         const sampler = new BeliefSampler(solverRng);
         belief.syncFromKnowledge(knowledge);
         const { deals } = sampler.sampleDeals(myHand, handSizes, belief, myIdx, 1);
@@ -4074,15 +4130,39 @@
     }
 
     // Importance weight for a hypothetical deal based on play-pattern plausibility
-    // Players who played many tiles with number N likely still hold more N-tiles
+    // Combines: (a) suit-strength signal — players who played many N-tiles likely hold more
+    //           (b) avoidance signal — if player avoided playing a number, reduce weight for holding it
+    //           (c) pass-adjacent penalty — tiles with one void number are less likely held
     function dealWeight(deal, knowledge) {
       let w = 1.0;
       for (let p = 0; p < 4; p++) {
         const str = knowledge.inferStrength(p);
+        const voidNums = knowledge.cantHave[p];
         for (let n = 0; n < 7; n++) {
+          const held = deal[p].filter(t => t.left === n || t.right === n).length;
+          // (a) Suit strength: played 2+ tiles with N → likely holds more
           if (str[n] >= 2) {
-            const held = deal[p].filter(t => t.left === n || t.right === n).length;
             w *= 1.0 + 0.2 * held;
+          }
+          // (b) Pass-adjacent: player is void in N (passed on it)
+          // Tiles where one end matches a void number are less likely held
+          // (hard constraints already exclude tiles where BOTH ends are void)
+          if (voidNums.has(n) && held > 0) {
+            // These tiles have n on one end + non-void on other — still possible but less likely
+            // Player would have played them if they could; discount
+            w *= 0.7;
+          }
+        }
+        // (c) Avoidance: if player played many tiles but never touched a number that's
+        // still available on many tiles, they may be avoiding it (weak signal)
+        if (knowledge.playsBy[p].length >= 3) {
+          for (let n = 0; n < 7; n++) {
+            if (voidNums.has(n) || str[n] > 0) continue; // already handled
+            // Player played 3+ tiles, never touching N, and N isn't void
+            const heldN = deal[p].filter(t => t.left === n || t.right === n).length;
+            if (heldN >= 2) {
+              w *= 0.85; // soft penalty — they might have N but haven't shown it
+            }
           }
         }
       }
@@ -4096,19 +4176,14 @@
       if (!belief || knowledge.played.size < 4) return; // need play-pattern signal
       belief.syncFromKnowledge(knowledge);
 
-      // Temporarily disable belief-weighted sampling to get unbiased base samples
-      const savedBelief = belief;
-      belief = null;
-
+      // Generate unbiased base samples (useBelief=false avoids circular sampling)
       const deals = [];
       const weights = [];
       for (let i = 0; i < nSamples; i++) {
-        const deal = generateConsistentDeal(myHand, handSizes, knowledge, myIdx);
+        const deal = generateConsistentDeal(myHand, handSizes, knowledge, myIdx, false);
         deals.push(deal);
         weights.push(dealWeight(deal, knowledge));
       }
-
-      belief = savedBelief;
 
       // Normalize weights for importance sampling
       const wSum = weights.reduce((s, w) => s + w, 0);
@@ -4366,7 +4441,8 @@
           let playGrade = null;
           if (mcResults && mcResults.length > 0 && snap.tile) {
             const best = mcResults[0];
-            const played = mcResults.find(m => m.tile.id === snap.tile.id);
+            const played = mcResults.find(m => m.tile.id === snap.tile.id && m.side === snap.side)
+                        || mcResults.find(m => m.tile.id === snap.tile.id);
             if (played && best) {
               const eqLoss = best.expectedPoints - played.expectedPoints;
               playGrade = {
@@ -4544,8 +4620,9 @@
 
       const handSizes = snap.hands.map(h => h.length);
       const myTeam = player % 2;
-      const results = [];
 
+      // Build all tile×side options with pre-computed state
+      const options = [];
       for (const tile of playable) {
         const sides = [];
         if (board.length === 0) {
@@ -4555,23 +4632,11 @@
           if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
           if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
         }
-
-        let bestResult = null;
-
         for (const side of sides) {
-          let wins = 0, totalPts = 0, sumPtsSq = 0, blocks = 0, ties = 0;
-          const outcomes = { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 };
-          const ptsArray = []; // for CVaR computation
-
           let newLE = lE, newRE = rE;
-          const newBLen = board.length + 1;
-          if (board.length === 0) {
-            newLE = tile.left; newRE = tile.right;
-          } else if (side === 'left') {
-            newLE = tile.left === lE ? tile.right : tile.left;
-          } else {
-            newRE = tile.right === rE ? tile.left : tile.right;
-          }
+          if (board.length === 0) { newLE = tile.left; newRE = tile.right; }
+          else if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+          else { newRE = tile.right === rE ? tile.left : tile.right; }
 
           const newHandSizes = [...handSizes];
           newHandSizes[player]--;
@@ -4580,65 +4645,95 @@
           if (newHandSizes[player] === 0) {
             const w = scoreWin(tile, lE, rE, board.length + 1);
             const wt = w.type.toLowerCase();
-            bestResult = {
-              tile, side,
+            options.push({
+              tile, side, instantWin: true,
               winRate: 1.0, expectedPoints: w.pts,
               blockRate: 0, outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0, [wt]: numSims },
               sims: numSims, variance: 0, stdDev: 0, ci95: 0, cvar5: w.pts
-            };
-            break;
+            });
+            continue;
           }
 
           const newKnowledge = knowledge.clone();
           newKnowledge.recordPlay(player, tile);
           const myNewHand = hand.filter(t => t.id !== tile.id);
-
-          for (let sim = 0; sim < numSims; sim++) {
-            const simHands = generateConsistentDeal(myNewHand, newHandSizes, newKnowledge, player);
-            const result = simulateFromPosition(simHands, null, newLE, newRE, (player + 1) % 4, newKnowledge, newBLen);
-
-            const signedPts = result.winnerTeam === myTeam ? result.points :
-                              result.winnerTeam >= 0 ? -result.points : 0;
-
-            if (result.winnerTeam === myTeam) wins++;
-            totalPts += signedPts;
-            sumPtsSq += signedPts * signedPts;
-            ptsArray.push(signedPts);
-            if (result.type === 'blocked' || result.type === 'tie') blocks++;
-            if (result.type === 'tie') ties++;
-            if (outcomes[result.type] !== undefined) outcomes[result.type]++;
-          }
-
-          const ep = numSims > 0 ? totalPts / numSims : 0;
-          const wr = numSims > 0 ? wins / numSims : 0.5;
-          const variance = numSims > 1 ? (sumPtsSq / numSims) - ep * ep : 0;
-          const stdDev = Math.sqrt(Math.max(0, variance));
-          const ci95 = numSims > 1 ? 1.96 * stdDev / Math.sqrt(numSims) : 0;
-
-          // CVaR 5%: expected value of worst 5% of outcomes
-          ptsArray.sort((a, b) => a - b);
-          const cvarCount = Math.max(1, Math.ceil(numSims * 0.05));
-          let cvarSum = 0;
-          for (let i = 0; i < cvarCount; i++) cvarSum += ptsArray[i];
-          const cvar5 = cvarSum / cvarCount;
-
-          const thisResult = {
-            tile, side,
-            winRate: wr, expectedPoints: ep,
-            blockRate: blocks / numSims,
-            outcomes,
-            sims: numSims,
-            variance, stdDev, ci95, cvar5
-          };
-
-          if (!bestResult || ep > bestResult.expectedPoints) {
-            bestResult = thisResult;
-          }
+          options.push({
+            tile, side, instantWin: false,
+            newLE, newRE, newBLen: board.length + 1, newHandSizes, newKnowledge, myNewHand,
+            wins: 0, totalPts: 0, sumPtsSq: 0, blocks: 0, sims: 0,
+            outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+            ptsArray: []
+          });
         }
-
-        if (bestResult) results.push(bestResult);
       }
 
+      const simOptions = options.filter(o => !o.instantWin);
+
+      // Adaptive MC: run in batches, check early stop every 20 sims
+      const BATCH = 20;
+      const MIN_SIMS = 40; // minimum before checking early stop
+      for (let done = 0; done < numSims; done += BATCH) {
+        const batchSize = Math.min(BATCH, numSims - done);
+        for (const o of simOptions) {
+          for (let b = 0; b < batchSize; b++) {
+            const simHands = generateConsistentDeal(o.myNewHand, o.newHandSizes, o.newKnowledge, player);
+            const result = simulateFromPosition(simHands, null, o.newLE, o.newRE, (player + 1) % 4, o.newKnowledge, o.newBLen);
+            const signedPts = result.winnerTeam === myTeam ? result.points :
+                              result.winnerTeam >= 0 ? -result.points : 0;
+            if (result.winnerTeam === myTeam) o.wins++;
+            o.totalPts += signedPts;
+            o.sumPtsSq += signedPts * signedPts;
+            o.ptsArray.push(signedPts);
+            if (result.type === 'blocked' || result.type === 'tie') o.blocks++;
+            if (o.outcomes[result.type] !== undefined) o.outcomes[result.type]++;
+            o.sims++;
+          }
+        }
+        // Early stop check: if best option's lower CI bound > second option's upper CI bound
+        if (done + batchSize >= MIN_SIMS && simOptions.length >= 2) {
+          const sorted = simOptions.map(o => ({
+            ep: o.totalPts / o.sims,
+            variance: o.sims > 1 ? (o.sumPtsSq / o.sims) - (o.totalPts / o.sims) ** 2 : 1,
+            sims: o.sims
+          })).sort((a, b) => b.ep - a.ep);
+          const best = sorted[0], second = sorted[1];
+          const diffMean = best.ep - second.ep;
+          const diffStdErr = Math.sqrt(Math.max(0, best.variance) / best.sims + Math.max(0, second.variance) / second.sims);
+          // 90% CI separation — best is clearly better
+          if (diffMean > 1.65 * diffStdErr && diffMean > 0.05) break;
+        }
+      }
+
+      // Build final results — pick best side per tile
+      const tileResults = new Map();
+      for (const o of options) {
+        const n = o.sims || numSims;
+        const ep = o.instantWin ? o.expectedPoints : (n > 0 ? o.totalPts / n : 0);
+        const wr = o.instantWin ? o.winRate : (n > 0 ? o.wins / n : 0.5);
+        const variance = o.instantWin ? 0 : (n > 1 ? (o.sumPtsSq / n) - ep * ep : 0);
+        const stdDev = Math.sqrt(Math.max(0, variance));
+        const ci95 = n > 1 ? 1.96 * stdDev / Math.sqrt(n) : 0;
+        let cvar5 = o.instantWin ? o.cvar5 : 0;
+        if (!o.instantWin && o.ptsArray.length > 0) {
+          o.ptsArray.sort((a, b) => a - b);
+          const cc = Math.max(1, Math.ceil(n * 0.05));
+          let cs = 0; for (let i = 0; i < cc; i++) cs += o.ptsArray[i];
+          cvar5 = cs / cc;
+        }
+        const r = {
+          tile: o.tile, side: o.side,
+          winRate: wr, expectedPoints: ep,
+          blockRate: o.instantWin ? 0 : o.blocks / n,
+          outcomes: o.outcomes, sims: n,
+          variance, stdDev, ci95, cvar5
+        };
+        const key = o.tile.id;
+        if (!tileResults.has(key) || ep > tileResults.get(key).expectedPoints) {
+          tileResults.set(key, r);
+        }
+      }
+
+      const results = [...tileResults.values()];
       results.sort((a, b) => b.expectedPoints - a.expectedPoints || b.winRate - a.winRate);
       mcCache.set(cacheKey, results);
       return results;
@@ -7058,10 +7153,11 @@
         computeBeliefs(prevSnap.knowledge, aHandSizes, prevSnap.hands[0], 0, 150);
         const mc = monteCarloEval(prevSnap, 0, MC_SIMS_ANALYSIS);
         const best = mc.length > 0 ? mc[0] : null;
-        const played = mc.find(m => m.tile.id === s.tile.id);
+        const played = mc.find(m => m.tile.id === s.tile.id && m.side === s.side)
+                    || mc.find(m => m.tile.id === s.tile.id);
         const eqLoss = best && played ? best.expectedPoints - played.expectedPoints : 0;
         let grade;
-        if (best && s.tile.id === best.tile.id) grade = 'perfect';
+        if (best && s.tile.id === best.tile.id && (!best.side || best.side === s.side)) grade = 'perfect';
         else if (eqLoss < 0.02) grade = 'perfect';
         else if (eqLoss < 0.15) grade = 'good';
         else if (eqLoss < 0.40) grade = 'ok';
@@ -7841,8 +7937,9 @@
       let mistakeClass = null;
       if (snap.tile && mcResults && mcResults.length > 0) {
         const best = mcResults[0];
-        const played = mcResults.find(m => m.tile.id === snap.tile.id);
-        if (played && best && best.tile.id !== played.tile.id) {
+        const played = mcResults.find(m => m.tile.id === snap.tile.id && m.side === snap.side)
+                    || mcResults.find(m => m.tile.id === snap.tile.id);
+        if (played && best && (best.tile.id !== played.tile.id || best.side !== played.side)) {
           const eqLoss = best.expectedPoints - played.expectedPoints;
           if (eqLoss > 0.05) {
             const bestFlow = flowMetrics.find(f => f.tile.id === best.tile.id);
@@ -8159,7 +8256,8 @@
         if (!cached || !cached.mcResults || cached.mcResults.length === 0) continue;
         totalDecisions++;
         const best = cached.mcResults[0];
-        const played = cached.mcResults.find(m => m.tile.id === s.tile.id);
+        const played = cached.mcResults.find(m => m.tile.id === s.tile.id && m.side === s.side)
+                    || cached.mcResults.find(m => m.tile.id === s.tile.id);
         if (!played) continue;
         const el = best.expectedPoints - played.expectedPoints;
         totalEL += el;
