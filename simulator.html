@@ -361,6 +361,13 @@
       if ((m = r.match(/^Few tiles left with (\d+) for partner$/))) return `Poucas pedras com ${m[1]} para o parceiro`;
       if (r === 'Exposes strongest suit — opponents may target') return 'Expõe naipe mais forte — adversários podem visar';
       if (r === 'Diversifies board — hides hand composition') return 'Diversifica o tabuleiro — esconde a mão';
+      // Dead number & trancar translations
+      if ((m = r.match(/^Dead end — all (\d+)s played, board stalls$/))) return `Ponta morta — todos os ${m[1]}s jogados, tabuleiro trava`;
+      if ((m = r.match(/^Both ends dead \((\d+), (\d+)\) — game locks, pips unfavorable$/))) return `Ambas pontas mortas (${m[1]}, ${m[2]}) — jogo tranca, pontos desfavoráveis`;
+      if ((m = r.match(/^Deliberate lock — we win on pips \((\d+) vs ~(\d+)\)$/))) return `Tranca deliberada — ganhamos por pontos (${m[1]} vs ~${m[2]})`;
+      if ((m = r.match(/^Near-dead — only 1 tile with (\d+) remains \(not ours\)$/))) return `Quase morta — só 1 pedra com ${m[1]} resta (não é nossa)`;
+      if ((m = r.match(/^Lock favors us — our pips (\d+) vs opponents ~(\d+)$/))) return `Tranca nos favorece — nossos pontos ${m[1]} vs adversários ~${m[2]}`;
+      if ((m = r.match(/^Lock hurts us — our pips (\d+) vs opponents ~(\d+)$/))) return `Tranca nos prejudica — nossos pontos ${m[1]} vs adversários ~${m[2]}`;
       if ((m = r.match(/^Dump heavy tile \((\d+) pips\)$/))) return `Descarta pedra pesada (${m[1]} pontos)`;
       if ((m = r.match(/^Sheds (\d+) pips$/))) return `Descarta ${m[1]} pontos`;
       if (r === 'Clear inflexible double') return 'Descarta carroça inflexível';
@@ -2205,6 +2212,60 @@
           if (oppCouldHaveNew <= 1) sr.push(`${newEnd}s nearly exhausted (${oppCouldHaveNew} out)`);
           else if (oppCouldHaveNew >= 4) sr.push(`${newEnd}s heavy — ${oppCouldHaveNew} still out for opponents`);
 
+          // Dead number detection — if all 7 tiles with a number are accounted for, that end is dead
+          const deadNew = knowledge.remainingWithNumber(newEnd) === 0;
+          const deadOther = knowledge.remainingWithNumber(otherEnd) === 0;
+          if (deadNew && !deadOther) {
+            // newEnd is dead — nobody can play there, board reduces to single active end
+            ss -= 35; sr.push(`Dead end — all ${newEnd}s played, board stalls`);
+          } else if (!deadNew && deadOther && newEnd !== otherEnd) {
+            // otherEnd already dead but newEnd is alive — no penalty for this move
+            // (dead other end is inherited, not caused by this move)
+          } else if (deadNew && deadOther) {
+            // Both ends dead — game WILL lock. Evaluate pip advantage.
+            const myPipsLock = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
+            const estPartPips = Math.max(0, 6 - knowledge.playsBy[partner].length) * 5;
+            const estOppPips = (Math.max(0, 6 - knowledge.playsBy[opp1].length) + Math.max(0, 6 - knowledge.playsBy[opp2].length)) * 5;
+            const myTeamBest = Math.min(myPipsLock, estPartPips);
+            const oppTeamBest = estOppPips / 2;
+            if (myTeamBest <= oppTeamBest - 2) {
+              ss += 40; sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${Math.round(estOppPips)})`);
+            } else {
+              ss -= 60; sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
+            }
+          }
+          // Near-dead: only 1 unplayed tile with newEnd (high lock risk)
+          if (!deadNew && knowledge.remainingWithNumber(newEnd) === 1 && newEnd !== otherEnd) {
+            // Only 1 tile left with this number — risky end
+            const weHaveIt = hand.some(h => h.id !== tile.id && (h.left === newEnd || h.right === newEnd));
+            if (!weHaveIt) {
+              ss -= 12; sr.push(`Near-dead — only 1 tile with ${newEnd} remains (not ours)`);
+            }
+          }
+
+          // Trancar (lock) risk/reward — if both ends are nearly dead, evaluate block outcome
+          const remNewT = knowledge.remainingWithNumber(newEnd);
+          const remOtherT = knowledge.remainingWithNumber(otherEnd);
+          if (remNewT + remOtherT <= 3 && bLen >= 8 && hand.length >= 2) {
+            // Board is heading toward a lock — who wins on pips?
+            const myPips = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
+            // Estimate opponent pips: assume average ~5 pips per remaining tile
+            const estPartnerTiles = Math.max(0, 6 - knowledge.playsBy[partner].length);
+            const estOpp1Tiles = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+            const estOpp2Tiles = Math.max(0, 6 - knowledge.playsBy[opp2].length);
+            const estOppPips = (estOpp1Tiles + estOpp2Tiles) * 5;
+            const estPartnerPips = estPartnerTiles * 5;
+            const myTeamMin = Math.min(myPips, estPartnerPips);
+            const oppTeamMin = Math.min(estOppPips / 2, estOppPips / 2); // rough split
+            if (myTeamMin < oppTeamMin - 3) {
+              // We'd likely win the block — locking is good
+              ss += 20; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
+            } else if (myTeamMin > oppTeamMin + 5) {
+              // We'd likely lose the block — avoid locking
+              ss -= 15; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
+            }
+          }
+
           // Information hiding — opening only
           if (bLen >= 1 && bLen <= 6 && hand.length >= 4) {
             const maxSC = Math.max(...suitCount);
@@ -3697,7 +3758,7 @@
         let wSum = 0;
         for (let j = 0; j <= i; j++) {
           const t = avail[j];
-          const w = 1 + 0.25 * ((str[t.left] || 0) + (str[t.right] || 0));
+          const w = 1 + 0.6 * ((str[t.left] || 0) + (str[t.right] || 0));
           avail[j]._sw = w;
           wSum += w;
         }
@@ -4291,7 +4352,7 @@
     let coachMCTimer = null;      // setTimeout handle for async MC batches
     let coachMCRunning = false;   // true while MC eval is in progress
     const COACH_MC_SIMS = 500;    // rollouts per tile option
-    const MC_SIMS_PLAY_EXPERT = 200; // MC rollouts for Expert AI decisions
+    const MC_SIMS_PLAY_EXPERT = 500; // MC rollouts for Expert AI decisions
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
