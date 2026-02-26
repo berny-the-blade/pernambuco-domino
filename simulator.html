@@ -3537,11 +3537,12 @@
     function renderPlaySidePickOverlay() {
       const t = playSidePick.tile;
       return `<div class="text-center mt-2 bg-slate-900 rounded-lg p-2 border border-yellow-500">
-        <div class="text-xs text-yellow-300 mb-1">[${t.left}|${t.right}] can play on both ends. Which side?</div>
+        <div class="text-xs text-yellow-300 mb-1">[${t.left}|${t.right}] ${_t('which_side')}</div>
         <div class="flex justify-center gap-3">
-          <button class="side-pick-btn bg-blue-600 text-white" onclick="playPickSide('left')">Left End (${liveLeftEnd})</button>
-          <button class="side-pick-btn bg-red-600 text-white" onclick="playPickSide('right')">Right End (${liveRightEnd})</button>
+          <button class="side-pick-btn bg-blue-600 text-white" onclick="playPickSide('left')">${_t('left_end')} (${liveLeftEnd})</button>
+          <button class="side-pick-btn bg-red-600 text-white" onclick="playPickSide('right')">${_t('right_end')} (${liveRightEnd})</button>
         </div>
+        <button class="text-xs text-slate-400 hover:text-white mt-2 underline" onclick="playSidePick=null;render()">${appLang==='pt'?'Cancelar — escolher outra pedra':'Cancel — pick a different tile'}</button>
       </div>`;
     }
 
