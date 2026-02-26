@@ -397,6 +397,12 @@
       if (r.match(/^<b>Clear double early/)) return r.replace('Clear double early:', 'Descarte carroça cedo:').replace("clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.", "descarta carroça inflexível enquanto tem opções.");
       if (r.match(/^<b>Go-out setup/)) return r.replace('Go-out setup:', 'Preparação para bater:').replace("sets up your remaining tile(s) to go out next turn.", "prepara para bater no próximo turno.").replace("Your play strands your last tiles", "Sua jogada tranca suas últimas pedras").replace("they don't match the new board ends.", "não combinam com as novas pontas.");
       if (r.match(/^<b>Dump heavy tile/)) return r.replace('Dump heavy tile:', 'Descarte pesado:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('In case of a block, lower pip count wins.', 'Em caso de tranca, menos pontos ganha.');
+      if (r.match(/^<b>Coverage risk/)) return r.replace('Coverage risk:', 'Risco de cobertura:').replace(/stacks (\d+) tiles?/, 'empilha $1 pedra(s)').replace('on end', 'na ponta').replace('with nothing on', 'sem nada na').replace("if opponents kill", "se adversários matarem").replace("you're stuck.", "você fica travado.").replace('spreads coverage across both ends.', 'distribui cobertura em ambas pontas.');
+      if (r.match(/^<b>Team play/)) return r.replace('Team play:', 'Jogo em equipe:').replace('Partner has shown strength in', 'Parceiro mostrou força em').replace(/\(played (\d+)x\)/, '(jogou $1x)').replace('keeps the board favorable for them', 'mantém o tabuleiro favorável para ele').replace("remember it's their turn soon too.", 'lembre que logo é a vez dele.');
+      if (r.match(/^<b>Chicote power/)) return r.replace('Chicote power:', 'Poder do chicote:').replace('You hold the last', 'Você tem o último').replace('-tile (chicote).', ' (chicote).').replace('creates end', 'cria ponta').replace('that only YOU can play on', 'que só VOCÊ pode jogar').replace('you control whether it lives or dies.', 'você controla se vive ou morre.');
+      if (r.match(/^<b>Chicote risk/)) return r.replace('Chicote risk:', 'Risco de chicote:').replace('An opponent holds the chicote for', 'Um adversário tem o chicote do').replace('But the MC still favors this', 'Mas o MC ainda favorece isso').replace('and pip advantage likely compensate.', 'e vantagem de pontos provavelmente compensam.');
+      if (r.match(/^<b>Avoid dead end/)) return r.replace('Avoid dead end:', 'Evite ponta morta:').replace('Your play creates end', 'Sua jogada cria ponta').replace(/with only (\d+) tiles? left/, 'com só $1 pedra(s)').replace("it's nearly dead.", 'quase morta.').replace('keeps end', 'mantém ponta').replace('alive', 'viva').replace('tiles still out', 'pedras ainda em jogo');
+      if (r.match(/^<b>Pip insurance/)) return r.replace('Pip insurance:', 'Seguro de pontos:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('If the game blocks, the team with lowest individual pip count wins', 'Se o jogo trancar, o time com menos pontos individuais ganha').replace('shedding heavy tiles early is insurance.', 'descartar pedras pesadas cedo é um seguro.');
       if (r.match(/^<b>Why better/)) return r.replace('Why better:', 'Por que é melhor:');
       // MC reasons
       if (r.match(/blocks/i)) return r.replace(/blocks/gi, 'bloqueia');
@@ -3603,6 +3609,56 @@
         if (bestPips > playPips + 3) {
           reasons.push(`<b>Dump heavy tile:</b> [${bestT.left}|${bestT.right}] sheds ${bestPips} pips vs ${playPips} for your play. In case of a block, lower pip count wins.`);
         }
+      }
+
+      // 7. Coverage diversification — detect stacking tiles on one end
+      const bestMatchByEnd = [
+        handAfterBest.filter(t => t.left === bestNewEnd || t.right === bestNewEnd).length,
+        handAfterBest.filter(t => t.left === bestKeptEnd || t.right === bestKeptEnd).length
+      ];
+      const playMatchByEnd = [
+        handAfterPlay.filter(t => t.left === playNewEnd || t.right === playNewEnd).length,
+        handAfterPlay.filter(t => t.left === playKeptEnd || t.right === playKeptEnd).length
+      ];
+      const bestSpread = Math.min(bestMatchByEnd[0], bestMatchByEnd[1]);
+      const playSpread = Math.min(playMatchByEnd[0], playMatchByEnd[1]);
+      if (bestSpread > playSpread && playSpread === 0) {
+        const stacked = playMatchByEnd[0] > playMatchByEnd[1] ? playNewEnd : playKeptEnd;
+        const empty = playMatchByEnd[0] > playMatchByEnd[1] ? playKeptEnd : playNewEnd;
+        reasons.push(`<b>Coverage risk:</b> Your play stacks ${playMatchByEnd[0] + playMatchByEnd[1]} tile${playMatchByEnd[0]+playMatchByEnd[1]>1?'s':''} on end ${stacked} with nothing on ${empty} — if opponents kill ${stacked}, you're stuck. [${bestT.left}|${bestT.right}] spreads coverage across both ends.`);
+      }
+
+      // 8. Team perspective — partner benefits from the new board ends
+      const pStr = knowledge.inferStrength(2);
+      const bestPartnerFit = (pStr[bestNewEnd] || 0) + (pStr[bestKeptEnd] || 0);
+      const playPartnerFit = (pStr[playNewEnd] || 0) + (pStr[playKeptEnd] || 0);
+      if (bestPartnerFit > playPartnerFit + 1) {
+        const strongEnd = pStr[bestNewEnd] > pStr[bestKeptEnd] ? bestNewEnd : bestKeptEnd;
+        reasons.push(`<b>Team play:</b> Partner has shown strength in ${strongEnd}s (played ${pStr[strongEnd]}x). [${bestT.left}|${bestT.right}] keeps the board favorable for them — remember it's their turn soon too.`);
+      }
+
+      // 9. Chicote / dead number context
+      if (bLen >= 6) {
+        const bestRemNew = knowledge.remainingWithNumber(bestNewEnd);
+        const playRemNew = knowledge.remainingWithNumber(playNewEnd);
+        if (bestRemNew <= 1 && playRemNew >= 3) {
+          const chic = knowledge.chicoteFor(bestNewEnd, hand);
+          if (chic && chic.holder === 'self') {
+            reasons.push(`<b>Chicote power:</b> You hold the last ${bestNewEnd}-tile (chicote). [${bestT.left}|${bestT.right}] creates end ${bestNewEnd} that only YOU can play on — you control whether it lives or dies.`);
+          } else if (chic && (chic.holder === 1 || chic.holder === 3)) {
+            reasons.push(`<b>Chicote risk:</b> An opponent holds the chicote for ${bestNewEnd}. But the MC still favors this — the ${bestKeptEnd}-end and pip advantage likely compensate.`);
+          }
+        }
+        if (playRemNew <= 1 && bestRemNew >= 3) {
+          reasons.push(`<b>Avoid dead end:</b> Your play creates end ${playNewEnd} with only ${playRemNew} tile${playRemNew===1?'':'s'} left — it's nearly dead. [${bestT.left}|${bestT.right}] keeps end ${bestNewEnd} alive (${bestRemNew} tiles still out).`);
+        }
+      }
+
+      // 10. Pip insurance for blocked games
+      const bestPipTotal = bestT.left + bestT.right;
+      const playPipTotal = playT.left + playT.right;
+      if (bestPipTotal > playPipTotal + 2 && hand.length >= 3) {
+        reasons.push(`<b>Pip insurance:</b> [${bestT.left}|${bestT.right}] sheds ${bestPipTotal} pips vs ${playPipTotal} for your play. If the game blocks, the team with lowest individual pip count wins — shedding heavy tiles early is insurance.`);
       }
 
       if (reasons.length === 0) {
