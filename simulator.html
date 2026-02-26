@@ -368,6 +368,15 @@
       if ((m = r.match(/^Near-dead — only 1 tile with (\d+) remains \(not ours\)$/))) return `Quase morta — só 1 pedra com ${m[1]} resta (não é nossa)`;
       if ((m = r.match(/^Lock favors us — our pips (\d+) vs opponents ~(\d+)$/))) return `Tranca nos favorece — nossos pontos ${m[1]} vs adversários ~${m[2]}`;
       if ((m = r.match(/^Lock hurts us — our pips (\d+) vs opponents ~(\d+)$/))) return `Tranca nos prejudica — nossos pontos ${m[1]} vs adversários ~${m[2]}`;
+      // Chicote translations
+      if ((m = r.match(/^We hold chicote for (\d+) — can kill this end at will$/))) return `Temos o chicote do ${m[1]} — podemos matar essa ponta`;
+      if ((m = r.match(/^Chicote \+ opponent void on (\d+) — lock threat$/))) return `Chicote + adversário sem ${m[1]} — ameaça de tranca`;
+      if ((m = r.match(/^Partner holds chicote for (\d+) — they control the kill$/))) return `Parceiro tem chicote do ${m[1]} — controla a morte`;
+      if ((m = r.match(/^Opponent holds chicote for (\d+) — they'll kill it$/))) return `Adversário tem chicote do ${m[1]} — vai matar`;
+      if ((m = r.match(/^Chicote for (\d+) is in dorme — end will die$/))) return `Chicote do ${m[1]} está no dorme — ponta vai morrer`;
+      if ((m = r.match(/^Near-dead (\d+) — chicote (\d+)% with opponent$/))) return `Quase morta ${m[1]} — chicote ${m[2]}% com adversário`;
+      // Suit exhaustion translations
+      if ((m = r.match(/^Exhausting (\d+)s — (\d+) left, we hold (\d+)$/))) return `Esgotando ${m[1]}s — ${m[2]} restam, temos ${m[3]}`;
       if ((m = r.match(/^Dump heavy tile \((\d+) pips\)$/))) return `Descarta pedra pesada (${m[1]} pontos)`;
       if ((m = r.match(/^Sheds (\d+) pips$/))) return `Descarta ${m[1]} pontos`;
       if (r === 'Clear inflexible double') return 'Descarta carroça inflexível';
@@ -2066,6 +2075,31 @@
         }
         return possible;
       }
+      // Chicote: find who holds the last tile of a near-dead suit
+      // Returns null if remainingWithNumber(n) !== 1
+      // Returns { tile, holder: playerIdx|'dorme', candidates: [], confidence: 0-1 }
+      chicoteFor(n, myHand) {
+        if (this._remainingCount[n] !== 1) return null;
+        let ct = null;
+        for (const t of ALL_TILES) {
+          if (this.played.has(t.id)) continue;
+          if (t.left === n || t.right === n) { ct = t; break; }
+        }
+        if (!ct) return null;
+        // In our hand?
+        if (myHand && myHand.some(h => h.id === ct.id)) return { tile: ct, holder: 'self', confidence: 1 };
+        // Who else can hold it?
+        const elig = [];
+        for (let p = 0; p < 4; p++) {
+          const blocked = ct.left === ct.right
+            ? this.cantHave[p].has(ct.left)
+            : (this.cantHave[p].has(ct.left) && this.cantHave[p].has(ct.right));
+          if (!blocked) elig.push(p);
+        }
+        if (elig.length === 0) return { tile: ct, holder: 'dorme', confidence: 1 };
+        if (elig.length === 1) return { tile: ct, holder: elig[0], confidence: 1 };
+        return { tile: ct, holder: 'unknown', candidates: elig, confidence: 1 / elig.length };
+      }
     }
 
     // Smart AI - returns all scored options (not just best)
@@ -2086,6 +2120,9 @@
 
       const partner = (player + 2) % 4;
       const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+
+      // Phase-dependent multiplier for dead number / chicote scores
+      const deadMul = bLen <= 4 ? 0.4 : (bLen <= 14 ? 1.0 : 1.4);
 
       // Pre-compute tile index by number for O(1) lookups
       const suitCount = new Array(7).fill(0);
@@ -2217,7 +2254,7 @@
           const deadOther = knowledge.remainingWithNumber(otherEnd) === 0;
           if (deadNew && !deadOther) {
             // newEnd is dead — nobody can play there, board reduces to single active end
-            ss -= 35; sr.push(`Dead end — all ${newEnd}s played, board stalls`);
+            ss -= Math.round(35 * deadMul); sr.push(`Dead end — all ${newEnd}s played, board stalls`);
           } else if (!deadNew && deadOther && newEnd !== otherEnd) {
             // otherEnd already dead but newEnd is alive — no penalty for this move
             // (dead other end is inherited, not caused by this move)
@@ -2229,16 +2266,37 @@
             const myTeamBest = Math.min(myPipsLock, estPartPips);
             const oppTeamBest = estOppPips / 2;
             if (myTeamBest <= oppTeamBest - 2) {
-              ss += 40; sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${Math.round(estOppPips)})`);
+              ss += Math.round(40 * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${Math.round(estOppPips)})`);
             } else {
-              ss -= 60; sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
+              ss -= Math.round(60 * deadMul); sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
             }
           }
-          // Near-dead: only 1 unplayed tile with newEnd (high lock risk)
+          // Chicote detection: only 1 unplayed tile with newEnd — who holds it?
           if (!deadNew && knowledge.remainingWithNumber(newEnd) === 1 && newEnd !== otherEnd) {
-            // Only 1 tile left with this number — risky end
-            const weHaveIt = hand.some(h => h.id !== tile.id && (h.left === newEnd || h.right === newEnd));
-            if (!weHaveIt) {
+            const chic = knowledge.chicoteFor(newEnd, hand);
+            if (chic && chic.holder === 'self') {
+              // WE hold the chicote — creating this end is POWERFUL
+              ss += Math.round(25 * deadMul); sr.push(`We hold chicote for ${newEnd} — can kill this end at will`);
+              // Extra: if opponents void on other end, lock threat
+              if (knowledge.cantHave[opp1].has(otherEnd) || knowledge.cantHave[opp2].has(otherEnd)) {
+                ss += 12; sr.push(`Chicote + opponent void on ${otherEnd} — lock threat`);
+              }
+            } else if (chic && chic.holder === partner) {
+              // Partner confirmed holds chicote — they control it
+              ss += Math.round(15 * deadMul); sr.push(`Partner holds chicote for ${newEnd} — they control the kill`);
+            } else if (chic && typeof chic.holder === 'number' && chic.holder !== partner) {
+              // Opponent confirmed holds chicote — avoid this end
+              ss -= Math.round(25 * deadMul); sr.push(`Opponent holds chicote for ${newEnd} — they'll kill it`);
+            } else if (chic && chic.holder === 'dorme') {
+              // Chicote is in the removed tiles — end will die naturally
+              ss -= 12; sr.push(`Chicote for ${newEnd} is in dorme — end will die`);
+            } else if (chic && chic.holder === 'unknown') {
+              // Uncertain — penalize proportional to opponent probability
+              const oppCount = chic.candidates.filter(c => c !== partner && c !== player).length;
+              const oppProb = oppCount / Math.max(chic.candidates.length, 1);
+              ss -= Math.round(15 * oppProb);
+              sr.push(`Near-dead ${newEnd} — chicote ${Math.round(oppProb*100)}% with opponent`);
+            } else {
               ss -= 12; sr.push(`Near-dead — only 1 tile with ${newEnd} remains (not ours)`);
             }
           }
@@ -2263,6 +2321,23 @@
             } else if (myTeamMin > oppTeamMin + 5) {
               // We'd likely lose the block — avoid locking
               ss -= 15; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
+            }
+          }
+
+          // Proactive suit exhaustion — playing this tile depletes a suit we control
+          const tNums = tile.left === tile.right ? [tile.left] : [tile.left, tile.right];
+          for (const n of tNums) {
+            const remAfter = knowledge.remainingWithNumber(n) - 1;
+            if (remAfter >= 1 && remAfter <= 3) {
+              let weStillHold = 0;
+              for (const h of hand) {
+                if (h.id === tile.id) continue;
+                if (h.left === n || h.right === n) weStillHold++;
+              }
+              if (weStillHold > 0 && weStillHold >= remAfter) {
+                const bonus = 8 + (3 - remAfter) * 5;
+                ss += bonus; sr.push(`Exhausting ${n}s — ${remAfter} left, we hold ${weStillHold}`);
+              }
             }
           }
 
