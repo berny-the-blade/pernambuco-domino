@@ -393,7 +393,7 @@
       if (r.match(/^<b>Suit control/)) return r.replace('Suit control:', 'Controle de naipe:').replace('leaves', 'deixa').replace('tiles matching the new board ends', 'pedras combinando com novas pontas').replace('vs only', 'vs apenas').replace('for your play', 'na sua jogada').replace('More matching tiles = more options next turn.', 'Mais pedras = mais opções no próximo turno.');
       if (r.match(/^<b>Blocking/)) return r.replace('Blocking:', 'Bloqueio:').replace("keeps board ends on numbers that", "mantém pontas em números que").replace("can't play (void), forcing them to pass. Your play opens a number they can match.", "não pode jogar, forçando-os a passar. Sua jogada abre um número que podem combinar.");
       if (r.match(/^<b>Partner support/)) return r.replace('Partner support:', 'Apoio ao parceiro:').replace("Your play puts both board ends on numbers your partner is void in", "Sua jogada coloca ambas pontas em números que seu parceiro não tem").replace("they'll be forced to pass.", "será forçado a passar.").replace("keeps at least one end playable for partner.", "mantém pelo menos uma ponta jogável para o parceiro.");
-      if (r.match(/^<b>Double management/)) return r.replace('Double management:', 'Gestão de carroça:').replace("Holding onto double", "Segurar a carroça").replace("for now might be better", "pode ser melhor agora").replace("doubles are inflexible and can strand you later.", "carroças são inflexíveis.").replace("is more versatile.", "é mais versátil.");
+      if (r.match(/^<b>Double management/)) return r.replace('Double management:', 'Gestão de carroça:').replace("Playing", "Jogar").replace("instead keeps the double", "mantém a carroça").replace("for later when the board may suit it better.", "para depois quando o tabuleiro favorecer.").replace("is more versatile and connects to more numbers.", "é mais versátil e conecta a mais números.");
       if (r.match(/^<b>Clear double early/)) return r.replace('Clear double early:', 'Descarte carroça cedo:').replace("clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.", "descarta carroça inflexível enquanto tem opções.");
       if (r.match(/^<b>Go-out setup/)) return r.replace('Go-out setup:', 'Preparação para bater:').replace("sets up your remaining tile(s) to go out next turn.", "prepara para bater no próximo turno.").replace("Your play strands your last tiles", "Sua jogada tranca suas últimas pedras").replace("they don't match the new board ends.", "não combinam com as novas pontas.");
       if (r.match(/^<b>Dump heavy tile/)) return r.replace('Dump heavy tile:', 'Descarte pesado:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('In case of a block, lower pip count wins.', 'Em caso de tranca, menos pontos ganha.');
@@ -2222,9 +2222,11 @@
             }
           }
 
-          // Pip weight — prefer playing heavier tiles earlier
+          // Pip weight — prefer playing heavier tiles, scaled by game phase
+          // Opening (deadMul=0.4): suit control matters more than pip dumping
+          // Endgame (deadMul=1.4): pip dumping critical for block outcomes
           const tilePips = tile.left + tile.right;
-          ss += tilePips * 2;
+          ss += Math.round(tilePips * 2 * deadMul);
           if (tilePips >= 9) sr.push(`Dump heavy tile (${tilePips} pips)`);
           else if (tilePips >= 6) sr.push(`Sheds ${tilePips} pips`);
 
@@ -2255,9 +2257,13 @@
           if (oppCouldHaveNew <= 1) sr.push(`${newEnd}s nearly exhausted (${oppCouldHaveNew} out)`);
           else if (oppCouldHaveNew >= 4) sr.push(`${newEnd}s heavy — ${oppCouldHaveNew} still out for opponents`);
 
-          // Dead number detection — if all 7 tiles with a number are accounted for, that end is dead
-          const deadNew = knowledge.remainingWithNumber(newEnd) === 0;
-          const deadOther = knowledge.remainingWithNumber(otherEnd) === 0;
+          // Dead number detection — compute POST-PLAY remaining counts
+          // The tile we're playing has newEnd; it may also have otherEnd
+          const remNewAfterPlay = knowledge.remainingWithNumber(newEnd) - 1;
+          const tileHasOtherEnd = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+          const remOtherAfterPlay = knowledge.remainingWithNumber(otherEnd) - tileHasOtherEnd;
+          const deadNew = remNewAfterPlay === 0;
+          const deadOther = remOtherAfterPlay === 0;
           if (deadNew && !deadOther) {
             // newEnd is dead — nobody can play there, board reduces to single active end
             ss -= Math.round(35 * deadMul); sr.push(`Dead end — all ${newEnd}s played, board stalls`);
@@ -2268,17 +2274,19 @@
             // Both ends dead — game WILL lock. Evaluate pip advantage.
             const myPipsLock = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
             const estPartPips = Math.max(0, 6 - knowledge.playsBy[partner].length) * 5;
-            const estOppPips = (Math.max(0, 6 - knowledge.playsBy[opp1].length) + Math.max(0, 6 - knowledge.playsBy[opp2].length)) * 5;
+            const estOpp1T = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+            const estOpp2T = Math.max(0, 6 - knowledge.playsBy[opp2].length);
+            const estOppPips = (estOpp1T + estOpp2T) * 5;
             const myTeamBest = Math.min(myPipsLock, estPartPips);
-            const oppTeamBest = estOppPips / 2;
+            const oppTeamBest = Math.min(estOpp1T * 5, estOpp2T * 5);
             if (myTeamBest <= oppTeamBest - 2) {
               ss += Math.round(40 * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${Math.round(estOppPips)})`);
             } else {
               ss -= Math.round(60 * deadMul); sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
             }
           }
-          // Chicote detection: only 1 unplayed tile with newEnd — who holds it?
-          if (!deadNew && knowledge.remainingWithNumber(newEnd) === 1 && newEnd !== otherEnd) {
+          // Chicote detection: after our play, exactly 1 tile with newEnd remains — who holds it?
+          if (!deadNew && remNewAfterPlay === 1 && newEnd !== otherEnd) {
             const chic = knowledge.chicoteFor(newEnd, hand);
             if (chic && chic.holder === 'self') {
               // WE hold the chicote — creating this end is POWERFUL
@@ -2320,7 +2328,7 @@
             const estOppPips = (estOpp1Tiles + estOpp2Tiles) * 5;
             const estPartnerPips = estPartnerTiles * 5;
             const myTeamMin = Math.min(myPips, estPartnerPips);
-            const oppTeamMin = Math.min(estOppPips / 2, estOppPips / 2); // rough split
+            const oppTeamMin = Math.min(estOpp1Tiles * 5, estOpp2Tiles * 5);
             if (myTeamMin < oppTeamMin - 3) {
               // We'd likely win the block — locking is good
               ss += 20; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${Math.round(estOppPips)}`);
@@ -2357,9 +2365,14 @@
             }
           }
 
-          // Partner close to winning (uniform bonus — same for all options, so not shown as a reason)
+          // Partner close to winning — boost moves that keep partner-friendly ends
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
-          if (estPHand <= 2 && estPHand > 0) { ss += 15; }
+          if (estPHand <= 2 && estPHand > 0) {
+            const partStr = knowledge.inferStrength(partner);
+            if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) {
+              ss += 15; sr.push('Partner close — keeping their suit on board');
+            }
+          }
 
           // === CLOSING BONUS ===
           // Instant win: playing this tile empties our hand
@@ -3571,14 +3584,14 @@
         reasons.push(`<b>Suit control:</b> [${bestT.left}|${bestT.right}] leaves ${bestMatch} tiles matching the new board ends (${bestNewEnd},${bestKeptEnd}) vs only ${playMatch} for your play (${playNewEnd},${playKeptEnd}). More matching tiles = more options next turn.`);
       }
 
-      // 2. Opponent blocking
+      // 2. Opponent blocking — opponent must be void in BOTH ends to be forced to pass
       const oppVoids = [1, 3].flatMap(p => [...knowledge.cantHave[p]]);
       if (oppVoids.length > 0) {
-        const bestBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(bestNewEnd) || knowledge.cantHave[p].has(bestKeptEnd));
-        const playBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(playNewEnd) || knowledge.cantHave[p].has(playKeptEnd));
+        const bestBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(bestNewEnd) && knowledge.cantHave[p].has(bestKeptEnd));
+        const playBlocksOpp = [1, 3].filter(p => knowledge.cantHave[p].has(playNewEnd) && knowledge.cantHave[p].has(playKeptEnd));
         if (bestBlocksOpp.length > playBlocksOpp.length) {
           const blocked = bestBlocksOpp.map(p => pn(p)).join(' & ');
-          reasons.push(`<b>Blocking:</b> [${bestT.left}|${bestT.right}] keeps board ends on numbers that ${blocked} can't play (void), forcing them to pass. Your play opens a number they can match.`);
+          reasons.push(`<b>Blocking:</b> [${bestT.left}|${bestT.right}] keeps board ends on numbers that ${blocked} can't play (void in both ${bestNewEnd} and ${bestKeptEnd}), forcing them to pass. Your play opens a number they can match.`);
         }
       }
 
@@ -3594,24 +3607,30 @@
 
       // 4. Double management
       if (playT.left === playT.right && bestT.left !== bestT.right) {
-        reasons.push(`<b>Double management:</b> Holding onto double [${playT.left}|${playT.right}] for now might be better — doubles are inflexible and can strand you later. [${bestT.left}|${bestT.right}] is more versatile.`);
+        reasons.push(`<b>Double management:</b> Playing [${bestT.left}|${bestT.right}] instead keeps the double [${playT.left}|${playT.right}] for later when the board may suit it better. [${bestT.left}|${bestT.right}] is more versatile and connects to more numbers.`);
       }
       if (bestT.left === bestT.right && playT.left !== playT.right) {
         reasons.push(`<b>Clear double early:</b> [${bestT.left}|${bestT.right}] clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.`);
       }
 
       // 5. Go-out setup
-      if (handAfterBest.length <= 2) {
-        const lastTiles = handAfterBest;
-        const canGoOut = lastTiles.some(t => t.left === bestNewEnd || t.right === bestNewEnd || t.left === bestKeptEnd || t.right === bestKeptEnd);
-        const canGoOutPlay = handAfterPlay.some(t => t.left === playNewEnd || t.right === playNewEnd || t.left === playKeptEnd || t.right === playKeptEnd);
+      if (handAfterBest.length === 1) {
+        const lastTile = handAfterBest[0];
+        const canGoOut = lastTile.left === bestNewEnd || lastTile.right === bestNewEnd || lastTile.left === bestKeptEnd || lastTile.right === bestKeptEnd;
+        const canGoOutPlay = handAfterPlay.length === 1 && (handAfterPlay[0].left === playNewEnd || handAfterPlay[0].right === playNewEnd || handAfterPlay[0].left === playKeptEnd || handAfterPlay[0].right === playKeptEnd);
         if (canGoOut && !canGoOutPlay) {
-          reasons.push(`<b>Go-out setup:</b> [${bestT.left}|${bestT.right}] sets up your remaining tile(s) to go out next turn. Your play strands your last tiles — they don't match the new board ends.`);
+          reasons.push(`<b>Go-out setup:</b> [${bestT.left}|${bestT.right}] sets up your last tile [${lastTile.left}|${lastTile.right}] to go out next turn. Your play strands your last tile — it doesn't match the new board ends.`);
+        }
+      } else if (handAfterBest.length === 2) {
+        const canPlayBest = handAfterBest.filter(t => t.left === bestNewEnd || t.right === bestNewEnd || t.left === bestKeptEnd || t.right === bestKeptEnd).length;
+        const canPlayUser = handAfterPlay.filter(t => t.left === playNewEnd || t.right === playNewEnd || t.left === playKeptEnd || t.right === playKeptEnd).length;
+        if (canPlayBest > canPlayUser) {
+          reasons.push(`<b>Go-out setup:</b> [${bestT.left}|${bestT.right}] keeps ${canPlayBest} of your last 2 tiles playable vs ${canPlayUser} for your play. Staying connected to the board is critical in the endgame.`);
         }
       }
 
-      // 6. Pip weight (endgame)
-      if (hand.length <= 3) {
+      // 6. Pip weight (deep endgame, 1-2 tiles left)
+      if (hand.length < 3) {
         const bestPips = bestT.left + bestT.right;
         const playPips = playT.left + playT.right;
         if (bestPips > playPips + 3) {
