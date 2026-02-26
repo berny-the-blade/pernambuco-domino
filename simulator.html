@@ -356,6 +356,11 @@
       if ((m = r.match(/^Blocks (.+)$/))) return `Bloqueia ${m[1]}`;
       if ((m = r.match(/^Partner played (.+) — may have more$/))) return `Parceiro jogou ${m[1]} — pode ter mais`;
       if ((m = r.match(/^Partner can't have (\d+)$/))) return `Parceiro não tem ${m[1]}`;
+      if ((m = r.match(/^Partner blocked — void in both (\d+) and (\d+)$/))) return `Parceiro bloqueado — não tem ${m[1]} nem ${m[2]}`;
+      if (r === 'Partner has good coverage on both ends') return 'Parceiro tem boa cobertura em ambas pontas';
+      if ((m = r.match(/^Few tiles left with (\d+) for partner$/))) return `Poucas pedras com ${m[1]} para o parceiro`;
+      if (r === 'Exposes strongest suit — opponents may target') return 'Expõe naipe mais forte — adversários podem visar';
+      if (r === 'Diversifies board — hides hand composition') return 'Diversifica o tabuleiro — esconde a mão';
       if ((m = r.match(/^Dump heavy tile \((\d+) pips\)$/))) return `Descarta pedra pesada (${m[1]} pontos)`;
       if ((m = r.match(/^Sheds (\d+) pips$/))) return `Descarta ${m[1]} pontos`;
       if (r === 'Clear inflexible double') return 'Descarta carroça inflexível';
@@ -2144,6 +2149,29 @@
           if (pAff > 0) { ss += pAff * 8; sr.push(`Partner played ${partnerDetails.join(' & ')} — may have more`); }
           if (knowledge.cantHave[partner].has(newEnd)) { ss -= 10; sr.push(`Partner can't have ${newEnd}`); }
 
+          // Partner forward modeling — can partner respond on new board ends?
+          const partnerVoidNew = knowledge.cantHave[partner].has(newEnd);
+          const partnerVoidOther = knowledge.cantHave[partner].has(otherEnd);
+          if (partnerVoidNew && partnerVoidOther) {
+            ss -= 20;
+            sr.push(`Partner blocked — void in both ${newEnd} and ${otherEnd}`);
+          } else if (!partnerVoidNew && !partnerVoidOther) {
+            const myIds = new Set(hand.map(h => h.id));
+            myIds.add(tile.id);
+            let pTilesNew = 0, pTilesOther = 0;
+            for (const pt of ALL_TILES) {
+              if (knowledge.played.has(pt.id) || myIds.has(pt.id)) continue;
+              if (knowledge.cantHave[partner].has(pt.left) || knowledge.cantHave[partner].has(pt.right)) continue;
+              if (pt.left === newEnd || pt.right === newEnd) pTilesNew++;
+              if (pt.left === otherEnd || pt.right === otherEnd) pTilesOther++;
+            }
+            if (pTilesNew >= 3 && pTilesOther >= 3) {
+              ss += 8; sr.push('Partner has good coverage on both ends');
+            } else if (pTilesNew === 0 && !partnerVoidNew) {
+              ss -= 8; sr.push(`Few tiles left with ${newEnd} for partner`);
+            }
+          }
+
           // Pip weight — prefer playing heavier tiles earlier
           const tilePips = tile.left + tile.right;
           ss += tilePips * 2;
@@ -2176,6 +2204,16 @@
           ss += boardCountScore;
           if (oppCouldHaveNew <= 1) sr.push(`${newEnd}s nearly exhausted (${oppCouldHaveNew} out)`);
           else if (oppCouldHaveNew >= 4) sr.push(`${newEnd}s heavy — ${oppCouldHaveNew} still out for opponents`);
+
+          // Information hiding — opening only
+          if (bLen >= 1 && bLen <= 6 && hand.length >= 4) {
+            const maxSC = Math.max(...suitCount);
+            if (suitCount[newEnd] >= 3 && suitCount[newEnd] === maxSC) {
+              ss -= 8; sr.push('Exposes strongest suit — opponents may target');
+            } else if (suitCount[newEnd] <= 1 && newEnd !== otherEnd) {
+              ss += 5; sr.push('Diversifies board — hides hand composition');
+            }
+          }
 
           // Partner close to winning (uniform bonus — same for all options, so not shown as a reason)
           const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
@@ -2717,7 +2755,22 @@
       const allOptions = smartAI(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, true);
 
       const difficulty = getDifficultyForPlayer(player);
-      const decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
+      let decision;
+      if (difficulty >= 1.0 && allOptions.length > 1) {
+        // Expert: use MC evaluation for best play by expected points
+        const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
+        const mcResults = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
+        if (mcResults.length > 0) {
+          const mcBest = mcResults[0];
+          decision = allOptions.find(o => o.tile.id === mcBest.tile.id && o.side === mcBest.side)
+                  || allOptions.find(o => o.tile.id === mcBest.tile.id)
+                  || allOptions[0];
+        } else {
+          decision = allOptions[0];
+        }
+      } else {
+        decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
+      }
 
       if (decision) {
         playLastMove = { player, tile: decision.tile, side: decision.side, pass: false };
@@ -3631,6 +3684,36 @@
       return true;
     }
 
+    // Soft-belief weighted shuffle: bias tile assignment toward play-pattern plausibility
+    // Players who played many tiles with number N likely still hold more N-tiles
+    function softWeightedShuffle(avail, player, knowledge, rng) {
+      if (knowledge.played.size <= 4 || avail.length <= 1) { rng.shuffle(avail); return; }
+      const str = knowledge.inferStrength(player);
+      const hasSignal = str.some(s => s >= 2);
+      if (!hasSignal) { rng.shuffle(avail); return; }
+      // Weighted Fisher-Yates: pick each position by weighted random from remaining
+      for (let i = avail.length - 1; i > 0; i--) {
+        // Compute weights for positions 0..i
+        let wSum = 0;
+        for (let j = 0; j <= i; j++) {
+          const t = avail[j];
+          const w = 1 + 0.25 * ((str[t.left] || 0) + (str[t.right] || 0));
+          avail[j]._sw = w;
+          wSum += w;
+        }
+        let r = rng.random() * wSum;
+        let pick = 0;
+        for (; pick < i; pick++) {
+          r -= avail[pick]._sw;
+          if (r <= 0) break;
+        }
+        // Swap picked element to position i
+        if (pick !== i) { const tmp = avail[i]; avail[i] = avail[pick]; avail[pick] = tmp; }
+      }
+      // Clean up temp property
+      for (const t of avail) delete t._sw;
+    }
+
     // Generate a belief-consistent deal (Phase 1 upgrade)
     // Uses BeliefSampler when belief model available, else rejection + backtracking (no greedy fallback)
     function generateConsistentDeal(myHand, handSizes, knowledge, myIdx) {
@@ -3673,7 +3756,7 @@
         for (const p of sortedPlayers) {
           const avail = eligible[p].filter(t => !assigned.has(t.id));
           if (avail.length < handSizes[p]) { valid = false; break; }
-          rng.shuffle(avail);
+          softWeightedShuffle(avail, p, knowledge, rng);
           for (let i = 0; i < handSizes[p]; i++) {
             hands[p].push(avail[i]);
             assigned.add(avail[i].id);
@@ -4208,6 +4291,7 @@
     let coachMCTimer = null;      // setTimeout handle for async MC batches
     let coachMCRunning = false;   // true while MC eval is in progress
     const COACH_MC_SIMS = 500;    // rollouts per tile option
+    const MC_SIMS_PLAY_EXPERT = 200; // MC rollouts for Expert AI decisions
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
