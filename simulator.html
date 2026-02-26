@@ -2541,6 +2541,9 @@
 
         // MC-assisted play: when player has ≤3 tiles and multiple options, use MC to pick
         if (decision && hands[cur].length <= 3 && allOptions.length > 1) {
+          // Compute Bayesian beliefs to improve MC deal generation
+          const handSizes = hands.map(h => h.length);
+          computeBeliefs(knowledge, handSizes, hands[cur], cur, 150);
           const snap = {
             hands: hands.map(h => [...h]),
             board: [...board],
@@ -2899,6 +2902,9 @@
       const difficulty = getDifficultyForPlayer(player);
       let decision;
       if (difficulty >= 1.0 && allOptions.length > 1) {
+        // Compute Bayesian beliefs before MC — importance-weighted tile probabilities
+        const handSizes = liveHands.map(h => h.length);
+        computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
         // Expert: use MC evaluation for best play by expected points
         const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
         const mcResults = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
@@ -3359,6 +3365,8 @@
 
       const playable = hand.filter(t => canPlay(t, lE, rE, board.length));
       if (playable.length <= 1) return; // no comparison needed
+      // Compute Bayesian beliefs for coach MC deal quality
+      computeBeliefs(knowledge, handSizes, hand, player, 200);
       const mcMsgIdx = coachMessages.length;
       addCoachMsg('deduction', `<b>MC Analysis running...</b> ${playable.length} options \u00D7 ${COACH_MC_SIMS} rollouts`);
       render();
@@ -3604,8 +3612,8 @@
 
       // 6. Pip weight (endgame)
       if (hand.length <= 3) {
-        const bestPips = playT.left + playT.right;
-        const playPips = bestT.left + bestT.right;
+        const bestPips = bestT.left + bestT.right;
+        const playPips = playT.left + playT.right;
         if (bestPips > playPips + 3) {
           reasons.push(`<b>Dump heavy tile:</b> [${bestT.left}|${bestT.right}] sheds ${bestPips} pips vs ${playPips} for your play. In case of a block, lower pip count wins.`);
         }
@@ -3997,6 +4005,52 @@
       return hands;
     }
 
+    // Importance weight for a hypothetical deal based on play-pattern plausibility
+    // Players who played many tiles with number N likely still hold more N-tiles
+    function dealWeight(deal, knowledge) {
+      let w = 1.0;
+      for (let p = 0; p < 4; p++) {
+        const str = knowledge.inferStrength(p);
+        for (let n = 0; n < 7; n++) {
+          if (str[n] >= 2) {
+            const held = deal[p].filter(t => t.left === n || t.right === n).length;
+            w *= 1.0 + 0.2 * held;
+          }
+        }
+      }
+      return w;
+    }
+
+    // Compute Bayesian beliefs by importance-weighted Monte Carlo sampling
+    // Generates unbiased deals, weights them by play-pattern plausibility,
+    // then populates belief.marginals for use by BeliefSampler
+    function computeBeliefs(knowledge, handSizes, myHand, myIdx, nSamples = 200) {
+      if (!belief || knowledge.played.size < 4) return; // need play-pattern signal
+      belief.syncFromKnowledge(knowledge);
+
+      // Temporarily disable belief-weighted sampling to get unbiased base samples
+      const savedBelief = belief;
+      belief = null;
+
+      const deals = [];
+      const weights = [];
+      for (let i = 0; i < nSamples; i++) {
+        const deal = generateConsistentDeal(myHand, handSizes, knowledge, myIdx);
+        deals.push(deal);
+        weights.push(dealWeight(deal, knowledge));
+      }
+
+      belief = savedBelief;
+
+      // Normalize weights for importance sampling
+      const wSum = weights.reduce((s, w) => s + w, 0);
+      if (wSum > 0) {
+        for (let i = 0; i < weights.length; i++) weights[i] /= wSum;
+      }
+
+      belief.updateMarginals(deals, weights, myIdx);
+    }
+
     // Compute tile probabilities for a player using MC sampling
     function computeTileProbs(playerIdx, knowledge, handSizes, myHand, myIdx, numSamples = 500) {
       const probs = {};
@@ -4225,9 +4279,11 @@
 
       setTimeout(() => {
         try {
-          // 1. MC evaluation
+          // 1. MC evaluation (with Bayesian beliefs for better deal generation)
           let mcResults = null;
           if (snap.action === 'play' && prevSnap) {
+            const studyHandSizes = prevSnap.hands.map(h => h.length);
+            computeBeliefs(prevSnap.knowledge, studyHandSizes, prevSnap.hands[snap.player], snap.player, 200);
             mcResults = monteCarloEval(prevSnap, snap.player, MC_SIMS_STUDY);
           }
           // 2. Tile probability matrix
@@ -4849,6 +4905,8 @@
       // Run Monte Carlo for equity loss computation
       let quizMC = null;
       if (deepAnalysis) {
+        const qHandSizes = snap.hands.map(h => h.length);
+        computeBeliefs(snap.knowledge, qHandSizes, snap.hands[0], 0, 200);
         quizMC = monteCarloEval(snap, 0, puzzleMode ? MC_SIMS_PUZZLE : MC_SIMS_QUIZ);
       }
 
@@ -6847,6 +6905,8 @@
         const i = p0Steps[idx];
         const s = snapshots[i];
         const prevSnap = snapshots[i - 1];
+        const aHandSizes = prevSnap.hands.map(h => h.length);
+        computeBeliefs(prevSnap.knowledge, aHandSizes, prevSnap.hands[0], 0, 150);
         const mc = monteCarloEval(prevSnap, 0, MC_SIMS_ANALYSIS);
         const best = mc.length > 0 ? mc[0] : null;
         const played = mc.find(m => m.tile.id === s.tile.id);
@@ -8902,6 +8962,8 @@
       setTimeout(() => {
         // Run MC from the state BEFORE this move was made
         const prevSnap = currentGame.snapshots[currentStep - 1];
+        const wHandSizes = prevSnap.hands.map(h => h.length);
+        computeBeliefs(prevSnap.knowledge, wHandSizes, prevSnap.hands[snap.player], snap.player, 150);
         mcResults = monteCarloEval(prevSnap, snap.player, MC_SIMS_WATCH);
         mcRunning = false;
         render();
@@ -9173,6 +9235,9 @@
           // MC team uses monteCarloEval for all positions with multiple options
           if (isOnMCTeam && decision && allOpts.length > 1) {
             try {
+              // Compute Bayesian beliefs for MC deal quality
+              const handSizes = hands.map(h => h.length);
+              computeBeliefs(knowledge, handSizes, hands[cur], cur, 100);
               const snap = { hands, leftEnd: lE, rightEnd: rE, board: new Array(bLen), knowledge };
               const mcRes = monteCarloEval(snap, cur, MC_SIMS_BENCH);
               if (mcRes.length > 0) {
