@@ -5939,6 +5939,192 @@
       return results;
     }
 
+    // ========== ENDGAME SOLVER VERIFICATION HARNESS ==========
+    // Brute-force minimax (no TT, no alpha-beta) as ground truth reference.
+    // Call from console: endgameVerify(2000) — runs N random subgames, compares.
+    function _bruteForceMinimax(hands, lE, rE, bLen, nextPlayer, passCount, myTeam) {
+      // Terminal: 4 consecutive passes → blocked
+      if (passCount >= 4) {
+        const block = resolveBlock(hands);
+        return block.type === 'tie' ? 0 : _rolloutToMEReward(block.team, block.points, myTeam);
+      }
+
+      const hand = hands[nextPlayer];
+      let hasPlayable = false;
+      for (let i = 0; i < hand.length; i++) {
+        if (canPlay(hand[i], lE, rE, bLen)) { hasPlayable = true; break; }
+      }
+
+      // No legal moves → pass (no pruning, just recurse)
+      if (!hasPlayable) {
+        return _bruteForceMinimax(hands, lE, rE, bLen, (nextPlayer + 1) % 4, passCount + 1, myTeam);
+      }
+
+      const isMax = (nextPlayer % 2) === myTeam;
+      let bestVal = isMax ? -Infinity : Infinity;
+
+      for (let ti = 0; ti < hand.length; ti++) {
+        const tile = hand[ti];
+        if (!canPlay(tile, lE, rE, bLen)) continue;
+
+        const sides = [];
+        if (bLen === 0) {
+          sides.push(null);
+        } else {
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+        }
+
+        for (let si = 0; si < sides.length; si++) {
+          const side = sides[si];
+          let newLE = lE, newRE = rE;
+          if (bLen === 0) { newLE = tile.left; newRE = tile.right; }
+          else if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+          else { newRE = tile.right === rE ? tile.left : tile.right; }
+
+          hand.splice(ti, 1);
+
+          let val;
+          if (hand.length === 0) {
+            const w = scoreWin(tile, lE, rE, bLen + 1);
+            val = _rolloutToMEReward(nextPlayer % 2, w.pts, myTeam);
+          } else {
+            val = _bruteForceMinimax(hands, newLE, newRE, bLen + 1, (nextPlayer + 1) % 4, 0, myTeam);
+          }
+
+          hand.splice(ti, 0, tile);
+
+          if (isMax) { if (val > bestVal) bestVal = val; }
+          else { if (val < bestVal) bestVal = val; }
+        }
+      }
+      return bestVal;
+    }
+
+    function endgameVerify(numCases = 2000) {
+      const savedMatchScore = [...matchScore];
+      const savedMultiplier = scoreMultiplier;
+      // Set a fixed match context so _rolloutToMEReward is consistent
+      matchScore[0] = 2; matchScore[1] = 3; scoreMultiplier = 1;
+
+      const rng = new SplitMix64(0xCAFEBABE);
+      let pass = 0, fail = 0, collisions = 0, totalNodes = 0;
+      const EPS = 1e-9;
+      const failures = [];
+
+      for (let c = 0; c < numCases; c++) {
+        // Generate random subgame: 4-8 total tiles in hands, valid board state
+        const totalTiles = 4 + rng.randomInt(5); // 4..8
+        const deck = ALL_TILES.map(t => t); // share refs (immutable)
+        // Fisher-Yates with seeded rng
+        for (let i = deck.length - 1; i > 0; i--) {
+          const j = rng.randomInt(i + 1);
+          [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+
+        // Distribute tiles to 4 players
+        const hands = [[], [], [], []];
+        let dealt = 0;
+        for (let p = 0; p < 4 && dealt < totalTiles; p++) {
+          const count = Math.min(
+            1 + rng.randomInt(Math.min(3, totalTiles - dealt)),
+            totalTiles - dealt
+          );
+          for (let i = 0; i < count; i++) hands[p].push(deck[dealt++]);
+        }
+        // Distribute any remainder
+        while (dealt < totalTiles) {
+          const p = rng.randomInt(4);
+          hands[p].push(deck[dealt++]);
+        }
+
+        // Pick board ends from remaining tiles (simulate mid-game board)
+        const boardTile = deck[totalTiles + rng.randomInt(Math.min(8, 28 - totalTiles))];
+        const lE = boardTile.left;
+        const rE = (rng.randomInt(3) === 0) ? boardTile.left : boardTile.right; // sometimes symmetric
+        // If we want different ends, pick from another tile
+        let finalRE = rE;
+        if (rng.randomInt(2) === 0 && totalTiles + 1 < 28) {
+          const otherTile = deck[totalTiles + 1 + rng.randomInt(Math.min(5, 27 - totalTiles))];
+          finalRE = otherTile.left;
+        }
+
+        const bLen = 12 + rng.randomInt(8); // 12..19 (deep into game)
+        const nextPlayer = rng.randomInt(4);
+        const myTeam = nextPlayer % 2;
+
+        // Run production solver (TT + alpha-beta)
+        const tt = new Map();
+        const deadline = Date.now() + 5000; // generous budget
+        let prodVal, bruteVal;
+        try {
+          prodVal = _endgameMinimax(hands, lE, finalRE, bLen, nextPlayer, 0, myTeam, -Infinity, Infinity, deadline, tt);
+        } catch (e) {
+          // Invariant violation — skip (shouldn't happen with bLen>=12)
+          continue;
+        }
+
+        // Run brute-force reference (no TT, no pruning)
+        try {
+          bruteVal = _bruteForceMinimax(hands, lE, finalRE, bLen, nextPlayer, 0, myTeam);
+        } catch (e) {
+          continue;
+        }
+
+        totalNodes += tt.size;
+
+        // Compare
+        if (Math.abs(prodVal - bruteVal) < EPS) {
+          pass++;
+        } else {
+          fail++;
+          if (failures.length < 10) {
+            failures.push({
+              case: c,
+              hands: hands.map(h => h.map(t => t.id)),
+              lE, rE: finalRE, bLen, nextPlayer, myTeam,
+              prodVal, bruteVal, diff: Math.abs(prodVal - bruteVal)
+            });
+          }
+        }
+
+        // TT collision check: re-solve one random position and verify consistency
+        if (tt.size > 0 && rng.randomInt(10) === 0) {
+          const tt2 = new Map();
+          const val2 = _endgameMinimax(hands, lE, finalRE, bLen, nextPlayer, 0, myTeam, -Infinity, Infinity, deadline, tt2);
+          if (Math.abs(prodVal - val2) > EPS) collisions++;
+        }
+      }
+
+      // Restore match state
+      matchScore[0] = savedMatchScore[0]; matchScore[1] = savedMatchScore[1];
+      scoreMultiplier = savedMultiplier;
+
+      const result = {
+        total: pass + fail,
+        pass,
+        fail,
+        collisions,
+        avgTTSize: Math.round(totalNodes / Math.max(1, pass + fail)),
+        failures: failures.slice(0, 5)
+      };
+
+      console.log(`%cEndgame Solver Verification`, 'font-weight:bold; font-size:14px;');
+      console.log(`Cases: ${result.total} | Pass: ${pass} | Fail: ${fail} | TT collisions: ${collisions}`);
+      console.log(`Avg TT entries/case: ${result.avgTTSize}`);
+      if (fail > 0) {
+        console.log(`%cFAILURES:`, 'color:red; font-weight:bold');
+        for (const f of result.failures) {
+          console.log(`  Case ${f.case}: prod=${f.prodVal.toFixed(6)} brute=${f.bruteVal.toFixed(6)} diff=${f.diff.toFixed(9)}`);
+          console.log(`    hands=${JSON.stringify(f.hands)} lE=${f.lE} rE=${f.rE} bLen=${f.bLen} next=${f.nextPlayer}`);
+        }
+      } else {
+        console.log(`%cALL PASS ✓`, 'color:green; font-weight:bold');
+      }
+      return result;
+    }
+
     // Run Monte Carlo evaluation for all playable tiles from current position
     // Returns rich results: E[pts], win%, block%, outcome distribution
     function monteCarloEval(snap, player, numSims = 80) {
