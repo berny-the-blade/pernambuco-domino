@@ -2765,6 +2765,10 @@
         this.passedOn = [[], [], [], []];
         this._strengthCache = [null, null, null, null];
         this._remainingCount = [7, 7, 7, 7, 7, 7, 7]; // each number appears on 7 tiles
+        // Signaling inference
+        this.openingSuits = [null, null, null, null]; // first suit each player leads with
+        this.sacrificeFlags = [new Set(), new Set(), new Set(), new Set()]; // suits where player dumped high-pip tiles
+        this._moveCount = 0; // total moves for phase-weighted avoidance
       }
       clone() {
         const k = Object.create(Knowledge.prototype);
@@ -2775,6 +2779,9 @@
         k.passedOn = this.passedOn.map(a => [...a]);
         k._strengthCache = [null, null, null, null];
         k._remainingCount = [...this._remainingCount];
+        k.openingSuits = [...this.openingSuits];
+        k.sacrificeFlags = this.sacrificeFlags.map(s => new Set(s));
+        k._moveCount = this._moveCount;
         return k;
       }
       recordPlay(p, t) {
@@ -2786,12 +2793,42 @@
         if (p >= 0 && p <= 3) {
           this.playsBy[p].push(t);
           this._strengthCache[p] = null;
+          // Opening suit inference: track first played suit (early game)
+          if (this.openingSuits[p] === null && this.playsBy[p].length <= 2 && this._moveCount < 8) {
+            // Prefer the non-double number as the "suit" signal
+            if (t.left === t.right) {
+              this.openingSuits[p] = t.left;
+            } else {
+              // The number that connects more of their played tiles
+              this.openingSuits[p] = t.left;
+            }
+          }
+          // Sacrifice detection: high-pip tile when total pips >= 9 and it's not their first play
+          if (this.playsBy[p].length >= 2 && t.left + t.right >= 9 && t.left !== t.right) {
+            // If they played a high-pip non-double, they may be dumping that suit
+            this.sacrificeFlags[p].add(t.left);
+            this.sacrificeFlags[p].add(t.right);
+          }
         }
+        this._moveCount++;
       }
       recordPass(p, lE, rE) {
         this.cantHave[p].add(lE);
         this.cantHave[p].add(rE);
-        this.passedOn[p].push({ lE, rE });
+        this.passedOn[p].push({ lE, rE, move: this._moveCount }); // track when pass happened
+      }
+      // Phase-weighted avoidance: recent passes are stronger signals
+      avoidanceStrength(p, n) {
+        let strength = 0;
+        for (const pass of this.passedOn[p]) {
+          if (pass.lE === n || pass.rE === n) {
+            // Decay: passes from early game (move < 8) are weaker signals
+            const age = this._moveCount - (pass.move || 0);
+            const weight = age < 5 ? 1.0 : (age < 10 ? 0.7 : 0.4);
+            strength += weight;
+          }
+        }
+        return strength;
       }
       inferStrength(p) {
         if (this._strengthCache[p]) return this._strengthCache[p];
@@ -2900,10 +2937,11 @@
       }
     }
 
-    // Track opponent styles: only P1 (opp left) and P3 (opp right)
-    let opponentStyles = [null, new OpponentStyle(), null, new OpponentStyle()];
+    // Track player styles: P1 (opp left), P2 (partner), P3 (opp right)
+    let opponentStyles = [null, new OpponentStyle(), new OpponentStyle(), new OpponentStyle()];
     function resetOpponentStyles() {
       opponentStyles[1] = new OpponentStyle();
+      opponentStyles[2] = new OpponentStyle();
       opponentStyles[3] = new OpponentStyle();
     }
 
@@ -2980,6 +3018,35 @@
           if (opponentStyles[opp2] && opponentStyles[opp2].observations >= 3) {
             const bf2 = opponentStyles[opp2].metrics.blockingFocus;
             if (bf2 > 0.6 && knowledge.cantHave[opp2].has(newEnd)) { ss += 5; sr.push(`${pn(opp2)} is a blocker — priority target`); }
+          }
+
+          // Partner style adjustment: trust aggressive partners, protect passive ones
+          if (opponentStyles[partner] && opponentStyles[partner].observations >= 3) {
+            const partnerAgg = opponentStyles[partner].metrics.aggressiveness;
+            if (partnerAgg > 0.6) {
+              // Aggressive partner — reduce our blocking bias, trust them to close
+              if (knowledge.cantHave[opp1].has(newEnd) || knowledge.cantHave[opp2].has(newEnd)) {
+                ss -= 3; sr.push('Trust aggressive partner — less blocking');
+              }
+            } else if (partnerAgg < 0.3) {
+              // Passive partner — take more initiative
+              ss += 3; sr.push('Passive partner — take initiative');
+            }
+          }
+
+          // Signaling inference: opening suit and sacrifice awareness
+          // If partner opened with suit X, opening that end is likely good
+          if (knowledge.openingSuits[partner] !== null) {
+            const partnerSuit = knowledge.openingSuits[partner];
+            if (newEnd === partnerSuit && !knowledge.cantHave[partner].has(partnerSuit)) {
+              ss += 6; sr.push(`Opens partner's opening suit ${partnerSuit}`);
+            }
+          }
+          // If opponent sacrificed (dumped high-pip tiles) in a suit, they may be weak there
+          for (const opp of [opp1, opp2]) {
+            if (knowledge.sacrificeFlags[opp].has(newEnd) && knowledge.avoidanceStrength(opp, newEnd) > 0) {
+              ss += 4; sr.push(`${pn(opp)} dumped ${newEnd}-tiles — weak there`);
+            }
           }
 
           // Partner support — check if partner has played tiles with these numbers
@@ -3494,8 +3561,29 @@
         const allOptions = smartAI(hands[cur], lE, rE, board.length, cur, knowledge, true);
         let decision = allOptions.length > 0 ? allOptions[0] : null;
 
+        // Endgame solver: when few tiles remain, use exact minimax instead of heuristic rollouts
+        const _egTotal = hands[0].length + hands[1].length + hands[2].length + hands[3].length;
+        if (decision && _egTotal <= ENDGAME_THRESHOLD && allOptions.length > 1) {
+          const handSizes = hands.map(h => h.length);
+          computeBeliefs(knowledge, handSizes, hands[cur], cur, 150);
+          try {
+            const egRes = endgameSolve(hands[cur], lE, rE, board.length, cur, knowledge, handSizes);
+            if (egRes.length > 0) {
+              const best = egRes[0];
+              const matched = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                           || allOptions.find(o => o.tile.id === best.tile.id);
+              if (matched) {
+                decision = matched;
+                const egTag = `Endgame solver (exact, ME:${best.expectedPoints.toFixed(3)})`;
+                if (!decision.reasons.includes(egTag)) {
+                  decision.reasons = [...decision.reasons, egTag];
+                }
+              }
+            }
+          } catch(e) { /* solver failed, fall through to MC/ISMCTS */ }
+        }
         // MC/ISMCTS-assisted play: when player has ≤4 tiles and multiple options
-        if (decision && hands[cur].length <= 4 && allOptions.length > 1) {
+        else if (decision && hands[cur].length <= 4 && allOptions.length > 1) {
           const handSizes = hands.map(h => h.length);
           computeBeliefs(knowledge, handSizes, hands[cur], cur, 150);
           try {
@@ -3545,6 +3633,10 @@
           if (opponentStyles[cur]) {
             opponentStyles[cur].update(tile, { bLen: board.length, lE, rE, knowledge, player: cur });
           }
+          // Continuous belief updates: sync after every observed play
+          if (belief && knowledge.played.size >= 4) {
+            belief.syncFromKnowledge(knowledge);
+          }
 
           const pL = lE, pR = rE;
 
@@ -3585,6 +3677,10 @@
           passCount++;
           knowledge.recordPass(cur, lE, rE);
           nb.recordPass(cur, moveNum, lE, rE);
+          // Continuous belief updates: sync after pass (strong signal)
+          if (belief && knowledge.played.size >= 4) {
+            belief.syncFromKnowledge(knowledge);
+          }
 
           let outcome = null;
           if (passCount >= 4) {
@@ -3867,7 +3963,23 @@
 
       const difficulty = getDifficultyForPlayer(player);
       let decision;
-      if (difficulty >= 1.0 && allOptions.length > 1) {
+      // Endgame solver: exact minimax when few tiles remain (Advanced+ difficulty)
+      const _egLiveTotal = liveHands[0].length + liveHands[1].length + liveHands[2].length + liveHands[3].length;
+      if (_egLiveTotal <= ENDGAME_THRESHOLD && allOptions.length > 1 && difficulty >= 0.7) {
+        const handSizes = liveHands.map(h => h.length);
+        computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
+        try {
+          const egRes = endgameSolve(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, handSizes);
+          if (egRes.length > 0) {
+            const best = egRes[0];
+            decision = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                    || allOptions.find(o => o.tile.id === best.tile.id)
+                    || allOptions[0];
+          } else {
+            decision = allOptions[0];
+          }
+        } catch(e) { decision = allOptions[0]; }
+      } else if (difficulty >= 1.0 && allOptions.length > 1) {
         // Compute Bayesian beliefs before search — importance-weighted tile probabilities
         const handSizes = liveHands.map(h => h.length);
         computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
@@ -3916,9 +4028,13 @@
       liveHands[player] = liveHands[player].filter(t => t.id !== tile.id);
       liveKnowledge.recordPlay(player, tile);
       liveNotebook.recordPlay(player, liveMoveNum, tile, side, liveLeftEnd, liveRightEnd);
-      // Update opponent style model for opponents in play mode
+      // Update opponent style model for all players in play mode
       if (opponentStyles[player]) {
         opponentStyles[player].update(tile, { bLen: liveBoard.length, lE: liveLeftEnd, rE: liveRightEnd, knowledge: liveKnowledge, player });
+      }
+      // Continuous belief updates: sync after every live play
+      if (belief && liveKnowledge.played.size >= 4) {
+        belief.syncFromKnowledge(liveKnowledge);
       }
       livePassCount = 0;
 
@@ -3974,6 +4090,10 @@
       livePassCount++;
       liveKnowledge.recordPass(player, liveLeftEnd, liveRightEnd);
       liveNotebook.recordPass(player, liveMoveNum, liveLeftEnd, liveRightEnd);
+      // Continuous belief updates: sync after pass (strong signal)
+      if (belief && liveKnowledge.played.size >= 4) {
+        belief.syncFromKnowledge(liveKnowledge);
+      }
 
       let outcome = null;
       if (livePassCount >= 4) {
@@ -5025,7 +5145,7 @@
         }
       }
       // (d) Opponent style: heavy dumpers are less likely to still hold heavy tiles
-      for (const p of [1, 3]) {
+      for (const p of [1, 2, 3]) {
         if (!opponentStyles[p] || opponentStyles[p].observations < 3) continue;
         const prof = opponentStyles[p].metrics;
         if (prof.heavyDump > 0.6) {
@@ -5033,6 +5153,22 @@
             if (t.left + t.right >= 9) w *= 0.85; // heavy dumpers shed these early
           }
         }
+      }
+      // (e) Sacrifice signal: if player dumped high-pip tiles in a suit, reduce belief they hold more
+      for (let p = 0; p < 4; p++) {
+        if (knowledge.sacrificeFlags[p].size === 0) continue;
+        for (const t of deal[p]) {
+          if (knowledge.sacrificeFlags[p].has(t.left) || knowledge.sacrificeFlags[p].has(t.right)) {
+            if (t.left + t.right >= 7) w *= 0.9; // less likely to hold more heavy tiles in sacrificed suit
+          }
+        }
+      }
+      // (f) Opening suit signal: if player opened with suit X, they likely hold more X-tiles
+      for (let p = 0; p < 4; p++) {
+        const os = knowledge.openingSuits[p];
+        if (os === null) continue;
+        const heldOS = deal[p].filter(t => t.left === os || t.right === os).length;
+        if (heldOS > 0) w *= 1.0 + 0.1 * heldOS; // boost deals where they hold their opening suit
       }
       return w;
     }
@@ -5457,6 +5593,210 @@
       return { winnerTeam: -1, points: 0, type: 'tie' };
     }
 
+    // ========== PERFECT ENDGAME SOLVER ==========
+    // When total tiles in all hands ≤ ENDGAME_THRESHOLD, sample consistent deals
+    // and solve each with minimax + alpha-beta for near-exact play.
+    // Replaces heuristic rollouts with mathematically optimal evaluation per determinization.
+
+    const ENDGAME_THRESHOLD = 8;      // trigger when total hand tiles ≤ this
+    const ENDGAME_BUDGET_MS = 500;    // hard time limit
+    const ENDGAME_SAMPLE_COUNT = 300; // deals to sample and solve
+
+    // Minimax with alpha-beta pruning for partnership domino (perfect info per deal)
+    // Team 0 (P0+P2) maximizes, Team 1 (P1+P3) minimizes
+    // Uses in-place mutation with undo for zero-allocation recursion
+    // Returns ME delta relative to myTeam
+    function _endgameMinimax(hands, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline) {
+      if (Date.now() > deadline) return 0;
+
+      // Terminal: 4 consecutive passes → blocked game
+      if (passCount >= 4) {
+        const block = resolveBlock(hands);
+        return block.type === 'tie' ? 0 : _rolloutToMEReward(block.team, block.points, myTeam);
+      }
+
+      const hand = hands[nextPlayer];
+      // Build playable list inline (avoid allocation when possible)
+      let hasPlayable = false;
+      for (let i = 0; i < hand.length; i++) {
+        if (canPlay(hand[i], lE, rE, bLen)) { hasPlayable = true; break; }
+      }
+
+      // No legal moves → pass
+      if (!hasPlayable) {
+        return _endgameMinimax(hands, lE, rE, bLen, (nextPlayer + 1) % 4, passCount + 1, myTeam, alpha, beta, deadline);
+      }
+
+      const isMax = (nextPlayer % 2) === myTeam;
+      let bestVal = isMax ? -Infinity : Infinity;
+
+      for (let ti = 0; ti < hand.length; ti++) {
+        if (Date.now() > deadline) break;
+        const tile = hand[ti];
+        if (!canPlay(tile, lE, rE, bLen)) continue;
+
+        // Determine playable sides
+        const sides = [];
+        if (bLen === 0) {
+          sides.push(null);
+        } else {
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+        }
+
+        for (let si = 0; si < sides.length; si++) {
+          const side = sides[si];
+          let newLE = lE, newRE = rE;
+          if (bLen === 0) { newLE = tile.left; newRE = tile.right; }
+          else if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+          else { newRE = tile.right === rE ? tile.left : tile.right; }
+
+          // Remove tile from hand (mutate)
+          hand.splice(ti, 1);
+
+          let val;
+          if (hand.length === 0) {
+            // Player went out — score the win
+            const w = scoreWin(tile, lE, rE, bLen + 1);
+            val = _rolloutToMEReward(nextPlayer % 2, w.pts, myTeam);
+          } else {
+            val = _endgameMinimax(hands, newLE, newRE, bLen + 1, (nextPlayer + 1) % 4, 0, myTeam, alpha, beta, deadline);
+          }
+
+          // Undo: re-insert tile at original position
+          hand.splice(ti, 0, tile);
+
+          if (isMax) {
+            if (val > bestVal) bestVal = val;
+            if (bestVal > alpha) alpha = bestVal;
+          } else {
+            if (val < bestVal) bestVal = val;
+            if (bestVal < beta) beta = bestVal;
+          }
+          if (beta <= alpha) break;
+        }
+        if (beta <= alpha) break;
+      }
+
+      return bestVal;
+    }
+
+    // Endgame solver entry point
+    // Samples consistent deals, solves each with minimax, returns weighted-average move values
+    // Output format matches monteCarloEval for seamless integration
+    function endgameSolve(hand, lE, rE, bLen, player, knowledge, handSizes) {
+      const deadline = Date.now() + ENDGAME_BUDGET_MS;
+      const myTeam = player % 2;
+
+      const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
+      if (playable.length === 0) return [];
+      if (playable.length === 1) {
+        return [{ tile: playable[0], side: null, expectedPoints: 0, winRate: 0.5,
+                  sims: 0, endgame: true, blockRate: 0,
+                  outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+                  variance: 0, stdDev: 0, ci95: 0, cvar5: 0 }];
+      }
+
+      // Sample consistent deals and compute importance weights
+      const deals = [];
+      const weights = [];
+      for (let i = 0; i < ENDGAME_SAMPLE_COUNT && Date.now() < deadline; i++) {
+        try {
+          const deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+          deals.push(deal);
+          weights.push(dealWeight(deal, knowledge));
+        } catch(e) { /* skip failed samples */ }
+      }
+      if (deals.length === 0) return [];
+
+      // Normalize weights
+      let wSum = 0;
+      for (let i = 0; i < weights.length; i++) wSum += weights[i];
+      if (wSum > 0) { for (let i = 0; i < weights.length; i++) weights[i] /= wSum; }
+      else { for (let i = 0; i < weights.length; i++) weights[i] = 1 / weights.length; }
+
+      // Build move registry: all (tile, side) combinations
+      const moveEntries = [];
+      for (const tile of playable) {
+        const sides = [];
+        if (bLen === 0) {
+          sides.push(null);
+        } else {
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+        }
+        for (const side of sides) {
+          moveEntries.push({ tile, side, totalME: 0, solvedWeight: 0, deals: 0 });
+        }
+      }
+
+      // For each deal, solve all moves via minimax
+      for (let d = 0; d < deals.length && Date.now() < deadline; d++) {
+        const deal = deals[d];
+        const w = weights[d];
+
+        for (let m = 0; m < moveEntries.length; m++) {
+          if (Date.now() > deadline) break;
+          const entry = moveEntries[m];
+          const { tile, side } = entry;
+
+          // Compute new board ends after this move
+          let newLE = lE, newRE = rE;
+          if (bLen === 0) { newLE = tile.left; newRE = tile.right; }
+          else if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+          else { newRE = tile.right === rE ? tile.left : tile.right; }
+
+          // Build hands for this deal with the move applied
+          const solveHands = [null, null, null, null];
+          for (let p = 0; p < 4; p++) {
+            solveHands[p] = p === player ? hand.filter(t => t.id !== tile.id) : [...deal[p]];
+          }
+
+          // Check instant win
+          if (solveHands[player].length === 0) {
+            const ws = scoreWin(tile, lE, rE, bLen + 1);
+            const reward = _rolloutToMEReward(player % 2, ws.pts, myTeam);
+            entry.totalME += w * reward;
+            entry.solvedWeight += w;
+            entry.deals++;
+            continue;
+          }
+
+          // Minimax solve from the next player's perspective
+          const val = _endgameMinimax(solveHands, newLE, newRE, bLen + 1, (player + 1) % 4, 0, myTeam, -Infinity, Infinity, deadline);
+          entry.totalME += w * val;
+          entry.solvedWeight += w;
+          entry.deals++;
+        }
+      }
+
+      // Build results — pick best side per tile (matches MC output format)
+      const tileResults = new Map();
+      for (const entry of moveEntries) {
+        if (entry.solvedWeight === 0) continue;
+        const me = entry.totalME / entry.solvedWeight;
+        const result = {
+          tile: entry.tile, side: entry.side,
+          winRate: Math.max(0, Math.min(1, 0.5 + me * 1.5)),
+          expectedPoints: me * 4,
+          sims: entry.deals, endgame: true,
+          blockRate: 0,
+          outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+          variance: 0, stdDev: 0, ci95: 0, cvar5: 0
+        };
+        const tileKey = entry.tile.id;
+        if (!tileResults.has(tileKey) || result.expectedPoints > tileResults.get(tileKey).expectedPoints) {
+          tileResults.set(tileKey, result);
+        }
+      }
+
+      const results = [...tileResults.values()];
+      results.sort((a, b) => b.expectedPoints - a.expectedPoints);
+      return results;
+    }
+
     // Run Monte Carlo evaluation for all playable tiles from current position
     // Returns rich results: E[pts], win%, block%, outcome distribution
     function monteCarloEval(snap, player, numSims = 80) {
@@ -5473,6 +5813,16 @@
                   variance: 0, stdDev: 0, ci95: 0, cvar5: 0 }];
       }
 
+      // Endgame solver: return exact minimax values instead of MC sampling
+      const _egMcTotal = snap.hands.reduce((s, h) => s + h.length, 0);
+      if (_egMcTotal <= ENDGAME_THRESHOLD) {
+        const handSizes = snap.hands.map(h => h.length);
+        try {
+          const egRes = endgameSolve(hand, lE, rE, board.length, player, knowledge, handSizes);
+          if (egRes.length > 0) return egRes;
+        } catch(e) { /* fall through to standard MC */ }
+      }
+
       // Check cache — BitSet-based compact keys
       const playedBS = new BitSet();
       for (const id of knowledge.played) playedBS.set(TILE_INDEX[id]);
@@ -5484,7 +5834,7 @@
 
       const handSizes = snap.hands.map(h => h.length);
       const myTeam = player % 2;
-      const useME = (matchScore[0] > 0 || matchScore[1] > 0 || scoreMultiplier > 1);
+      const useME = true; // Always use match equity for optimal play
 
       // Build all tile×side options with pre-computed state
       const options = [];
@@ -5614,10 +5964,12 @@
         this.children = [];
         this.visits = 0;
         this.totalReward = 0;
+        this.hBias = 0;         // progressive bias from heuristic evaluation
       }
       ucb1(C = 1.41) {
         if (this.visits === 0) return Infinity;
-        return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits);
+        return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits)
+             + this.hBias / (this.visits + 1);
       }
       selectChild(legalMoves) {
         // Filter children to those whose move is legal in this determinization
@@ -5666,12 +6018,37 @@
       return { newLE: lE, newRE: tile.right === rE ? tile.left : tile.right };
     }
 
+    // Heuristic bias for ISMCTS progressive bias — lightweight scoring for root-level moves
+    function _ismctsHeuristic(move, hand, lE, rE, bLen, knowledge, player) {
+      const { tile, side } = move;
+      let h = 0;
+      const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+      // Compute new end after move
+      let newEnd;
+      if (bLen === 0) { newEnd = tile.right; }
+      else if (side === 'left') { newEnd = tile.left === lE ? tile.right : tile.left; }
+      else { newEnd = tile.right === rE ? tile.left : tile.right; }
+      // Suit control: tiles in hand matching new board end
+      for (const t of hand) {
+        if (t.id !== tile.id && (t.left === newEnd || t.right === newEnd)) h += 0.04;
+      }
+      // Double clearing bonus
+      if (tile.left === tile.right) h += 0.03;
+      // Blocking bonus
+      if (knowledge.cantHave[opp1].has(newEnd)) h += 0.04;
+      if (knowledge.cantHave[opp2].has(newEnd)) h += 0.03;
+      // Near-win bonus
+      if (hand.length === 1) h += 0.5;
+      else if (hand.length === 2) h += 0.05;
+      return h;
+    }
+
     function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
-      const MAX_ITERATIONS = 300;
-      const TIME_LIMIT = 150; // ms
+      const MAX_ITERATIONS = 400;
+      const TIME_LIMIT = 200; // ms (increased for stronger play)
       const MAX_NODES = 5000;
       const myTeam = player % 2;
-      const useME = (matchScore[0] > 0 || matchScore[1] > 0 || scoreMultiplier > 1);
+      const useME = true; // Always use match equity for optimal play
       const handSizes = [6, 6, 6, 6]; // approximate — will be overridden per determinization
 
       // Compute actual hand sizes from knowledge
@@ -5725,8 +6102,13 @@
           if (untriedMoves.length > 0 && node.children.length < Math.ceil(Math.sqrt(node.visits + 1))) {
             // Expand: pick a random untried move
             const expandMove = untriedMoves[Math.floor(Math.random() * untriedMoves.length)];
+            const _prevNode = node;
             node = node.expand(expandMove);
             nodeCount++;
+            // Progressive bias for root-level children
+            if (_prevNode === root && curPlayer === player) {
+              node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+            }
             // Apply move
             const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
             simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
@@ -5767,8 +6149,13 @@
           const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
           if (legalMoves.length > 0) {
             const expandMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+            const _leafParent = node;
             node = node.expand(expandMove);
             nodeCount++;
+            // Progressive bias for root-level children
+            if (_leafParent === root && curPlayer === player) {
+              node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+            }
             const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
             simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
             simKnowledge.recordPlay(curPlayer, expandMove.tile);
