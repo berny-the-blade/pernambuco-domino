@@ -5580,6 +5580,9 @@
         return { tile: best, side: null };
       }
 
+      // Phase-dependent pip multiplier (ported from smartAI)
+      const deadMul = bLen <= 4 ? 0.4 : (bLen <= 14 ? 1.0 : 1.4);
+
       let bestTile = null, bestSide = null, bestScore = -Infinity;
       for (const tile of playable) {
         for (const side of ['left', 'right']) {
@@ -5611,11 +5614,33 @@
           // Partner void penalty
           if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) ss -= 15;
 
-          // Pip weight
-          ss += (tile.left + tile.right) * 2;
+          // Pip weight (phase-dependent)
+          ss += Math.round((tile.left + tile.right) * 2 * deadMul);
 
           // Double clearing
           if (tile.left === tile.right) ss += 10;
+
+          // Dead number detection (ported from smartAI — highest-weighted strategic feature)
+          {
+            const remNew = knowledge.remainingWithNumber(newEnd);
+            // remNew counts tiles with this number still unplayed (including the tile we're about to play)
+            // After playing, remaining = remNew - (tile has newEnd ? 1 : 0) but tile always has newEnd
+            const remNewAfter = remNew - 1;
+            if (remNewAfter === 0 && newEnd !== otherEnd) {
+              // newEnd will be dead after this play
+              const tileHasOther = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+              const remOther = knowledge.remainingWithNumber(otherEnd) - tileHasOther;
+              if (remOther > 0) {
+                // One end dead, other alive — board stalls on one end
+                ss -= 30;
+              } else {
+                // Both ends dead — game will block. Evaluate our pip position.
+                let myPips = 0;
+                for (const h of hand) { if (h.id !== tile.id) myPips += h.left + h.right; }
+                ss += myPips <= 6 ? 20 : -25;
+              }
+            }
+          }
 
           // Near-close: 2 tiles → check if last tile can play
           if (hand.length === 2) {
@@ -5623,8 +5648,19 @@
             if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) {
               ss += 60;
             } else {
-              ss -= 20;
+              ss -= 30;
             }
+          }
+
+          // 3-tile closing check: can both remaining tiles play?
+          if (hand.length === 3) {
+            let coverCount = 0;
+            for (const h of hand) {
+              if (h.id === tile.id) continue;
+              if (h.left === newEnd || h.right === newEnd || h.left === otherEnd || h.right === otherEnd) coverCount++;
+            }
+            if (coverCount === 2) ss += 20;
+            else if (coverCount === 0) ss -= 15;
           }
 
           if (ss > bestScore) { bestScore = ss; bestTile = tile; bestSide = side; }
@@ -6599,8 +6635,8 @@
     }
 
     function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
-      const MAX_ITERATIONS = 400;
-      const TIME_LIMIT = 200; // ms (increased for stronger play)
+      const MAX_ITERATIONS = 600;
+      const TIME_LIMIT = 300; // ms
       const MAX_NODES = 5000;
       const myTeam = player % 2;
       const useME = true; // Always use match equity for optimal play
@@ -6815,7 +6851,7 @@
     let coachMCTimer = null;      // setTimeout handle for async MC batches
     let coachMCRunning = false;   // true while MC eval is in progress
     const COACH_MC_SIMS = 500;    // rollouts per tile option
-    const MC_SIMS_PLAY_EXPERT = 500; // MC rollouts for Expert AI decisions
+    const MC_SIMS_PLAY_EXPERT = 800; // MC rollouts for Expert AI decisions
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
@@ -11703,6 +11739,246 @@
       return { winnerTeam: -1, points: 0, type: 'tie' };
     };
     window.AI_WEIGHTS = AI_WEIGHTS;
+
+    // ========== CMA-ES Weight Optimizer ==========
+    // Usage: optimizeWeights(30, 16, 150) — 30 generations, pop 16, 150 games/eval
+    // Uses adversarial evaluation: candidate weights vs champion weights head-to-head
+
+    // Box-Muller normal random
+    let _cmaSpare = null;
+    function _cmaRandn() {
+      if (_cmaSpare !== null) { const v = _cmaSpare; _cmaSpare = null; return v; }
+      let u, v, s;
+      do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u * u + v * v; } while (s >= 1 || s === 0);
+      s = Math.sqrt(-2 * Math.log(s) / s);
+      _cmaSpare = v * s;
+      return u * s;
+    }
+
+    // Minimal diagonal CMA-ES (Hansen 2016)
+    function _cmaesCreate(dim, x0, sigma0, popSize) {
+      const mu = Math.floor(popSize / 2);
+      const rawW = [];
+      for (let i = 0; i < mu; i++) rawW.push(Math.log(mu + 0.5) - Math.log(i + 1));
+      const wSum = rawW.reduce((s, w) => s + w, 0);
+      const weights = rawW.map(w => w / wSum);
+      const mueff = 1 / weights.reduce((s, w) => s + w * w, 0);
+      const cs = (mueff + 2) / (dim + mueff + 5);
+      const ds = 1 + 2 * Math.max(0, Math.sqrt((mueff - 1) / (dim + 1)) - 1) + cs;
+      const chiN = Math.sqrt(dim) * (1 - 1 / (4 * dim) + 1 / (21 * dim * dim));
+      const cc = (4 + mueff / dim) / (dim + 4 + 2 * mueff / dim);
+      const c1 = 2 / ((dim + 1.3) ** 2 + mueff);
+      const cmu = Math.min(1 - c1, 2 * (mueff - 2 + 1 / mueff) / ((dim + 2) ** 2 + mueff));
+      const mean = [...x0];
+      let sigma = sigma0;
+      const pc = new Float64Array(dim), ps = new Float64Array(dim);
+      const C = new Float64Array(dim).fill(1.0);
+
+      return {
+        dim, popSize, mu, weights, mean, sigma, pc, ps, C,
+        cs, ds, chiN, cc, c1, cmu, mueff,
+        ask() {
+          const cands = [];
+          for (let i = 0; i < this.popSize; i++) {
+            const x = new Float64Array(this.dim);
+            for (let j = 0; j < this.dim; j++)
+              x[j] = this.mean[j] + this.sigma * Math.sqrt(this.C[j]) * _cmaRandn();
+            cands.push(x);
+          }
+          return cands;
+        },
+        tell(candidates, fitnesses) {
+          const idx = fitnesses.map((_, i) => i).sort((a, b) => fitnesses[b] - fitnesses[a]);
+          const oldMean = [...this.mean];
+          for (let j = 0; j < this.dim; j++) {
+            this.mean[j] = 0;
+            for (let i = 0; i < this.mu; i++) this.mean[j] += this.weights[i] * candidates[idx[i]][j];
+          }
+          const md = this.mean.map((m, j) => (m - oldMean[j]) / this.sigma);
+          const sqC = this.C.map(c => 1 / Math.sqrt(c + 1e-20));
+          for (let j = 0; j < this.dim; j++) {
+            this.ps[j] = (1 - this.cs) * this.ps[j] + Math.sqrt(this.cs * (2 - this.cs) * this.mueff) * sqC[j] * md[j];
+            this.pc[j] = (1 - this.cc) * this.pc[j] + Math.sqrt(this.cc * (2 - this.cc) * this.mueff) * md[j];
+          }
+          for (let j = 0; j < this.dim; j++) {
+            let r1 = this.c1 * this.pc[j] * this.pc[j], rmu = 0;
+            for (let i = 0; i < this.mu; i++) {
+              const d = (candidates[idx[i]][j] - oldMean[j]) / this.sigma;
+              rmu += this.weights[i] * d * d;
+            }
+            this.C[j] = (1 - this.c1 - this.cmu) * this.C[j] + r1 + this.cmu * rmu;
+            this.C[j] = Math.max(this.C[j], 1e-10);
+          }
+          const psN = Math.sqrt(this.ps.reduce((s, v) => s + v * v, 0));
+          this.sigma *= Math.exp((this.cs / this.ds) * (psN / this.chiN - 1));
+          this.sigma = Math.max(this.sigma, 0.01);
+        }
+      };
+    }
+
+    const _CMA_PARAM_KEYS = [
+      'deadEndPenalty', 'lockFavorable', 'lockUnfavorable',
+      'chicoteSelf', 'chicotePartner', 'chicoteOpponent', 'chicoteDorme',
+      'lockApproachGood', 'lockApproachBad',
+      'monopolyBonus', 'boardCountGradient', 'captiveEndBonus', 'probDeadPenalty'
+    ];
+    const _CMA_BOUNDS = {
+      deadEndPenalty: [10, 70], lockFavorable: [15, 80], lockUnfavorable: [20, 100],
+      chicoteSelf: [10, 50], chicotePartner: [5, 35], chicoteOpponent: [10, 50],
+      chicoteDorme: [3, 25], lockApproachGood: [5, 45], lockApproachBad: [5, 40],
+      monopolyBonus: [8, 45], boardCountGradient: [2, 15], captiveEndBonus: [8, 45],
+      probDeadPenalty: [10, 50]
+    };
+
+    // Adversarial headless game: team 0 uses weightsA, team 1 uses weightsB
+    function _headlessAdversarial(seed, weightsA, weightsB) {
+      const rng = new SplitMix64(seed);
+      const deck = [...ALL_TILES];
+      rng.shuffle(deck);
+      const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+      let hp = -1, ht = null, hd = -1;
+      for (let p = 0; p < 4; p++)
+        for (const t of hands[p])
+          if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+      if (!ht) return { winnerTeam: -1, points: 0 };
+      hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+      let lE = ht.left, rE = ht.right, bLen = 1;
+      const knowledge = new Knowledge();
+      knowledge.recordPlay(hp, ht);
+      let cur = (hp + 1) % 4, passCount = 0;
+
+      function applyWeights(vec) {
+        for (let i = 0; i < _CMA_PARAM_KEYS.length; i++) {
+          AI_WEIGHTS[_CMA_PARAM_KEYS[i]] = vec[i];
+        }
+      }
+
+      for (let move = 0; move < 200; move++) {
+        // Apply the appropriate weights for this player's team
+        applyWeights(cur % 2 === 0 ? weightsA : weightsB);
+        const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+        const decision = allOpts.length > 0 ? allOpts[0] : null;
+        if (decision) {
+          passCount = 0;
+          const { tile, side: prefSide } = decision;
+          let side = prefSide;
+          if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+          hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+          knowledge.recordPlay(cur, tile);
+          const pL = lE, pR = rE;
+          if (bLen === 0) { lE = tile.left; rE = tile.right; }
+          else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+          else { rE = tile.right === rE ? tile.left : tile.right; }
+          bLen++;
+          if (hands[cur].length === 0) {
+            const w = scoreWin(tile, pL, pR, bLen);
+            return { winnerTeam: cur % 2, points: w.pts };
+          }
+          cur = (cur + 1) % 4;
+        } else {
+          passCount++;
+          knowledge.recordPass(cur, lE, rE);
+          if (passCount >= 4) {
+            const b = resolveBlock(hands);
+            return { winnerTeam: b.type === 'tie' ? -1 : b.team, points: b.points };
+          }
+          cur = (cur + 1) % 4;
+        }
+      }
+      return { winnerTeam: -1, points: 0 };
+    }
+
+    window.optimizeWeights = async function(generations = 30, popSize = 16, gamesPerEval = 150) {
+      const dim = _CMA_PARAM_KEYS.length;
+      const champion = _CMA_PARAM_KEYS.map(k => AI_WEIGHTS[k]);
+      const savedWeights = [...champion];
+
+      console.log('%cCMA-ES Weight Optimizer', 'font-weight:bold; font-size:14px');
+      console.log(`Population: ${popSize} | Games/eval: ${gamesPerEval} | Generations: ${generations}`);
+      console.log(`Optimizing ${dim} parameters`);
+
+      const optimizer = _cmaesCreate(dim, champion, 5.0, popSize);
+      let globalBest = [...champion], globalBestFit = -Infinity;
+      let staleCount = 0;
+      const t0 = performance.now();
+
+      for (let gen = 0; gen < generations; gen++) {
+        const candidates = optimizer.ask();
+        const fitnesses = [];
+
+        for (let ci = 0; ci < candidates.length; ci++) {
+          // Clamp to bounds
+          for (let j = 0; j < dim; j++) {
+            const [lo, hi] = _CMA_BOUNDS[_CMA_PARAM_KEYS[j]];
+            candidates[ci][j] = Math.max(lo, Math.min(hi, candidates[ci][j]));
+          }
+
+          // Adversarial evaluation: candidate as team0, then as team1
+          const vec = Array.from(candidates[ci]);
+          let netScore = 0;
+          const half = Math.floor(gamesPerEval / 2);
+          for (let g = 0; g < half; g++) {
+            const seed = (gen * popSize * gamesPerEval + ci * gamesPerEval + g) >>> 0;
+            // Candidate = team 0
+            const r1 = _headlessAdversarial(seed, vec, champion);
+            if (r1.winnerTeam === 0) netScore += r1.points;
+            else if (r1.winnerTeam === 1) netScore -= r1.points;
+            // Candidate = team 1 (swap)
+            const r2 = _headlessAdversarial(seed + 0x80000000, champion, vec);
+            if (r2.winnerTeam === 1) netScore += r2.points;
+            else if (r2.winnerTeam === 0) netScore -= r2.points;
+          }
+          fitnesses.push(netScore / gamesPerEval);
+
+          // Yield to UI every 4 candidates
+          if (ci % 4 === 3) await new Promise(r => setTimeout(r, 0));
+        }
+
+        optimizer.tell(candidates, fitnesses);
+
+        const bestIdx = fitnesses.indexOf(Math.max(...fitnesses));
+        const genBest = fitnesses[bestIdx];
+        const avg = (fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length).toFixed(3);
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+        if (genBest > globalBestFit) {
+          globalBestFit = genBest;
+          globalBest = Array.from(candidates[bestIdx]);
+          staleCount = 0;
+        } else {
+          staleCount++;
+        }
+
+        console.log(`Gen ${String(gen + 1).padStart(3)} | Best: ${genBest.toFixed(3)} | Avg: ${avg} | σ: ${optimizer.sigma.toFixed(2)} | Global: ${globalBestFit.toFixed(3)} | ${elapsed}s`);
+
+        // Convergence: step size collapsed or stale for 5 gens
+        if (optimizer.sigma < 0.5 || staleCount >= 5) {
+          console.log(`Converged (${optimizer.sigma < 0.5 ? 'σ collapsed' : 'stale 5 gens'})`);
+          break;
+        }
+      }
+
+      // Restore original weights
+      for (let i = 0; i < dim; i++) AI_WEIGHTS[_CMA_PARAM_KEYS[i]] = savedWeights[i];
+
+      // Print results
+      console.log('\n%cResults:', 'font-weight:bold; font-size:13px');
+      console.table(_CMA_PARAM_KEYS.reduce((obj, k, i) => {
+        obj[k] = { Default: savedWeights[i], Optimized: Math.round(globalBest[i] * 10) / 10,
+          Change: ((globalBest[i] - savedWeights[i]) / Math.max(Math.abs(savedWeights[i]), 1) * 100).toFixed(0) + '%' };
+        return obj;
+      }, {}));
+
+      console.log('\n%c// Paste into AI_WEIGHTS:', 'color: #22c55e');
+      const lines = _CMA_PARAM_KEYS.map((k, i) =>
+        `  ${k}: ${Math.round(globalBest[i] * 10) / 10}`
+      ).join(',\n');
+      console.log(`const AI_WEIGHTS = {\n${lines}\n};`);
+
+      const totalTime = ((performance.now() - t0) / 1000).toFixed(1);
+      console.log(`\nTotal: ${totalTime}s | Global best fitness: ${globalBestFit.toFixed(4)}`);
+      return { best: globalBest, fitness: globalBestFit, keys: _CMA_PARAM_KEYS };
+    };
   </script>
 </body>
 </html>
