@@ -5689,7 +5689,7 @@
     // and solve each with minimax + alpha-beta for near-exact play.
     // Replaces heuristic rollouts with mathematically optimal evaluation per determinization.
 
-    const ENDGAME_THRESHOLD = 16;     // trigger when total hand tiles ≤ this (bitmask solver + move ordering + PVS)
+    const ENDGAME_THRESHOLD = 16;     // trigger when total hand tiles ≤ this (bitmask solver + move ordering)
     const ENDGAME_BUDGET_MS = 500;    // hard time limit (graceful timeout — falls through to MC if exceeded)
     const ENDGAME_SAMPLE_COUNT = 300; // deals to sample and solve
 
@@ -6005,24 +6005,7 @@
           mh ^= _ZOBRIST.le[newLE]; mh ^= _ZOBRIST.re[newRE];
           mh ^= _ZOBRIST.np[newNext]; mh ^= _ZOBRIST.pc[0];
 
-          // PVS: after first move, search with null window first
-          if (mi === 0) {
-            val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
-          } else {
-            // Null-window probe
-            if (isMax) {
-              val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, alpha + 0.0001, deadline, tt, mh);
-              if (val > alpha && val < beta) {
-                // Re-search with full window
-                val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
-              }
-            } else {
-              val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, beta - 0.0001, beta, deadline, tt, mh);
-              if (val < beta && val > alpha) {
-                val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
-              }
-            }
-          }
+          val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
         }
 
         handBits[nextPlayer] ^= bit;
