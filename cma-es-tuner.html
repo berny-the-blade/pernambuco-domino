@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CMA-ES Weight Tuner — Pernambuco Domino AI</title>
+<style>
+  body { font-family: 'Consolas', 'Monaco', monospace; background: #0f172a; color: #e2e8f0; padding: 20px; }
+  h1 { color: #38bdf8; font-size: 18px; }
+  #log { white-space: pre-wrap; font-size: 13px; line-height: 1.5; max-height: 80vh; overflow-y: auto; }
+  .header { color: #22c55e; font-weight: bold; }
+  .best { color: #facc15; }
+  .dim { color: #64748b; }
+  button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; margin: 4px; }
+  button:hover { background: #1d4ed8; }
+  button:disabled { background: #475569; cursor: not-allowed; }
+  #status { color: #94a3b8; margin: 8px 0; }
+  table { border-collapse: collapse; margin: 10px 0; }
+  td, th { padding: 4px 12px; text-align: right; border: 1px solid #334155; }
+  th { color: #38bdf8; background: #1e293b; }
+</style>
+</head>
+<body>
+<h1>CMA-ES Weight Tuner for Pernambuco Domino AI</h1>
+<div>
+  <button id="btnStart" onclick="startCMAES()">Start Optimization</button>
+  <button id="btnStop" onclick="stopCMAES()" disabled>Stop</button>
+  <label style="margin-left:16px; color:#94a3b8">
+    Games per eval: <input id="gamesPerEval" type="number" value="200" min="50" max="2000" step="50" style="width:60px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; padding:2px 4px">
+  </label>
+  <label style="margin-left:12px; color:#94a3b8">
+    Generations: <input id="maxGens" type="number" value="40" min="5" max="200" step="5" style="width:50px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; padding:2px 4px">
+  </label>
+  <label style="margin-left:12px; color:#94a3b8">
+    Population: <input id="popSize" type="number" value="20" min="8" max="60" step="2" style="width:50px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; padding:2px 4px">
+  </label>
+</div>
+<div id="status">Load simulator.html in iframe...</div>
+<div id="log"></div>
+
+<!-- Hidden iframe loads the real game engine -->
+<iframe id="engine" src="simulator.html" style="display:none"></iframe>
+
+<script>
+'use strict';
+
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+let running = false;
+let engine = null; // iframe's contentWindow
+
+function log(msg, cls) {
+  const span = document.createElement('span');
+  span.textContent = msg + '\n';
+  if (cls) span.className = cls;
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// Wait for engine to load
+document.getElementById('engine').onload = () => {
+  engine = document.getElementById('engine').contentWindow;
+  if (engine.AI_WEIGHTS && engine.headlessGame) {
+    statusEl.textContent = 'Engine loaded. Ready to optimize.';
+    log('Engine loaded successfully. AI_WEIGHTS detected:', 'header');
+    const w = engine.AI_WEIGHTS;
+    for (const [k, v] of Object.entries(w)) {
+      log(`  ${k}: ${v}`, 'dim');
+    }
+    log('');
+  } else {
+    statusEl.textContent = 'ERROR: Engine missing AI_WEIGHTS or headlessGame exports.';
+    log('ERROR: simulator.html did not expose AI_WEIGHTS or headlessGame.', 'best');
+  }
+};
+
+// ========== CMA-ES CORE ==========
+// Minimal CMA-ES (μ/μ_w, λ)-CMA-ES following Hansen (2016)
+
+function cmaes(dim, x0, sigma0, popSize) {
+  const mu = Math.floor(popSize / 2); // parent count
+  // Log weights
+  const rawWeights = [];
+  for (let i = 0; i < mu; i++) rawWeights.push(Math.log(mu + 0.5) - Math.log(i + 1));
+  const wSum = rawWeights.reduce((s, w) => s + w, 0);
+  const weights = rawWeights.map(w => w / wSum);
+  const mueff = 1 / weights.reduce((s, w) => s + w * w, 0);
+
+  // Step size adaptation
+  const cs = (mueff + 2) / (dim + mueff + 5);
+  const ds = 1 + 2 * Math.max(0, Math.sqrt((mueff - 1) / (dim + 1)) - 1) + cs;
+  const chiN = Math.sqrt(dim) * (1 - 1 / (4 * dim) + 1 / (21 * dim * dim));
+
+  // Covariance adaptation
+  const cc = (4 + mueff / dim) / (dim + 4 + 2 * mueff / dim);
+  const c1 = 2 / ((dim + 1.3) * (dim + 1.3) + mueff);
+  const cmu = Math.min(1 - c1, 2 * (mueff - 2 + 1 / mueff) / ((dim + 2) * (dim + 2) + mueff));
+
+  // State
+  const mean = [...x0];
+  let sigma = sigma0;
+  const pc = new Float64Array(dim); // evolution path for C
+  const ps = new Float64Array(dim); // evolution path for sigma
+  // Diagonal covariance (simplified: no full matrix for efficiency)
+  const C = new Float64Array(dim).fill(1.0);
+
+  return {
+    dim, popSize, mu, weights, mean, sigma, pc, ps, C,
+    cs, ds, chiN, cc, c1, cmu, mueff,
+    gen: 0,
+
+    ask() {
+      // Generate popSize candidate solutions
+      const candidates = [];
+      for (let i = 0; i < this.popSize; i++) {
+        const x = new Float64Array(this.dim);
+        for (let j = 0; j < this.dim; j++) {
+          x[j] = this.mean[j] + this.sigma * Math.sqrt(this.C[j]) * randn();
+        }
+        candidates.push(x);
+      }
+      return candidates;
+    },
+
+    tell(candidates, fitnesses) {
+      // Sort by fitness (higher = better) → descending
+      const indices = fitnesses.map((f, i) => i);
+      indices.sort((a, b) => fitnesses[b] - fitnesses[a]);
+
+      // Compute weighted mean of top-mu candidates
+      const oldMean = [...this.mean];
+      for (let j = 0; j < this.dim; j++) {
+        this.mean[j] = 0;
+        for (let i = 0; i < this.mu; i++) {
+          this.mean[j] += this.weights[i] * candidates[indices[i]][j];
+        }
+      }
+
+      // Update evolution paths
+      const meanDiff = this.mean.map((m, j) => (m - oldMean[j]) / this.sigma);
+      const sqrtC = this.C.map(c => 1 / Math.sqrt(c + 1e-20));
+
+      for (let j = 0; j < this.dim; j++) {
+        this.ps[j] = (1 - this.cs) * this.ps[j] + Math.sqrt(this.cs * (2 - this.cs) * this.mueff) * sqrtC[j] * meanDiff[j];
+        this.pc[j] = (1 - this.cc) * this.pc[j] + Math.sqrt(this.cc * (2 - this.cc) * this.mueff) * meanDiff[j];
+      }
+
+      // Update diagonal covariance
+      for (let j = 0; j < this.dim; j++) {
+        let rankOneTerm = this.c1 * this.pc[j] * this.pc[j];
+        let rankMuTerm = 0;
+        for (let i = 0; i < this.mu; i++) {
+          const diff = (candidates[indices[i]][j] - oldMean[j]) / this.sigma;
+          rankMuTerm += this.weights[i] * diff * diff;
+        }
+        this.C[j] = (1 - this.c1 - this.cmu) * this.C[j] + rankOneTerm + this.cmu * rankMuTerm;
+        this.C[j] = Math.max(this.C[j], 1e-10); // prevent degeneration
+      }
+
+      // Update step size
+      const psNorm = Math.sqrt(this.ps.reduce((s, v) => s + v * v, 0));
+      this.sigma *= Math.exp((this.cs / this.ds) * (psNorm / this.chiN - 1));
+      this.sigma = Math.max(this.sigma, 0.01); // floor
+
+      this.gen++;
+    }
+  };
+}
+
+// Box-Muller normal
+let _spare = null;
+function randn() {
+  if (_spare !== null) { const v = _spare; _spare = null; return v; }
+  let u, v, s;
+  do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u * u + v * v; } while (s >= 1 || s === 0);
+  s = Math.sqrt(-2 * Math.log(s) / s);
+  _spare = v * s;
+  return u * s;
+}
+
+// ========== EVALUATION ==========
+
+// Weight parameter names (must match AI_WEIGHTS keys in simulator.html)
+const PARAM_KEYS = [
+  'deadEndPenalty', 'lockFavorable', 'lockUnfavorable',
+  'chicoteSelf', 'chicotePartner', 'chicoteOpponent', 'chicoteDorme',
+  'lockApproachGood', 'lockApproachBad',
+  'monopolyBonus', 'boardCountGradient', 'captiveEndBonus', 'probDeadPenalty'
+];
+
+const PARAM_BOUNDS = {
+  deadEndPenalty:    [10, 70],
+  lockFavorable:     [15, 80],
+  lockUnfavorable:   [20, 100],
+  chicoteSelf:       [10, 50],
+  chicotePartner:    [5, 35],
+  chicoteOpponent:   [10, 50],
+  chicoteDorme:      [3, 25],
+  lockApproachGood:  [5, 45],
+  lockApproachBad:   [5, 40],
+  monopolyBonus:     [8, 45],
+  boardCountGradient:[2, 15],
+  captiveEndBonus:   [8, 45],
+  probDeadPenalty:   [10, 50],
+};
+
+function getDefaults() {
+  return PARAM_KEYS.map(k => engine.AI_WEIGHTS[k]);
+}
+
+function setWeights(vec) {
+  for (let i = 0; i < PARAM_KEYS.length; i++) {
+    const k = PARAM_KEYS[i];
+    const [lo, hi] = PARAM_BOUNDS[k];
+    engine.AI_WEIGHTS[k] = Math.max(lo, Math.min(hi, vec[i]));
+  }
+}
+
+function restoreDefaults(defaults) {
+  for (let i = 0; i < PARAM_KEYS.length; i++) {
+    engine.AI_WEIGHTS[PARAM_KEYS[i]] = defaults[i];
+  }
+}
+
+// Evaluate a weight vector via duplicate dominoes (same seeds, swapped teams)
+// Returns win-rate advantage over default weights
+function evaluateCandidate(vec, defaults, numGames) {
+  let candidateScore = 0, defaultScore = 0;
+  const seeds = [];
+  for (let i = 0; i < numGames; i++) seeds.push(Math.floor(Math.random() * 0xFFFFFFFF));
+
+  // Play with candidate weights
+  setWeights(vec);
+  for (const seed of seeds) {
+    const r = engine.headlessGame(seed);
+    if (r.winnerTeam === 0) candidateScore += r.points;
+    else if (r.winnerTeam === 1) defaultScore += r.points; // opponent team
+  }
+
+  // Play again with same seeds — candidate is now on Team 1
+  // To simulate this, we can't easily swap teams in the current engine,
+  // so we compare against default weights playing the same seeds
+  restoreDefaults(defaults);
+  let baselineTeam0 = 0, baselineTeam1 = 0;
+  for (const seed of seeds) {
+    const r = engine.headlessGame(seed);
+    if (r.winnerTeam === 0) baselineTeam0 += r.points;
+    else if (r.winnerTeam === 1) baselineTeam1 += r.points;
+  }
+
+  // Fitness = candidate's Team0 score improvement over baseline's Team0 score
+  const candidateNet = candidateScore - defaultScore;
+  const baselineNet = baselineTeam0 - baselineTeam1;
+  return (candidateNet - baselineNet) / Math.max(numGames, 1);
+}
+
+// ========== MAIN LOOP ==========
+
+async function startCMAES() {
+  if (!engine || !engine.AI_WEIGHTS || !engine.headlessGame) {
+    log('ERROR: Engine not loaded yet.', 'best');
+    return;
+  }
+  if (running) return;
+  running = true;
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+
+  const gamesPerEval = parseInt(document.getElementById('gamesPerEval').value) || 200;
+  const maxGens = parseInt(document.getElementById('maxGens').value) || 40;
+  const popSize = parseInt(document.getElementById('popSize').value) || 20;
+  const dim = PARAM_KEYS.length;
+  const defaults = getDefaults();
+
+  log('=' .repeat(60), 'header');
+  log('  CMA-ES Weight Optimizer for Pernambuco Domino AI', 'header');
+  log(`  Population: ${popSize}, Games/eval: ${gamesPerEval}, Max generations: ${maxGens}`, 'header');
+  log(`  Optimizing ${dim} parameters`, 'header');
+  log('=' .repeat(60), 'header');
+  log('');
+
+  // Initialize CMA-ES from current defaults with 20% relative step size
+  const sigma0 = 5.0; // initial step size in weight-space units
+  const optimizer = cmaes(dim, defaults, sigma0, popSize);
+
+  let globalBest = [...defaults];
+  let globalBestFitness = -Infinity;
+  const t0 = performance.now();
+
+  for (let gen = 0; gen < maxGens && running; gen++) {
+    const candidates = optimizer.ask();
+    const fitnesses = [];
+
+    statusEl.textContent = `Generation ${gen + 1}/${maxGens} — evaluating ${popSize} candidates...`;
+
+    for (let i = 0; i < candidates.length && running; i++) {
+      // Clamp to bounds
+      for (let j = 0; j < dim; j++) {
+        const [lo, hi] = PARAM_BOUNDS[PARAM_KEYS[j]];
+        candidates[i][j] = Math.max(lo, Math.min(hi, candidates[i][j]));
+      }
+
+      const fitness = evaluateCandidate(Array.from(candidates[i]), defaults, gamesPerEval);
+      fitnesses.push(fitness);
+
+      // Yield to UI every 5 candidates
+      if (i % 5 === 4) await new Promise(r => setTimeout(r, 0));
+    }
+
+    if (!running) break;
+
+    optimizer.tell(candidates, fitnesses);
+
+    // Track best
+    const bestIdx = fitnesses.indexOf(Math.max(...fitnesses));
+    const genBestFitness = fitnesses[bestIdx];
+    const avgFitness = fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length;
+
+    if (genBestFitness > globalBestFitness) {
+      globalBestFitness = genBestFitness;
+      globalBest = Array.from(candidates[bestIdx]);
+    }
+
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    log(
+      `Gen ${String(gen + 1).padStart(3)} | ` +
+      `Best: ${genBestFitness.toFixed(3)} | ` +
+      `Avg: ${avgFitness.toFixed(3)} | ` +
+      `σ: ${optimizer.sigma.toFixed(2)} | ` +
+      `Global: ${globalBestFitness.toFixed(3)} | ` +
+      `${elapsed}s`,
+      genBestFitness > 0 ? 'best' : ''
+    );
+  }
+
+  // Restore defaults
+  restoreDefaults(defaults);
+
+  // Final validation
+  log('');
+  log('=' .repeat(60), 'header');
+  log('  FINAL RESULTS', 'header');
+  log('=' .repeat(60), 'header');
+  log('');
+
+  log('Parameter comparison:', 'header');
+  log('Parameter'.padEnd(22) + 'Default'.padStart(10) + 'Optimized'.padStart(12) + 'Change'.padStart(10));
+  log('-'.repeat(54));
+  for (let i = 0; i < dim; i++) {
+    const def = defaults[i];
+    const opt = Math.round(globalBest[i] * 10) / 10;
+    const pct = def !== 0 ? ((opt - def) / Math.abs(def) * 100).toFixed(0) : 'N/A';
+    log(
+      PARAM_KEYS[i].padEnd(22) +
+      String(def).padStart(10) +
+      String(opt).padStart(12) +
+      `${pct > 0 ? '+' : ''}${pct}%`.padStart(10),
+      Math.abs(opt - def) / Math.max(Math.abs(def), 1) > 0.15 ? 'best' : ''
+    );
+  }
+
+  log('');
+  log('// Paste into simulator.html AI_WEIGHTS:', 'header');
+  log('const AI_WEIGHTS = {');
+  for (let i = 0; i < dim; i++) {
+    const opt = Math.round(globalBest[i] * 10) / 10;
+    const comma = i < dim - 1 ? ',' : '';
+    log(`  ${PARAM_KEYS[i]}: ${opt}${comma}`);
+  }
+  log('};');
+
+  const totalTime = ((performance.now() - t0) / 1000).toFixed(1);
+  log(`\nTotal time: ${totalTime}s`, 'dim');
+  log(`Global best fitness: ${globalBestFitness.toFixed(4)}`, 'best');
+
+  statusEl.textContent = `Done. ${totalTime}s elapsed.`;
+  running = false;
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+}
+
+function stopCMAES() {
+  running = false;
+  statusEl.textContent = 'Stopping...';
+  document.getElementById('btnStop').disabled = true;
+}
+</script>
+</body>
+</html>

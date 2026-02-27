@@ -2876,6 +2876,16 @@
         if (elig.length === 1) return { tile: ct, holder: elig[0], confidence: 1 };
         return { tile: ct, holder: 'unknown', candidates: elig, confidence: 1 / elig.length };
       }
+      // Probabilistic dead number: all other players confirmed void on n
+      // Remaining n-tiles (if any) must be in dorme or myIdx's hand only
+      isProbablyDead(n, myIdx) {
+        if (this._remainingCount[n] === 0) return true; // absolutely dead
+        for (let p = 0; p < 4; p++) {
+          if (p === myIdx) continue;
+          if (!this.cantHave[p].has(n)) return false;
+        }
+        return true; // all others void → remaining n-tiles in dorme + myIdx only
+      }
     }
 
     // ========== OPPONENT STYLE MODELING ==========
@@ -2944,6 +2954,23 @@
       opponentStyles[2] = new OpponentStyle();
       opponentStyles[3] = new OpponentStyle();
     }
+
+    // Tunable AI weights — CMA-ES tuner modifies these via iframe.contentWindow.AI_WEIGHTS
+    const AI_WEIGHTS = {
+      deadEndPenalty: 35,       // penalty for creating a dead board end
+      lockFavorable: 40,        // bonus for deliberate favorable lock
+      lockUnfavorable: 60,      // penalty for unfavorable lock
+      chicoteSelf: 25,          // bonus when we hold the chicote
+      chicotePartner: 15,       // bonus when partner holds chicote
+      chicoteOpponent: 25,      // penalty when opponent holds chicote
+      chicoteDorme: 12,         // penalty when chicote in dorme
+      lockApproachGood: 20,     // bonus when approaching lock favors us
+      lockApproachBad: 15,      // penalty when approaching lock hurts us
+      monopolyBonus: 20,        // bonus for total monopoly on a suit
+      boardCountGradient: 6,    // per-opponent tile gradient
+      captiveEndBonus: 20,      // bonus for captive end (prob-dead favorable)
+      probDeadPenalty: 25,      // penalty for prob-dead unfavorable
+    };
 
     // Smart AI - returns all scored options (not just best)
     function smartAI(hand, lE, rE, bLen, player, knowledge, returnAll = false) {
@@ -3128,7 +3155,7 @@
           const totalUnknown = 28 - knowledge.played.size - hand.length;
           const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
           // Gradient: 0 opponents tiles = +12, 1 = +6, 2 = 0, 3 = -6, 4+ = -12
-          const boardCountScore = (2 - oppCouldHaveNew) * 6;
+          const boardCountScore = (2 - oppCouldHaveNew) * AI_WEIGHTS.boardCountGradient;
           ss += boardCountScore;
           if (oppCouldHaveNew <= 1) sr.push(`${newEnd}s nearly exhausted (${oppCouldHaveNew} out)`);
           else if (oppCouldHaveNew >= 4) sr.push(`${newEnd}s heavy — ${oppCouldHaveNew} still out for opponents`);
@@ -3142,7 +3169,7 @@
           const deadOther = remOtherAfterPlay === 0;
           if (deadNew && !deadOther) {
             // newEnd is dead — nobody can play there, board reduces to single active end
-            ss -= Math.round(35 * deadMul); sr.push(`Dead end — all ${newEnd}s played, board stalls`);
+            ss -= Math.round(AI_WEIGHTS.deadEndPenalty * deadMul); sr.push(`Dead end — all ${newEnd}s played, board stalls`);
           } else if (!deadNew && deadOther && newEnd !== otherEnd) {
             // otherEnd already dead but newEnd is alive — no penalty for this move
             // (dead other end is inherited, not caused by this move)
@@ -3165,9 +3192,9 @@
             const myTeamBest = Math.min(myPipsLock, estPartPips);
             const oppTeamBest = Math.min(Math.round(estOpp1T * avgPipLock), Math.round(estOpp2T * avgPipLock));
             if (myTeamBest <= oppTeamBest - 2) {
-              ss += Math.round(40 * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${estOppPips})`);
+              ss += Math.round(AI_WEIGHTS.lockFavorable * deadMul); sr.push(`Deliberate lock — we win on pips (${myPipsLock} vs ~${estOppPips})`);
             } else {
-              ss -= Math.round(60 * deadMul); sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
+              ss -= Math.round(AI_WEIGHTS.lockUnfavorable * deadMul); sr.push(`Both ends dead (${newEnd}, ${otherEnd}) — game locks, pips unfavorable`);
             }
           }
           // Chicote detection: after our play, exactly 1 tile with newEnd remains — who holds it?
@@ -3175,20 +3202,20 @@
             const chic = knowledge.chicoteFor(newEnd, hand);
             if (chic && chic.holder === 'self') {
               // WE hold the chicote — creating this end is POWERFUL
-              ss += Math.round(25 * deadMul); sr.push(`We hold chicote for ${newEnd} — can kill this end at will`);
+              ss += Math.round(AI_WEIGHTS.chicoteSelf * deadMul); sr.push(`We hold chicote for ${newEnd} — can kill this end at will`);
               // Extra: if opponents void on other end, lock threat
               if (knowledge.cantHave[opp1].has(otherEnd) || knowledge.cantHave[opp2].has(otherEnd)) {
                 ss += 12; sr.push(`Chicote + opponent void on ${otherEnd} — lock threat`);
               }
             } else if (chic && chic.holder === partner) {
               // Partner confirmed holds chicote — they control it
-              ss += Math.round(15 * deadMul); sr.push(`Partner holds chicote for ${newEnd} — they control the kill`);
+              ss += Math.round(AI_WEIGHTS.chicotePartner * deadMul); sr.push(`Partner holds chicote for ${newEnd} — they control the kill`);
             } else if (chic && typeof chic.holder === 'number' && chic.holder !== partner) {
               // Opponent confirmed holds chicote — avoid this end
-              ss -= Math.round(25 * deadMul); sr.push(`Opponent holds chicote for ${newEnd} — they'll kill it`);
+              ss -= Math.round(AI_WEIGHTS.chicoteOpponent * deadMul); sr.push(`Opponent holds chicote for ${newEnd} — they'll kill it`);
             } else if (chic && chic.holder === 'dorme') {
               // Chicote is in the removed tiles — end will die naturally
-              ss -= 12; sr.push(`Chicote for ${newEnd} is in dorme — end will die`);
+              ss -= AI_WEIGHTS.chicoteDorme; sr.push(`Chicote for ${newEnd} is in dorme — end will die`);
             } else if (chic && chic.holder === 'unknown') {
               // Uncertain — penalize proportional to opponent probability
               const oppCount = chic.candidates.filter(c => c !== partner && c !== player).length;
@@ -3197,6 +3224,20 @@
               sr.push(`Near-dead ${newEnd} — chicote ${Math.round(oppProb*100)}% with opponent`);
             } else {
               ss -= 12; sr.push(`Near-dead — only 1 tile with ${newEnd} remains (not ours)`);
+            }
+          }
+
+          // Probabilistic dead: all opponents void on this end (remaining tiles in dorme/our hand only)
+          if (!deadNew && remNewAfterPlay > 0 && knowledge.isProbablyDead(newEnd, player)) {
+            let myEndTiles = 0;
+            for (const h of hand) {
+              if (h.id === tile.id) continue;
+              if (h.left === newEnd || h.right === newEnd) myEndTiles++;
+            }
+            if (myEndTiles > 0) {
+              ss += Math.round(AI_WEIGHTS.captiveEndBonus * deadMul); sr.push(`Captive ${newEnd}-end — only we can play (${myEndTiles} in hand)`);
+            } else {
+              ss -= Math.round(AI_WEIGHTS.probDeadPenalty * deadMul); sr.push(`Prob-dead ${newEnd}-end — all tiles likely in dorme`);
             }
           }
 
@@ -3224,10 +3265,10 @@
             const oppTeamMin = Math.min(Math.round(estOpp1Tiles * avgPipPerTile), Math.round(estOpp2Tiles * avgPipPerTile));
             if (myTeamMin < oppTeamMin - 3) {
               // We'd likely win the block — locking is good
-              ss += 20; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${estOppPips}`);
+              ss += AI_WEIGHTS.lockApproachGood; sr.push(`Lock favors us — our pips ${myPips} vs opponents ~${estOppPips}`);
             } else if (myTeamMin > oppTeamMin + 5) {
               // We'd likely lose the block — avoid locking
-              ss -= 15; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${estOppPips}`);
+              ss -= AI_WEIGHTS.lockApproachBad; sr.push(`Lock hurts us — our pips ${myPips} vs opponents ~${estOppPips}`);
             }
           }
 
@@ -3258,7 +3299,7 @@
                 if (h.left === endN || h.right === endN) weHoldAll++;
               }
               if (weHoldAll === remEnd) {
-                const monoBonus = Math.round(20 * deadMul);
+                const monoBonus = Math.round(AI_WEIGHTS.monopolyBonus * deadMul);
                 ss += monoBonus; sr.push(`MONOPOLY on ${endN}s — hold ALL ${remEnd} remaining`);
               }
             }
@@ -5107,6 +5148,32 @@
       return hands;
     }
 
+    // Gibbs sampling: generate diverse deals from a base deal via local tile swaps
+    // Starts from a known-valid deal, iteratively swaps tiles between two random players
+    // Only accepts swaps that maintain cantHave constraints → Markov chain over valid deals
+    function gibbsSampleDeal(baseDeal, knowledge, myIdx, rng, iterations = 50) {
+      const players = [0, 1, 2, 3].filter(p => p !== myIdx);
+      if (players.length < 2) return baseDeal;
+      const deal = [null, null, null, null];
+      for (let p = 0; p < 4; p++) {
+        deal[p] = p === myIdx ? baseDeal[p] : [...baseDeal[p]];
+      }
+      for (let iter = 0; iter < iterations; iter++) {
+        const a = players[rng.randomInt(players.length)];
+        const b = players[rng.randomInt(players.length)];
+        if (a === b || deal[a].length === 0 || deal[b].length === 0) continue;
+        const ia = rng.randomInt(deal[a].length);
+        const ib = rng.randomInt(deal[b].length);
+        const tA = deal[a][ia];
+        const tB = deal[b][ib];
+        // Validate swap respects cantHave constraints
+        if (!canPlayerHold(b, tA, knowledge) || !canPlayerHold(a, tB, knowledge)) continue;
+        deal[a][ia] = tB;
+        deal[b][ib] = tA;
+      }
+      return deal;
+    }
+
     // Importance weight for a hypothetical deal based on play-pattern plausibility
     // Combines: (a) suit-strength signal — players who played many N-tiles likely hold more
     //           (b) avoidance signal — if player avoided playing a number, reduce weight for holding it
@@ -5602,11 +5669,45 @@
     const ENDGAME_BUDGET_MS = 500;    // hard time limit
     const ENDGAME_SAMPLE_COUNT = 300; // deals to sample and solve
 
+    // Zobrist hashing for endgame transposition table
+    const _ZOBRIST = (() => {
+      const rng = new SplitMix64(0xDEADBEEF);
+      const tp = []; // [tileIdx][player] — 28 × 4
+      for (let t = 0; t < 28; t++) {
+        tp[t] = [];
+        for (let p = 0; p < 4; p++) tp[t][p] = rng.randomInt(0x7FFFFFFF);
+      }
+      const le = [], re = [];
+      for (let n = 0; n < 7; n++) {
+        le[n] = rng.randomInt(0x7FFFFFFF);
+        re[n] = rng.randomInt(0x7FFFFFFF);
+      }
+      const np = [];
+      for (let p = 0; p < 4; p++) np[p] = rng.randomInt(0x7FFFFFFF);
+      const pc = [];
+      for (let c = 0; c < 5; c++) pc[c] = rng.randomInt(0x7FFFFFFF);
+      return { tp, le, re, np, pc };
+    })();
+
+    function _endgameHash(hands, lE, rE, nextPlayer, passCount) {
+      let h = 0;
+      for (let p = 0; p < 4; p++) {
+        for (let i = 0; i < hands[p].length; i++) {
+          h ^= _ZOBRIST.tp[TILE_INDEX[hands[p][i].id]][p];
+        }
+      }
+      if (lE >= 0 && lE <= 6) h ^= _ZOBRIST.le[lE];
+      if (rE >= 0 && rE <= 6) h ^= _ZOBRIST.re[rE];
+      h ^= _ZOBRIST.np[nextPlayer];
+      h ^= _ZOBRIST.pc[Math.min(passCount, 4)];
+      return h;
+    }
+
     // Minimax with alpha-beta pruning for partnership domino (perfect info per deal)
     // Team 0 (P0+P2) maximizes, Team 1 (P1+P3) minimizes
     // Uses in-place mutation with undo for zero-allocation recursion
     // Returns ME delta relative to myTeam
-    function _endgameMinimax(hands, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline) {
+    function _endgameMinimax(hands, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline, tt) {
       if (Date.now() > deadline) return 0;
 
       // Terminal: 4 consecutive passes → blocked game
@@ -5614,6 +5715,18 @@
         const block = resolveBlock(hands);
         return block.type === 'tie' ? 0 : _rolloutToMEReward(block.team, block.points, myTeam);
       }
+
+      // TT lookup
+      const hash = _endgameHash(hands, lE, rE, nextPlayer, passCount);
+      const ttEntry = tt.get(hash);
+      if (ttEntry) {
+        if (ttEntry.f === 0) return ttEntry.v; // EXACT
+        if (ttEntry.f === 1 && ttEntry.v >= beta) return ttEntry.v; // LOWER bound
+        if (ttEntry.f === 2 && ttEntry.v <= alpha) return ttEntry.v; // UPPER bound
+        if (ttEntry.f === 1 && ttEntry.v > alpha) alpha = ttEntry.v;
+        if (ttEntry.f === 2 && ttEntry.v < beta) beta = ttEntry.v;
+      }
+      const origAlpha = alpha;
 
       const hand = hands[nextPlayer];
       // Build playable list inline (avoid allocation when possible)
@@ -5624,7 +5737,9 @@
 
       // No legal moves → pass
       if (!hasPlayable) {
-        return _endgameMinimax(hands, lE, rE, bLen, (nextPlayer + 1) % 4, passCount + 1, myTeam, alpha, beta, deadline);
+        const val = _endgameMinimax(hands, lE, rE, bLen, (nextPlayer + 1) % 4, passCount + 1, myTeam, alpha, beta, deadline, tt);
+        tt.set(hash, { v: val, f: 0 }); // pass-through is exact
+        return val;
       }
 
       const isMax = (nextPlayer % 2) === myTeam;
@@ -5661,7 +5776,7 @@
             const w = scoreWin(tile, lE, rE, bLen + 1);
             val = _rolloutToMEReward(nextPlayer % 2, w.pts, myTeam);
           } else {
-            val = _endgameMinimax(hands, newLE, newRE, bLen + 1, (nextPlayer + 1) % 4, 0, myTeam, alpha, beta, deadline);
+            val = _endgameMinimax(hands, newLE, newRE, bLen + 1, (nextPlayer + 1) % 4, 0, myTeam, alpha, beta, deadline, tt);
           }
 
           // Undo: re-insert tile at original position
@@ -5678,6 +5793,13 @@
         }
         if (beta <= alpha) break;
       }
+
+      // Store in TT: determine bound type
+      let flag;
+      if (bestVal <= origAlpha) flag = 2; // UPPER bound (failed low)
+      else if (bestVal >= beta) flag = 1; // LOWER bound (failed high)
+      else flag = 0; // EXACT
+      tt.set(hash, { v: bestVal, f: flag });
 
       return bestVal;
     }
@@ -5698,12 +5820,20 @@
                   variance: 0, stdDev: 0, ci95: 0, cvar5: 0 }];
       }
 
-      // Sample consistent deals and compute importance weights
+      // Sample consistent deals: first 10 via full generation, rest via Gibbs from base
       const deals = [];
       const weights = [];
+      const rng = getRng();
+      let baseDeal = null;
       for (let i = 0; i < ENDGAME_SAMPLE_COUNT && Date.now() < deadline; i++) {
         try {
-          const deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+          let deal;
+          if (baseDeal && i >= 10) {
+            deal = gibbsSampleDeal(baseDeal, knowledge, player, rng, 30 + (i % 40));
+          } else {
+            deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+            if (!baseDeal) baseDeal = deal;
+          }
           deals.push(deal);
           weights.push(dealWeight(deal, knowledge));
         } catch(e) { /* skip failed samples */ }
@@ -5732,10 +5862,11 @@
         }
       }
 
-      // For each deal, solve all moves via minimax
+      // For each deal, solve all moves via minimax (TT shared across root moves per deal)
       for (let d = 0; d < deals.length && Date.now() < deadline; d++) {
         const deal = deals[d];
         const w = weights[d];
+        const tt = new Map(); // transposition table per deal
 
         for (let m = 0; m < moveEntries.length; m++) {
           if (Date.now() > deadline) break;
@@ -5765,7 +5896,7 @@
           }
 
           // Minimax solve from the next player's perspective
-          const val = _endgameMinimax(solveHands, newLE, newRE, bLen + 1, (player + 1) % 4, 0, myTeam, -Infinity, Infinity, deadline);
+          const val = _endgameMinimax(solveHands, newLE, newRE, bLen + 1, (player + 1) % 4, 0, myTeam, -Infinity, Infinity, deadline, tt);
           entry.totalME += w * val;
           entry.solvedWeight += w;
           entry.deals++;
@@ -11096,6 +11227,58 @@
 
       return { mcWins, heuristicWins, ties, mcWR, eloDiff, mcPPG, hPPG, elapsed };
     };
+
+    // Headless game for CMA-ES tuner: plays a full game using smartAI with current AI_WEIGHTS
+    // Returns {winnerTeam, points, type}. Deterministic given seed.
+    window.headlessGame = function(seed) {
+      const rng = new SplitMix64(seed);
+      const deck = [...ALL_TILES];
+      rng.shuffle(deck);
+      const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+      // Find highest double for opener
+      let hp = -1, ht = null, hd = -1;
+      for (let p = 0; p < 4; p++)
+        for (const t of hands[p])
+          if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+      if (!ht) return { winnerTeam: -1, points: 0, type: 'none' };
+      hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+      let lE = ht.left, rE = ht.right, bLen = 1;
+      const knowledge = new Knowledge();
+      knowledge.recordPlay(hp, ht);
+      let cur = (hp + 1) % 4, passCount = 0;
+      for (let move = 0; move < 200; move++) {
+        const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+        const decision = allOpts.length > 0 ? allOpts[0] : null;
+        if (decision) {
+          passCount = 0;
+          const { tile, side: prefSide } = decision;
+          let side = prefSide;
+          if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+          hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+          knowledge.recordPlay(cur, tile);
+          const pL = lE, pR = rE;
+          if (bLen === 0) { lE = tile.left; rE = tile.right; }
+          else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+          else { rE = tile.right === rE ? tile.left : tile.right; }
+          bLen++;
+          if (hands[cur].length === 0) {
+            const w = scoreWin(tile, pL, pR, bLen);
+            return { winnerTeam: cur % 2, points: w.pts, type: w.type.toLowerCase() };
+          }
+          cur = (cur + 1) % 4;
+        } else {
+          passCount++;
+          knowledge.recordPass(cur, lE, rE);
+          if (passCount >= 4) {
+            const b = resolveBlock(hands);
+            return { winnerTeam: b.type === 'tie' ? -1 : b.team, points: b.points, type: b.type };
+          }
+          cur = (cur + 1) % 4;
+        }
+      }
+      return { winnerTeam: -1, points: 0, type: 'tie' };
+    };
+    window.AI_WEIGHTS = AI_WEIGHTS;
   </script>
 </body>
 </html>
