@@ -389,3 +389,282 @@ Standalone Node.js script that extracts the core game engine and runs 1,000,000 
 | Hands visible in Study | All tiles face-up when Study tab active |
 | 1000 rollouts | Increased MC accuracy for Deep Study |
 | Deep heuristic explanations | Click-to-expand What/Math/Why for all 17 AI reasons |
+| Pro Analytics tab | OPP/PPP flow, trap radar, go-out threats |
+| BeliefModel & EntropyTracker | Probabilistic inference engine |
+| OpponentStyle profiling | EMA-based behavioral labels |
+| ISMCTS search | Information Set MCTS with UCB1 and progressive widening |
+| ME3D match equity table | 3D DP table with dobrada dimension |
+| Match equity in search | `_rolloutToMEReward` integrating ME into MC/ISMCTS |
+| 40 curated puzzles | 12 original + 28 audit positions across 8 categories |
+| LeakAggregator | Persistent weakness tracking across sessions |
+| Coach overlay | Real-time strategic narration during play |
+| Internationalization | Full EN/PT bilingual support (~221 keys) |
+
+---
+
+## Advanced AI Reference
+
+### `smartAI` — Complete Scoring Table
+
+**Signature**: `smartAI(hand, lE, rE, bLen, player, knowledge, returnAll = false)`
+
+Phase multiplier (`deadMul`): ≤4 tiles → 0.4, 5–14 → 1.0, >14 → 1.4.
+
+Opening (bLen=0): `sc[left]*10 + sc[right]*10 + (double?15:0) + pips*2`
+
+**All ~35 mid-game factors:**
+
+| Factor | Points | Condition |
+|--------|--------|-----------|
+| Suit control | `+myCount × 15` | Tiles matching new/other end |
+| Block opp1 (next) | `+35` | Both ends in opp1's void set |
+| Block opp2 | `+25` | Both ends in opp2's void set |
+| Opp1 blocker style | `+8` | opp1 blockingFocus > 0.6, void on newEnd |
+| Opp2 blocker style | `+5` | Same for opp2 |
+| Partner affinity | `+pAff × 8` | Partner played that suit |
+| Partner void newEnd | `−10` | Partner confirmed void |
+| Partner blocked both | `−20` | Partner void on both ends |
+| Partner good coverage | `+8` | Both ends have 3+ partner tiles |
+| Few partner tiles | `−8` | pTilesNew=0, partner not void |
+| Pip weight | `+round(pips × 2 × deadMul)` | Always |
+| Play double early | `+12` | Tile is a double |
+| Isolated double setup | `+20` | Creates end matching isolated double |
+| Board count gradient | `+(2−oppCouldHave) × 6` | +12 to −12 range |
+| Dead end penalty | `−round(35 × deadMul)` | Creates single dead end |
+| Deliberate lock win | `+round(40 × deadMul)` | Both dead, our pips ≤ opp−2 |
+| Both dead, bad pips | `−round(60 × deadMul)` | Both dead, pips unfavorable |
+| Chicote: we hold | `+round(25 × deadMul)` | Self holds last tile of number |
+| Chicote self+opp void | `+12` | Lock threat bonus |
+| Chicote: partner | `+round(15 × deadMul)` | Partner holds chicote |
+| Chicote: opponent | `−round(25 × deadMul)` | Opponent holds chicote |
+| Chicote: dorme | `−12` | Chicote in removed tiles |
+| Chicote: unknown | `−round(15 × oppProb)` | Proportional to opp probability |
+| Near-dead, not ours | `−12` | 1 remaining, we don't hold chicote |
+| Lock favors us | `+20` | Few tiles, bLen≥8, our pips < opp−3 |
+| Lock hurts us | `−15` | Same, our pips > opp+5 |
+| Suit exhaustion | `+8 + (3−rem)×5` | 1–3 remaining, we hold ≥ rem |
+| True monopoly | `+round(20 × deadMul)` | Hold ALL remaining of a number |
+| Near-monopoly | `+round((weHold/rem) × 12 × deadMul)` | Hold 2+ of last 3–4 |
+| Info hiding: exposed | `−8` | bLen 1–6, strongest suit exposed |
+| Info hiding: diversify | `+5` | Low suit count, different end |
+| Partner close sacrifice | `+25` | Partner 1 tile, their suit on newEnd |
+| Partner close suit | `+10/+15` | Partner 1–2 tiles, keep their suit |
+| Match point pips | `+round(pips × 1.5)` | Our score ≥ 5 |
+| Match point options | `+8` | Our score ≥ 5, suit count ≥ 2 |
+| Behind, play double | `+8` | Double, opp≥5, our<4 |
+| Point denial (normal) | `−8` | Feeds opp with 1 tile left |
+| Point denial (cruzada) | `−15` | Same + tile is double |
+| Go out | `+200 + pts×30` | Last tile played |
+| Near-close plays | `+80` | 1 tile left, can play |
+| Strands last tile | `−30` | 1 tile left, can't play |
+| 2 tiles: both play | `+25` | Both remaining match ends |
+| 2 tiles: neither | `−15` | Neither matches |
+| 2-ply: opp goes out | `−25` | Opp 1 tile can go out (≤3 hand, bLen≥10) |
+| 2-ply: opp 2 both play | `−10` | Opp 2 tiles both playable |
+
+### `fastAI` — Lightweight Rollout Policy
+
+Used by MC/ISMCTS rollouts. No chicote/lock/match awareness.
+
+| Factor | Points | Condition |
+|--------|--------|-----------|
+| Suit control | `+mc × 12` | Matching tiles |
+| Block opp1 | `+25` | Both ends voided |
+| Block opp2 | `+18` | Both ends voided |
+| Partner void | `−15` | Partner void both ends |
+| Pip weight | `+(left+right) × 2` | Always |
+| Double clearing | `+10` | Is double |
+| Near-close plays | `+60` | 2 tiles, last can play |
+| Near-close stranded | `−20` | 2 tiles, last can't |
+
+### `monteCarloEval` Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Default sims | 80 |
+| Batch size | 20 |
+| Min before early stop | 40 |
+| Early stopping | 90% CI: `diffMean > 1.65 × StdErr && > 0.05` |
+| Cache | LRUCache(300), BitSet hex keys |
+
+### `ismctsEval` Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Iterations | 300 |
+| Time limit | 150ms |
+| Max nodes | 5000 |
+| UCB1 C | 1.41 |
+| Widening | `children < ceil(sqrt(visits+1))` |
+
+### MC Simulation Counts by Context
+
+| Context | Sims |
+|---------|------|
+| Expert AI (Play) | 500 |
+| Coach overlay | 500 |
+| Deep Study | 1000 |
+| Pro Analytics | 50 |
+| Default MC | 80 |
+| Puzzle grading | 500 |
+| Watch MC:ON | 120 |
+| Quiz grading | 100 |
+| Analysis tab | 60 |
+| Endgame override | 30 |
+| Opening quiz | 40 |
+
+---
+
+## Knowledge & Belief Systems
+
+### `Knowledge` Class
+- `cantHave[p]`: Set of voided numbers (from passes)
+- `played`: Set of played tile IDs
+- `playsBy[p]`: tiles played by each player
+- `_remainingCount[7]`: O(1) tiles-per-number lookup
+- Methods: `recordPlay`, `recordPass`, `inferStrength(p)` (7-element array), `remainingWithNumber(n)`, `possibleTilesFor(p)`, `chicoteFor(n, hand)` → `{tile, holder, confidence}`
+
+### `BeliefModel` Class
+- `marginals[p]`: tileId → probability
+- `avoidanceCount[4][7]`: avoidance tracking
+- Methods: `recordPass`, `recordPlay`, `getTileMarginal`, `getNumberStrength`, `getEntropy` (Shannon), `updateMarginals(deals, weights)`, `syncFromKnowledge`
+
+### `OpponentStyle` Class (EMA α=0.3, P1+P3 only)
+5 metrics: `heavyDump`, `doubleSpeed`, `blockingFocus`, `suitLoyalty`, `aggressiveness`
+Labels: Heavy Dumper (>0.65), Blocker (>0.65), Aggressive (>0.65+doubles>0.55), Suit Player (>0.7)
+
+### `EntropyTracker`
+Records Shannon entropy snapshots. Methods: `infoGain(move)`, `totalInfoGain()`, `getTimeline()`
+
+### `LeakAggregator` (6 types)
+`BLOCKING_MISS`, `FEED_ERROR`, `DOUBLE_TIMING`, `DEAD_END`, `PIP_WASTE`, `PARTNER_IGNORE`
+Persisted in localStorage `domino-leak-stats`.
+
+---
+
+## Match Equity System
+
+### ME3D Table
+- Dimensions: 11×11×4 (score1 × score2 × dobrada level)
+- `POINT_DIST`: 1pt=70%, 2pt=16%, 3pt=10%, 4pt=4%
+- `TIE_PROB`: 3%
+- `DOB_VALUES`: [1, 2, 4, 8]
+- Fill: bottom-up DP, ties at max dobrada solved analytically
+
+### `_rolloutToMEReward(winnerTeam, points, myTeam)`
+Returns ME delta: `newME − currentME`. Positive = good for us.
+`useME` gate: active when `matchScore[0]>0 || matchScore[1]>0 || scoreMultiplier>1`.
+
+---
+
+## Data Structures
+
+- **`BitSet`**: Dual 32-bit unsigned ints. Methods: has/set/clear/or/and/xor/not/popcount/forEach/toString(hex)
+- **`ISMCTSNode`**: Tree node with UCB1(C=1.41), selectChild, expand, update
+- **`LRUCache`**: MC cache, 300 entries, evicts LRU on overflow
+- **`DeductionNotebook`**: Narrative analysis, avoidance patterns, certainty-tagged bullets
+
+---
+
+## Puzzle System Details
+
+### Format
+```
+{ id, title, difficulty, category, myHand, board,
+  otherHands: [P1,P2,P3], voids, passHistory,
+  correctTile, correctSide, explanation }
+```
+
+**Invariant**: myHand + board + otherHands + 4(dorme) = 28, no duplicates.
+
+### 40 Puzzles by Category
+| Category | Count | IDs |
+|----------|-------|-----|
+| blocking | 10 | block-01/02, audit-block-01–08 |
+| feeding | 7 | feed-01/02, audit-partner-01–05 |
+| doubles | 2 | double-01/02 |
+| endgame | 5 | end-01/02, audit-end-01–03 |
+| reading | 2 | read-01/02 |
+| tempo | 6 | tempo-01/02, audit-tempo-01–04 |
+| pip | 4 | audit-pip-01–04 |
+| suit-control | 4 | audit-suit-01–04 |
+
+### Auto-Generation
+- `extractPuzzleFromAnalysis`: creates from game position
+- `validatePuzzle`: tile accounting + eqLoss ≥ 0.15
+- `scanGameForPuzzles`: finds positions with eqLoss ≥ 0.30
+- localStorage max 20 FIFO, category `'generated'`
+
+---
+
+## Internationalization
+
+- Languages: Portuguese (pt, default) and English (en)
+- `TR` object: ~221 keys, each `{en, pt}`
+- `_t(key)` lookup, `_tr(reason)` for AI reason translation
+- Persisted in localStorage `pernambuco_lang`
+
+---
+
+## All localStorage Keys
+
+| Key | Contents |
+|-----|----------|
+| `pernambuco_lang` | UI language |
+| `domino-trainer-stats` | Quiz accuracy |
+| `domino_elo` | Elo rating |
+| `domino-game-history` | Last 100 games |
+| `domino-puzzle-completion` | Puzzle grades |
+| `domino-generated-puzzles` | Auto puzzles (max 20) |
+| `domino-opening-quiz-stats` | Opening quiz stats |
+| `domino-leak-stats` | Leak aggregator |
+| `pernambuco_coach` | Coach enabled |
+| `pernambuco_coach_collapsed` | Coach collapsed |
+
+---
+
+## Self-Play Benchmark
+
+### `window.runAIBenchmark(numGames)`
+Console function. Plays numGames×2 games: heuristic vs MC-expert (500 sims/move).
+Reports: win rates, Pts/Game, Elo diff = `400 × log10(mcWR / heuristicWR)`.
+
+### `selfPlayBatch(numGames)`
+Pure heuristic self-play. Returns: games, wins, avgPts, blockedPct.
+
+---
+
+## Elo System
+
+| Parameter | Value |
+|-----------|-------|
+| Starting | 1200 |
+| K-factor | 32 |
+| Perfect move opponent | 1600 |
+| Blunder opponent | 800 |
+
+---
+
+## Development Guide
+
+### Adding a Puzzle
+1. Add to `PUZZLES[]` before `];`
+2. Verify: myHand + board + otherHands + 4 = 28, no dupes
+3. Voids must match passHistory
+4. correctTile should have ≥ 0.15 EP gap
+
+### Tuning AI Weights
+- Search `ss +=` / `ss -=` in `smartAI`
+- Test: `runAIBenchmark(200)`, check 40 puzzles still pass
+
+### Adding a Leak Type
+1. Add to `LEAK_TYPES`
+2. Add detection in Analysis grading loop
+3. Call `leakAggregator.addLeak(type, severity)`
+
+### Key Gotchas
+- `tileHTML` takes **7 params** — missing any silently breaks
+- `lE`/`rE` not `leftEnd`/`rightEnd`
+- CSS `!important` needed for board tile borders
+- Play mode uses `liveLeftEnd`/`liveRightEnd`
+- `'3-1'` and `'1-3'` are the same tile — compare by ID
