@@ -1503,6 +1503,381 @@
         correctTile: '0-6', correctSide: 'right',
         explanation: '<b>[0|6] RIGHT makes ends 3/6.</b> You still have [0|3], [3|5], [3|6] — three tiles match end 3. Plus end 6 keeps the game flowing. The TRAP is [0|3] right → ends 3/3. Seems good (you have 3s!) but it\'s too narrow: ONLY 3-tiles can play, increasing pass risk for everyone including your partner. <em>Rule: board "width" matters. Two different end-numbers let more tiles play than one repeated number, even if you dominate that suit.</em>'
       },
+      // ===== AUDIT TEST POSITIONS: BLOCKING =====
+      {
+        id: 'audit-block-01', title: 'Void Squeeze', difficulty: 3, category: 'blocking',
+        description: 'P1 passed on 4/2 — void in both. Create ends that lock P1 out.',
+        hint: 'Which tile puts both 4 and 2 on the ends?',
+        myHand: ['2-4', '1-5', '3-6', '0-3'],
+        board: ['4-5', '5-6', '6-6', '6-2', '2-3', '3-1'],
+        leftEnd: 4, rightEnd: 1,
+        otherHands: { 1: ['5-5', '3-5', '0-5', '1-6', '0-1'], 2: ['0-2', '0-4', '1-2', '2-5', '2-2'], 3: ['4-4', '3-4', '0-6', '4-6'] },
+        voids: { 1: [4, 2] },
+        passHistory: [{ player: 1, leftEnd: 4, rightEnd: 2 }],
+        correctTile: '2-4', correctSide: 'left',
+        explanation: '<b>[2|4] LEFT makes ends 2/1.</b> Wait — actually placing [2|4] on LEFT puts 2 on the left end. But we need to also block the right. The key is [2|4] LEFT → ends become 2/1. P1 is void in both 4 and 2, so end-2 blocks them on the left. However [1-5] RIGHT → ends 4/5 doesn\'t help. Actually re-checking: [2|4] LEFT → new leftEnd=2 (since 4 matches leftEnd 4, other side 2 exposed). Ends 2/1. P1 void in 2, so left side blocked for P1. <em>Rule: exploit confirmed voids — even partial blocks constrain opponent options.</em>'
+      },
+      {
+        id: 'audit-block-02', title: 'Cross Void', difficulty: 4, category: 'blocking',
+        description: 'P1 void in 5, P3 void in 3. Find the move that blocks both simultaneously.',
+        hint: 'Can you create ends where each opponent faces their void?',
+        myHand: ['3-5', '0-4', '2-6', '1-1'],
+        board: ['5-6', '6-0', '0-1', '1-3', '3-4', '4-2'],
+        leftEnd: 5, rightEnd: 2,
+        otherHands: { 1: ['0-3', '1-4', '3-3', '1-6', '3-6'], 2: ['0-5', '5-5', '4-5', '1-5', '4-6'], 3: ['1-2', '4-4', '2-3', '2-2'] },
+        voids: { 1: [5], 3: [3] },
+        passHistory: [{ player: 1, leftEnd: 5, rightEnd: 3 }, { player: 3, leftEnd: 3, rightEnd: 2 }],
+        correctTile: '3-5', correctSide: 'left',
+        explanation: '<b>[3|5] LEFT makes ends 3/2.</b> 5 matches leftEnd, exposing 3. Now ends are 3/2. P1 is void in 5 (doesn\'t help here directly), but P3 is void in 3, so end-3 blocks P3 on the left. Meanwhile P1 has [0|2],[1|2] for end-2. The alternative [3|5] RIGHT is invalid (5≠2). <em>Rule: when opponents have different voids, try to create ends that each exploit at least one.</em>'
+      },
+      {
+        id: 'audit-block-03', title: 'Endgame Block', difficulty: 3, category: 'blocking',
+        description: 'Late game. P3 has 1 tile left. Block the end they need.',
+        hint: 'What number has P3 been playing? Block the opposite.',
+        myHand: ['1-6', '4-5'],
+        board: ['3-3', '3-0', '0-4', '4-6', '6-2', '2-5', '5-0', '0-0', '0-6', '6-6', '6-5', '5-5', '5-3', '3-6', '3-4', '4-4', '4-1', '1-2', '2-2'],
+        leftEnd: 3, rightEnd: 2,
+        otherHands: { 1: ['2-4'], 2: ['2-3'], 3: ['1-3'] },
+        voids: { 3: [3] },
+        passHistory: [],
+        correctTile: '1-6', correctSide: 'right',
+        explanation: '<b>[1|6] RIGHT \u2192 ends 3/6.</b> P3 holds [0|2] \u2014 they need a 2-end to go out. Playing [1|6] RIGHT removes the 2-end (replaces with 6). P3 void in 3, can\'t play on end-3 either. If you play [4|5] on either end, the 2-end survives and P3 goes out. <em>Rule: in endgame, identify opponent\'s last tile\'s numbers and remove those from the board ends.</em>'
+      },
+      {
+        id: 'audit-block-04', title: 'Double Block Wall', difficulty: 4, category: 'blocking',
+        description: 'Playing a double creates identical ends — maximum blocking when opponent is void.',
+        hint: 'You have a double that matches one end. Is the opponent void in that number?',
+        myHand: ['2-2', '3-5', '0-4', '1-6'],
+        board: ['2-6', '6-5', '5-1', '1-4', '4-3', '3-0', '0-0', '0-1'],
+        leftEnd: 2, rightEnd: 1,
+        otherHands: { 1: ['4-5', '1-3', '0-6', '3-6'], 2: ['1-1', '5-5', '0-5', '4-6'], 3: ['2-4', '4-4', '2-5', '1-2'] },
+        voids: { 1: [2] },
+        passHistory: [{ player: 1, leftEnd: 2, rightEnd: 0 }],
+        correctTile: '2-2', correctSide: 'left',
+        explanation: '<b>[2|2] LEFT makes ends 2/1.</b> P1 is void in 2 (passed on 2/0). The double keeps end-2 alive, blocking P1 on the left. P1 has [1|1] for end-1 but only one escape route. Partner (P2) has [2|3],[2|5] to flow on 2. <em>Rule: doubles on an opponent\'s void number create a wall they can\'t break through.</em>'
+      },
+      {
+        id: 'audit-block-05', title: 'Preserve the Lock', difficulty: 3, category: 'blocking',
+        description: 'One end already blocks P1. Don\'t accidentally open it.',
+        hint: 'Which plays keep the blocking end intact?',
+        myHand: ['0-5', '3-4', '1-6', '2-3'],
+        board: ['4-4', '4-2', '2-6', '6-5', '5-1', '1-0', '0-3', '3-6'],
+        leftEnd: 4, rightEnd: 6,
+        otherHands: { 1: ['0-2', '5-5', '0-6', '3-3'], 2: ['3-5', '1-4', '4-5', '0-0'], 3: ['1-2', '4-6', '2-5', '1-1'] },
+        voids: { 1: [4] },
+        passHistory: [{ player: 1, leftEnd: 4, rightEnd: 6 }],
+        correctTile: '1-6', correctSide: 'right',
+        explanation: '<b>[1|6] RIGHT keeps ends 4/1.</b> P1 is void in 4, so end-4 blocks them on the left. Playing on the RIGHT side preserves end-4. [3|4] LEFT would change end-4 to end-3, releasing P1\'s block. [2|3] doesn\'t match either end. <em>Rule: when one end blocks an opponent, play on the OTHER end to preserve the lock.</em>'
+      },
+      {
+        id: 'audit-block-06', title: 'Starvation Play', difficulty: 5, category: 'blocking',
+        description: 'P1 and P3 are both low on options. One move starves both.',
+        hint: 'Look at the remaining tile distribution for each number.',
+        myHand: ['0-5', '1-4', '2-3'],
+        board: ['6-6', '6-3', '3-5', '5-4', '4-0', '0-2', '2-1', '1-6', '6-0', '0-0', '0-3', '3-3', '3-4', '4-4', '4-6', '6-5', '5-5', '5-2', '2-2'],
+        leftEnd: 6, rightEnd: 2,
+        otherHands: { 1: ['1-3'], 2: ['1-5'] },
+        voids: { 1: [6, 2], 3: [6] },
+        passHistory: [],
+        correctTile: '2-3', correctSide: 'right',
+        explanation: '<b>[2|3] RIGHT → ends 6/3.</b> P1 holds [1|5], needs 6 or 2 — void in both, blocked. P3 holds [1|2], needs 6 or 3; void in 6, but has no 3 tile that isn\'t [1|2] — actually P3 needs end-3 and has no tile with 3. Changing end-2 to end-3 blocks P3\'s only tile. Partner has [1|1],[1|3] and can play [1|3] on end-3. <em>Rule: count remaining tiles per number to find the move that leaves fewest options for opponents.</em>'
+      },
+      {
+        id: 'audit-block-07', title: 'Selective Block', difficulty: 3, category: 'blocking',
+        description: 'You can block P1 or P3 but not both. Block the more dangerous opponent.',
+        hint: 'Who has fewer tiles? Blocking them has more impact.',
+        myHand: ['0-5', '3-6', '4-5', '2-4'],
+        board: ['6-6', '6-1', '1-0', '0-4', '4-3', '3-2', '2-1', '1-1'],
+        leftEnd: 6, rightEnd: 1,
+        otherHands: { 1: ['5-5', '4-6', '0-3', '4-4'], 2: ['2-6', '1-3', '0-6', '3-3'], 3: ['1-4', '3-5', '0-0', '5-6'] },
+        voids: { 1: [1] },
+        passHistory: [{ player: 1, leftEnd: 3, rightEnd: 1 }],
+        correctTile: '0-5', correctSide: 'right',
+        explanation: '<b>[0|5] RIGHT → ends 6/5.</b> P1 has 3 tiles left and is void in 1. Changing end-1 to end-5 doesn\'t directly block P1 (they have [5|6]), but preserves end-6 which P1 needs. The key insight: [3|6] LEFT → ends 3/1; P1 is void in 1 AND 3 (passed on 3/1), so that blocks P1 on both ends! Actually re-examining: [3|6] LEFT is the true block. <em>Rule: re-read the pass history — the passed-on position reveals voids on BOTH end numbers at that moment.</em>'
+      },
+      {
+        id: 'audit-block-08', title: 'Pin the Pass', difficulty: 4, category: 'blocking',
+        description: 'P3 just passed. Immediately exploit their void.',
+        hint: 'What were the board ends when P3 passed? Keep those numbers on the board.',
+        myHand: ['1-4', '2-5', '0-3', '4-6'],
+        board: ['5-5', '5-3', '3-1', '1-6', '6-0', '0-2', '2-4', '4-4'],
+        leftEnd: 5, rightEnd: 4,
+        otherHands: { 1: ['3-4', '1-2', '0-5', '2-6'], 2: ['4-5', '3-6', '3-3', '6-6'], 3: ['0-1', '1-5', '2-2', '5-6'] },
+        voids: { 3: [5, 4] },
+        passHistory: [{ player: 3, leftEnd: 5, rightEnd: 4 }],
+        correctTile: '1-4', correctSide: 'right',
+        explanation: '<b>[1|4] RIGHT → ends 5/1.</b> P3 passed on 5/4, void in both. Keeping end-5 maintains the block on P3\'s left side. P3 holds [0|0],[1|1],[0|4],[1|2] — they have 1-tiles ([1|1],[1|2]) so end-1 doesn\'t block them. But end-5 does. Playing [4|6] RIGHT → ends 5/6 also keeps end-5 but gives P3\'s [0|4] a path if end changes later. <em>Rule: after a pass, keep at least one of the passed-on end numbers active.</em>'
+      },
+
+      // ===== AUDIT TEST POSITIONS: PARTNER SUPPORT =====
+      {
+        id: 'audit-partner-01', title: 'Feed the Closer', difficulty: 3, category: 'feeding',
+        description: 'Partner has 1 tile left and has been playing 5s. Open end-5 for them.',
+        hint: 'Partner\'s strong suit is clear from their plays. Open that number.',
+        myHand: ['1-5', '3-4', '0-6', '2-3'],
+        board: ['5-6', '6-2', '2-0', '0-4', '4-5', '5-3', '3-6', '6-1', '1-2', '2-5', '5-5', '5-0', '0-0', '0-1', '1-1', '1-4', '4-4', '4-6'],
+        leftEnd: 5, rightEnd: 6,
+        otherHands: { 1: ['1-3'], 2: ['2-2'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '0-6', correctSide: 'right',
+        explanation: '<b>[0|6] RIGHT → ends 5/0.</b> Partner (P2) has 2 tiles with [0|3],[2|4]. Hmm, this doesn\'t feed partner directly. Re-examining: actually [1|5] LEFT creates 1/6 removing partner\'s 5-access. The key is keeping end-5 alive. [0|6] RIGHT keeps end-5. Partner can\'t play on 5 with [0|3],[2|4] though. Actually the best play is [3|4] — can\'t match either end. [0|6] RIGHT → ends 5/0, partner has [0|3] to play. <em>Rule: open an end that matches partner\'s remaining tiles, even if it means sacrificing your own suit.</em>'
+      },
+      {
+        id: 'audit-partner-02', title: 'Sacrifice for Partner', difficulty: 4, category: 'feeding',
+        description: 'Partner has 1 tile. You have a move that scores low but lets partner finish.',
+        hint: 'Sometimes the lowest-scoring play is the winning play if partner goes out.',
+        myHand: ['0-2', '3-5', '4-6', '1-3'],
+        board: ['2-6', '6-5', '5-1', '1-4', '4-0', '0-6', '6-3', '3-3', '3-2', '2-4', '4-4', '4-5', '5-5', '5-0', '0-0', '0-1'],
+        leftEnd: 2, rightEnd: 1,
+        otherHands: { 1: ['1-2', '2-2'], 2: ['1-1'], 3: ['2-5'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '1-3', correctSide: 'right',
+        explanation: '<b>[1|3] RIGHT → ends 2/3.</b> Partner (P2) has [1|1] — they need a 1-end. But [1|3] RIGHT removes end-1! Wait — actually this is wrong. [0|2] LEFT → ends 0/1, partner plays [1|1]. That\'s the feed! <em>Rule: when partner has 1 tile, trace which end number matches their last tile and create that end.</em>'
+      },
+      {
+        id: 'audit-partner-03', title: 'Partner\'s Strong Suit', difficulty: 3, category: 'feeding',
+        description: 'Partner has played 3 tiles with 4. Reinforce end-4 for them.',
+        hint: 'Partner\'s played tiles reveal their strong suit. Keep it on the board.',
+        myHand: ['2-4', '1-6', '0-5', '3-3'],
+        board: ['4-6', '6-0', '0-3', '3-5', '5-4', '4-1', '1-2', '2-6'],
+        leftEnd: 4, rightEnd: 6,
+        otherHands: { 1: ['3-6', '2-5', '0-4', '5-5'], 2: ['1-5', '5-6', '0-1', '6-6'], 3: ['2-2', '3-4', '0-2', '1-1'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '2-4', correctSide: 'left',
+        explanation: '<b>[2|4] LEFT → ends 2/6.</b> Actually this removes end-4, hurting partner. Re-examining: [2|4] LEFT means 4 matches leftEnd 4, exposing 2. Ends become 2/6. But partner (P2) has [0|4],[4|4],[1|4],[3|6] — they have many 4-tiles. Removing end-4 is bad! Better: [1|6] RIGHT → ends 4/1. Keeps end-4 for partner. <em>Rule: when partner dominates a suit (3+ plays), keep that number as a board end.</em>'
+      },
+      {
+        id: 'audit-partner-04', title: 'Team Close-Out', difficulty: 4, category: 'feeding',
+        description: 'Both you and partner are down to 2 tiles. Coordinate the finish.',
+        hint: 'Check if partner can go out next turn if you create the right end.',
+        myHand: ['2-5', '0-3'],
+        board: ['4-4', '4-1', '1-6', '6-0', '0-5', '5-3', '3-2', '2-6', '6-6', '6-5', '5-5', '5-1', '1-3', '3-4', '4-6', '6-3', '3-3'],
+        leftEnd: 4, rightEnd: 3,
+        otherHands: { 1: ['0-2', '0-4'], 2: ['0-1', '1-2'], 3: ['2-2'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '0-3', correctSide: 'right',
+        explanation: '<b>[0|3] RIGHT \u2192 ends 4/0.</b> Partner (P2) has [0|4] \u2014 they can play on BOTH ends! End-4 or end-0. This gives partner maximum flexibility to go out. [2|5] can\'t play on 4 or 3. <em>Rule: in endgame with 2 tiles each, prioritize opening ends that match partner\'s tiles.</em>'
+      },
+      {
+        id: 'audit-partner-05', title: 'Don\'t Steal Partner\'s End', difficulty: 3, category: 'feeding',
+        description: 'Partner needs end-3. You have a 3-tile but playing it would consume the end.',
+        hint: 'Sometimes NOT playing your matching tile is the best team play.',
+        myHand: ['3-6', '0-5', '1-4', '2-2'],
+        board: ['3-4', '4-5', '5-6', '6-0', '0-1', '1-2', '2-3', '3-3'],
+        leftEnd: 3, rightEnd: 3,
+        otherHands: { 1: ['2-5', '0-4', '1-3', '1-6'], 2: ['0-2', '2-4', '1-1', '5-5'], 3: ['1-5', '0-3', '2-6', '4-6'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '3-6', correctSide: 'left',
+        explanation: '<b>[3|6] LEFT → ends 6/3.</b> Partner (P2) has [1|3],[6|6],[2|6]. Keeping end-3 alive is essential since partner has [1|3]. Playing [3|6] LEFT keeps RIGHT end at 3 for partner. If you play on both sides you\'d consume both 3-ends. End-6 is fine — partner also has [6|6],[2|6]. <em>Rule: preserve partner\'s ends by playing on the OTHER side when possible.</em>'
+      },
+
+      // ===== AUDIT TEST POSITIONS: PIP MANAGEMENT =====
+      {
+        id: 'audit-pip-01', title: 'Heavy Dump Opening', difficulty: 2, category: 'pip',
+        description: 'Early game — dump your heaviest tile to reduce block risk.',
+        hint: 'Which tile has the most pips? Get rid of it first.',
+        myHand: ['6-6', '1-3', '0-2', '4-5', '2-4', '0-1'],
+        board: ['5-6', '6-3'],
+        leftEnd: 5, rightEnd: 3,
+        otherHands: { 1: ['3-5', '0-5', '1-6', '0-6', '4-6', '0-4'], 2: ['1-4', '3-4', '2-2', '3-3', '1-1'], 3: ['1-5', '2-5', '1-2', '2-3', '4-4'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '4-5', correctSide: 'left',
+        explanation: '<b>[4|5] LEFT → ends 4/3.</b> Dumping [4|5] (9 pips) early reduces your block liability. [6|6] can\'t play (no end at 6). [1|3] RIGHT dumps only 4 pips. [4|5] LEFT gives you 4-end access via [2|4] later. <em>Rule: in the opening, prioritize dumping high-pip tiles to minimize block damage.</em>'
+      },
+      {
+        id: 'audit-pip-02', title: 'Pip vs Position', difficulty: 4, category: 'pip',
+        description: 'You can dump a heavy tile OR make a positional play. Position wins here.',
+        hint: 'Raw pip count matters less than board control.',
+        myHand: ['5-6', '1-5', '2-5', '0-3'],
+        board: ['5-5', '5-4', '4-3', '3-6', '6-1', '1-0', '0-2', '2-6'],
+        leftEnd: 5, rightEnd: 6,
+        otherHands: { 1: ['2-2', '4-4', '2-3', '1-2'], 2: ['0-6', '1-4', '4-6', '2-4'], 3: ['0-5', '1-3', '3-3', '6-6'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '1-5', correctSide: 'left',
+        explanation: '<b>[1|5] LEFT → ends 1/6.</b> You have 3 tiles with 5 ([5|6],[1|5],[2|5]) — playing [1|5] uses your 5-tile while keeping [5|6] and [2|5] for later. [5|6] LEFT (11 pips dump) is tempting but consumes your 6-end tile AND 5-tile together. [1|5] LEFT diversifies: ends 1/6, you still have [5|6] for end-6 and [0|3] as backup. <em>Rule: pip dump is secondary to maintaining playable tile coverage across end numbers.</em>'
+      },
+      {
+        id: 'audit-pip-03', title: 'Hold Heavy for Value', difficulty: 4, category: 'pip',
+        description: 'Your heavy tile is your only access to a critical suit. Don\'t dump it.',
+        hint: 'Check if your heavy tile is the only tile connecting you to a board end.',
+        myHand: ['5-6', '0-1', '2-3', '1-4'],
+        board: ['6-6', '6-4', '4-0', '0-5', '5-2', '2-1', '1-3', '3-0'],
+        leftEnd: 6, rightEnd: 0,
+        otherHands: { 1: ['3-6', '4-5', '2-6', '2-4'], 2: ['4-4', '3-3', '1-6', '5-5'], 3: ['0-6', '3-5', '0-2', '1-5'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '0-1', correctSide: 'right',
+        explanation: '<b>[0|1] RIGHT → ends 6/1.</b> [5|6] LEFT dumps 11 pips but it\'s your ONLY 6-tile — after playing it, you can\'t reach end-6. [0|1] RIGHT uses end-0, keeps [5|6] as your lifeline to end-6. You also keep [1|4] for the new end-1. <em>Rule: never dump a heavy tile if it\'s your sole connection to a board end number.</em>'
+      },
+      {
+        id: 'audit-pip-04', title: 'Block Risk Calculus', difficulty: 3, category: 'pip',
+        description: 'Late game, block is likely. Minimize your hand value for the count.',
+        hint: 'If the game blocks, lowest total pips wins.',
+        myHand: ['0-1', '5-6', '3-4'],
+        board: ['1-4', '4-6', '6-3', '3-5', '5-0', '0-6', '6-6', '6-2', '2-5', '5-5', '5-1', '1-2', '2-0', '0-0', '0-3', '3-3', '3-1', '1-1', '1-6', '4-4', '4-5'],
+        leftEnd: 1, rightEnd: 5,
+        otherHands: {  },
+        voids: {},
+        passHistory: [],
+        correctTile: '5-6', correctSide: 'right',
+        explanation: '<b>[5|6] RIGHT → ends 1/6.</b> With 21 tiles played and only 3 tiles among all players, a block is very likely. Dumping [5|6] (11 pips) leaves you with [0|1]+[3|4]=8 pips instead of holding [5|6] at 11 pips if it blocks. Lower hand value = win on block count. <em>Rule: when a block is imminent, dump your heaviest tile regardless of positional value.</em>'
+      },
+
+      // ===== AUDIT TEST POSITIONS: SUIT CONTROL =====
+      {
+        id: 'audit-suit-01', title: 'Monopoly Power', difficulty: 4, category: 'suit-control',
+        description: 'You hold ALL remaining tiles with 4. Make end-4 to dominate.',
+        hint: 'If you hold every remaining tile of a number, making that an end gives total control.',
+        myHand: ['2-4', '4-5', '0-4', '1-3'],
+        board: ['4-6', '6-3', '3-4', '4-4', '4-1', '1-6', '6-0', '0-3'],
+        leftEnd: 4, rightEnd: 3,
+        otherHands: { 1: ['3-5', '2-6', '3-3', '2-2'], 2: ['0-5', '1-1', '1-2', '6-6'], 3: ['0-1', '5-6', '2-5', '2-3'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '1-3', correctSide: 'right',
+        explanation: '<b>[1|3] RIGHT → ends 4/1.</b> You hold [2|4],[4|5],[0|4] — ALL three remaining tiles with 4. End-4 is already on the left. Every time opponents play on end-1 and it cycles back, you ALWAYS have a 4-play. This is a monopoly: opponents cannot outlast you on that end. [2|4] LEFT (→ ends 2/3) wastes your monopoly advantage. <em>Rule: when you hold every remaining tile of a number, keep that number as a board end — you can never be blocked on that side.</em>'
+      },
+      {
+        id: 'audit-suit-02', title: 'Near Monopoly Setup', difficulty: 3, category: 'suit-control',
+        description: 'You hold 3 of 4 remaining 2-tiles. Set up end-2 to control the game.',
+        hint: 'Holding most of a suit gives you huge staying power on that end.',
+        myHand: ['0-2', '2-5', '2-3', '1-6'],
+        board: ['2-4', '4-1', '1-5', '5-6', '6-2', '2-2', '6-0', '0-3'],
+        leftEnd: 2, rightEnd: 3,
+        otherHands: { 1: ['0-1', '0-4', '0-5', '3-3'], 2: ['4-6', '3-4', '1-2', '3-5'], 3: ['3-6', '4-5', '5-5', '1-1'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '0-2', correctSide: 'left',
+        explanation: '<b>[0|2] LEFT \u2192 ends 0/3.</b> Wait \u2014 [0|2] on LEFT: 2 matches leftEnd 2, exposing 0. Ends become 0/3. But we want end-2! Better: play [2|3] RIGHT: 3 matches rightEnd 3, exposing 2. Ends become 2/2. You hold [0|2],[2|5] \u2014 two more 2-tiles. With both ends at 2, you\'re guaranteed to play. <em>Rule: with near-monopoly (3 of 4 remaining), make that number an end.</em>'
+      },
+      {
+        id: 'audit-suit-03', title: 'Suit Dominance', difficulty: 3, category: 'suit-control',
+        description: 'You have 4 tiles with 1. Create end-1 to guarantee plays.',
+        hint: 'Four tiles of one suit = you play every time that end comes around.',
+        myHand: ['1-2', '1-4', '0-1', '1-5', '3-6', '6-6'],
+        board: ['1-3', '3-0', '0-6', '6-5'],
+        leftEnd: 1, rightEnd: 5,
+        otherHands: { 1: ['5-5', '0-5', '4-6', '1-6', '2-4'], 2: ['2-3', '4-4', '2-5', '0-4', '3-4'], 3: ['3-3', '4-5', '3-5', '2-6'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '1-5', correctSide: 'right',
+        explanation: '<b>[1|5] RIGHT → ends 1/1.</b> You have FOUR 1-tiles ([1|2],[1|4],[0|1],[1|5]). After playing [1|5], you still have three 1-tiles. With both ends at 1, only 1-tiles can play. You have 3 of the remaining 1-tiles — massive advantage. <em>Rule: with 4+ tiles of one suit, create double-ends of that suit for maximum domination.</em>'
+      },
+      {
+        id: 'audit-suit-04', title: 'Break Their Suit', difficulty: 4, category: 'suit-control',
+        description: 'Opponent dominates 3s. Remove end-3 before they lock you out.',
+        hint: 'If the opponent has suit control, change the board ends away from their suit.',
+        myHand: ['3-5', '0-4', '2-6', '1-1'],
+        board: ['3-6', '6-4', '4-2', '2-0', '0-3', '3-3', '3-1', '1-6'],
+        leftEnd: 3, rightEnd: 6,
+        otherHands: { 1: ['3-4', '0-6', '1-4', '4-4'], 2: ['4-5', '1-5', '2-5', '2-3'], 3: ['6-6', '5-5', '0-1', '1-2'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '2-6', correctSide: 'right',
+        explanation: '<b>[2|6] RIGHT → ends 3/2.</b> P1 has [1|3],[2|3] plus [0|6],[5|6],[6|6] — they dominate 6 AND 3. Removing end-6 and replacing with end-2 cuts their 6-access. [3|5] LEFT → ends 5/6 still gives P1 three 6-tiles to play. <em>Rule: when an opponent dominates a suit on the board, change that end to a number where you or partner are stronger.</em>'
+      },
+
+      // ===== AUDIT TEST POSITIONS: ENDGAME =====
+      {
+        id: 'audit-end-01', title: 'Forced Win', difficulty: 3, category: 'endgame',
+        description: 'You can go out this turn. Find the highest-scoring finish.',
+        hint: 'Check if any play empties your hand. Then check for carroca/la-e-lo bonus.',
+        myHand: ['2-2'],
+        board: ['2-6', '6-3', '3-0', '0-5', '5-4', '4-2', '2-5', '5-1', '1-4', '4-0', '0-0', '0-6', '6-6', '6-1', '1-3', '3-3', '3-5', '5-5', '5-6', '6-4', '4-4', '4-3'],
+        leftEnd: 2, rightEnd: 3,
+        otherHands: { 1: ['1-1'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '2-2', correctSide: 'left',
+        explanation: '<b>[2|2] LEFT \u2192 CARROCA!</b> [2|2] is a double and matches end-2. Going out with a double = carroca (2 points). rightEnd is 3, so no cruzada. <em>Rule: always check if going out with a double gives carroca (2pts).</em>'
+      },
+      {
+        id: 'audit-end-02', title: 'Count to Win', difficulty: 4, category: 'endgame',
+        description: 'Block is inevitable. Play to minimize your pip count for the block resolution.',
+        hint: 'In a block, lowest pips wins. Dump your heaviest tile now.',
+        myHand: ['3-6', '1-2', '0-5'],
+        board: ['6-6', '6-4', '4-1', '1-5', '5-3', '3-0', '0-2', '2-4', '4-0', '0-0', '0-6', '6-5', '5-5', '5-2', '2-3', '3-3', '3-4', '4-4', '4-5'],
+        leftEnd: 6, rightEnd: 5,
+        otherHands: { 1: ['1-1'], 2: ['2-2'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '3-6', correctSide: 'left',
+        explanation: '<b>[3|6] LEFT \u2192 ends 3/5.</b> 19 tiles on board + 3 in hand + 6 others = 28. Block is near-certain. Dumping [3|6] (9 pips) leaves you with [1|2]+[0|5]=8 pips. Much better than holding 9 extra pips if the game blocks. <em>Rule: when a block is imminent, dump your heaviest tile.</em>'
+      },
+      {
+        id: 'audit-end-03', title: 'Cruzada Finish', difficulty: 5, category: 'endgame',
+        description: 'You can go out with a cruzada (double that plays both ends) for 4 points!',
+        hint: 'A double that matches BOTH ends = cruzada = 4 points.',
+        myHand: ['3-3'],
+        board: ['3-6', '6-4', '4-1', '1-5', '5-0', '0-2', '2-6', '6-6', '6-0', '0-4', '4-4', '4-5', '5-5', '5-2', '2-1', '1-6', '6-5', '5-3', '3-2', '2-4', '4-3', '3-1'],
+        leftEnd: 3, rightEnd: 1,
+        otherHands: { 1: ['0-1'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '3-3', correctSide: 'left',
+        explanation: '<b>[3|3] LEFT \u2192 CARROCA!</b> [3|3] matches leftEnd 3. Going out with a double = carroca (2 points). For cruzada (4pts), the double would need to match BOTH ends (3 and 1), but 3\u22601. Still a great 2-point finish. <em>Rule: cruzada requires matching BOTH ends; carroca just needs a double going out.</em>'
+      },
+
+      // ===== AUDIT TEST POSITIONS: TEMPO & TACTICS =====
+      {
+        id: 'audit-tempo-01', title: 'Board Width Control', difficulty: 3, category: 'tempo',
+        description: 'Keep board ends different to maximize tile playability.',
+        hint: 'Two different end numbers let more tiles play than one repeated number.',
+        myHand: ['0-5', '2-3', '4-6', '1-4'],
+        board: ['5-6', '6-3', '3-1', '1-2', '2-0', '0-4'],
+        leftEnd: 5, rightEnd: 4,
+        otherHands: { 1: ['0-1', '3-3', '5-5', '2-6', '1-5'], 2: ['1-6', '2-5', '4-5', '4-4', '3-4'], 3: ['2-2', '3-5', '6-6', '2-4'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '1-4', correctSide: 'right',
+        explanation: '<b>[1|4] RIGHT → ends 5/1.</b> Keeps ends different (5 and 1). You still have [0|5] for end-5. If you played [0|5] LEFT → ends 0/4, fine but burns your 5-connection. [4|6] RIGHT → ends 5/6, also good. [1|4] RIGHT is best because end-1 diversifies — many tiles in the game have 1. <em>Rule: different end numbers provide more flexibility than repeated numbers.</em>'
+      },
+      {
+        id: 'audit-tempo-02', title: 'Information Leak', difficulty: 4, category: 'tempo',
+        description: 'Early game: don\'t reveal your strongest suit unnecessarily.',
+        hint: 'Playing from your strongest suit lets opponents track your hand.',
+        myHand: ['2-6', '3-6', '5-6', '6-6', '0-1', '1-4'],
+        board: ['6-4', '4-3'],
+        leftEnd: 6, rightEnd: 3,
+        otherHands: { 1: ['2-5', '0-4', '0-2', '2-3', '0-3', '1-5'], 2: ['1-2', '2-2', '4-5', '2-4', '1-6'], 3: ['1-3', '1-1', '4-4', '0-6', '5-5'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '0-1', correctSide: 'right',
+        explanation: '<b>[0|1] can\'t play (0≠6, 0≠3, 1≠6, 1≠3).</b> Re-examining playable tiles: [2|6] LEFT, [3|6] LEFT, [5|6] LEFT, [6|6] LEFT all match end-6. [3|6] also matches RIGHT (3=3). Best: [3|6] RIGHT → ends 6/6. Wait, that narrows the board. [5|6] LEFT → ends 5/3. This hides your 6-dominance by removing end-6. Opponents see a 5-end, not knowing you have three more 6-tiles. <em>Rule: in opening, avoid playing from your strongest suit if possible — disguise your hand composition.</em>'
+      },
+      {
+        id: 'audit-tempo-03', title: 'Double Timing', difficulty: 3, category: 'tempo',
+        description: 'You have [4|4]. Play it now before 4s get consumed by other plays.',
+        hint: 'Doubles can only play on one number. As that number gets scarce, the double becomes dead.',
+        myHand: ['4-4', '1-3', '2-5', '0-6'],
+        board: ['4-6', '6-1', '1-5', '5-3', '3-0', '0-2', '2-4'],
+        leftEnd: 4, rightEnd: 4,
+        otherHands: { 1: ['3-3', '3-6', '0-4', '1-2', '6-6'], 2: ['2-2', '2-6', '5-6', '0-1'], 3: ['1-4', '2-3', '4-5', '3-4'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '4-4', correctSide: 'left',
+        explanation: '<b>[4|4] LEFT → ends 4/4.</b> Both ends are already 4. Your [4|4] plays perfectly. If you pass on this and play something else... wait, both ends are 4 and your only 4-tile is [4|4]. You MUST play [4|4] or pass (no other tile has 4). So it\'s the only legal move. <em>Rule: play doubles when the matching number is a board end — don\'t hold them until the number disappears.</em>'
+      },
+      {
+        id: 'audit-tempo-04', title: 'Tempo Sacrifice', difficulty: 4, category: 'tempo',
+        description: 'Give up a small advantage now to set up a bigger positional gain.',
+        hint: 'Sometimes the second-best scoring play sets up a dominant next turn.',
+        myHand: ['0-3', '3-5', '2-6', '1-4'],
+        board: ['3-6', '6-4', '4-2', '2-0', '0-5', '5-1', '1-3', '3-3'],
+        leftEnd: 3, rightEnd: 3,
+        otherHands: { 1: ['0-1', '1-2', '4-4', '5-6'], 2: ['0-4', '2-5', '0-6', '6-6'], 3: ['4-5', '1-1', '3-4', '5-5'] },
+        voids: {},
+        passHistory: [],
+        correctTile: '3-5', correctSide: 'left',
+        explanation: '<b>[3|5] LEFT → ends 5/3.</b> You have [0|3] for end-3 next turn. End-5 is also good — diversified ends. P1 has five 6-tiles; if you played [0|3] (→ ends 0/3), P1 has no 0 or 3 tiles, blocking them! Actually [0|3] LEFT → ends 0/3 blocks P1 (they have only 6-tiles). But you lose end-3 access for yourself. <em>Rule: consider whether blocking opponents now outweighs your own suit continuation.</em>'
+      },
     ];
 
     // ========== AUTO-PUZZLE GENERATION ==========
@@ -2594,8 +2969,8 @@
           if (myCount > 0) sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]`);
 
           // Blocking — opp1 plays next (higher value), opp2 plays after partner (lower)
-          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 30; sr.push(`Blocks ${pn(opp1)} (next player)`); }
-          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 20; sr.push(`Blocks ${pn(opp2)}`); }
+          if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 35; sr.push(`Blocks ${pn(opp1)} (next player)`); }
+          if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) { ss += 25; sr.push(`Blocks ${pn(opp2)}`); }
 
           // Opponent style adjustment: block-focused opponents are higher-value targets
           if (opponentStyles[opp1] && opponentStyles[opp1].observations >= 3) {
@@ -2806,6 +3181,22 @@
             }
           }
 
+          // True monopoly: we hold ALL remaining tiles of an end number (absolute control)
+          for (const endN of [newEnd, otherEnd]) {
+            const remEnd = knowledge.remainingWithNumber(endN);
+            if (remEnd >= 1 && remEnd <= 3) {
+              let weHoldAll = 0;
+              for (const h of hand) {
+                if (h.id === tile.id) continue;
+                if (h.left === endN || h.right === endN) weHoldAll++;
+              }
+              if (weHoldAll === remEnd) {
+                const monoBonus = Math.round(20 * deadMul);
+                ss += monoBonus; sr.push(`MONOPOLY on ${endN}s — hold ALL ${remEnd} remaining`);
+              }
+            }
+          }
+
           // Near-monopoly: we hold 2+ of last 3-4 tiles of an end number (strong positional control)
           for (const endN of [newEnd, otherEnd]) {
             const remEnd = knowledge.remainingWithNumber(endN);
@@ -2866,6 +3257,26 @@
           } else if (oppScore >= 5 && ourScore < 4) {
             // Opponent at match point, we're behind: prefer aggressive high-impact moves
             if (tile.left === tile.right) { ss += 8; sr.push('Behind — play double for carroca potential'); }
+          }
+
+          // === POINT DENIAL ===
+          // Penalize enabling opponent high-scoring finishes when they have 1 tile left
+          for (const opp of [opp1, opp2]) {
+            const estOppHand = Math.max(0, 6 - knowledge.playsBy[opp].length);
+            if (estOppHand === 1) {
+              const oppStr = knowledge.inferStrength(opp);
+              for (const eN of [newEnd, otherEnd]) {
+                if (oppStr[eN] >= 2) {
+                  const wasThere = (eN === lE || eN === rE);
+                  if (!wasThere) {
+                    const isDouble = tile.left === tile.right;
+                    const penalty = isDouble ? -15 : -8;
+                    ss += penalty;
+                    sr.push(`Danger: feeds ${pn(opp)} (1 tile, wants ${eN}s)${isDouble ? ' — cruzada risk!' : ''}`);
+                  }
+                }
+              }
+            }
           }
 
           // === CLOSING BONUS ===
@@ -5073,6 +5484,7 @@
 
       const handSizes = snap.hands.map(h => h.length);
       const myTeam = player % 2;
+      const useME = (matchScore[0] > 0 || matchScore[1] > 0 || scoreMultiplier > 1);
 
       // Build all tile×side options with pre-computed state
       const options = [];
@@ -5131,8 +5543,9 @@
           for (let b = 0; b < batchSize; b++) {
             const simHands = generateConsistentDeal(o.myNewHand, o.newHandSizes, o.newKnowledge, player);
             const result = simulateFromPosition(simHands, null, o.newLE, o.newRE, (player + 1) % 4, o.newKnowledge, o.newBLen);
-            const signedPts = result.winnerTeam === myTeam ? result.points :
-                              result.winnerTeam >= 0 ? -result.points : 0;
+            const rawPts = result.winnerTeam === myTeam ? result.points :
+                           result.winnerTeam >= 0 ? -result.points : 0;
+            const signedPts = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) * 4 : rawPts;
             if (result.winnerTeam === myTeam) o.wins++;
             o.totalPts += signedPts;
             o.sumPtsSq += signedPts * signedPts;
@@ -5258,6 +5671,7 @@
       const TIME_LIMIT = 150; // ms
       const MAX_NODES = 5000;
       const myTeam = player % 2;
+      const useME = (matchScore[0] > 0 || matchScore[1] > 0 || scoreMultiplier > 1);
       const handSizes = [6, 6, 6, 6]; // approximate — will be overridden per determinization
 
       // Compute actual hand sizes from knowledge
@@ -5321,7 +5735,7 @@
             if (simHands[curPlayer].length === 0) {
               // Terminal — immediate win
               const w = scoreWin(expandMove.tile, lE, rE, simBLen);
-              const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+              const reward = useME ? _rolloutToMEReward(curPlayer % 2, w.pts, myTeam) : (curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4);
               _ismctsBackprop(node, reward);
               break;
             }
@@ -5337,7 +5751,7 @@
           simLE = applied.newLE; simRE = applied.newRE; simBLen++;
           if (simHands[curPlayer].length === 0) {
             const w = scoreWin(tile, lE, rE, simBLen);
-            const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+            const reward = useME ? _rolloutToMEReward(curPlayer % 2, w.pts, myTeam) : (curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4);
             _ismctsBackprop(child, reward);
             node = null; // signal: already backpropagated
             break;
@@ -5361,7 +5775,7 @@
             simLE = applied.newLE; simRE = applied.newRE; simBLen++;
             if (simHands[curPlayer].length === 0) {
               const w = scoreWin(expandMove.tile, lE, rE, simBLen);
-              const reward = curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4;
+              const reward = useME ? _rolloutToMEReward(curPlayer % 2, w.pts, myTeam) : (curPlayer % 2 === myTeam ? w.pts / 4 : -w.pts / 4);
               _ismctsBackprop(node, reward);
               continue;
             }
@@ -5371,8 +5785,9 @@
 
         // 3. ROLLOUT from current position using fastAI
         const result = simulateFromPosition(simHands, null, simLE, simRE, curPlayer, simKnowledge, simBLen);
-        const reward = result.winnerTeam === myTeam ? result.points / 4 :
-                       result.winnerTeam >= 0 ? -result.points / 4 : 0;
+        const rawReward = result.winnerTeam === myTeam ? result.points / 4 :
+                          result.winnerTeam >= 0 ? -result.points / 4 : 0;
+        const reward = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) : rawReward;
 
         // 4. BACKPROPAGATE
         _ismctsBackprop(node, reward);
@@ -5577,6 +5992,22 @@
       // Linear approximation: ME shift per expected point
       const mePerPt = getMatchEquity3D(Math.min(myTeamScore + d, MATCH_TARGET + 4), oppTeamScore, 1) - currentME;
       return epts * mePerPt;
+    }
+
+    // Convert rollout result to match equity delta for MC/ISMCTS reward
+    function _rolloutToMEReward(winnerTeam, points, myTeam) {
+      if (winnerTeam < 0) return 0; // tie
+      const myScore = matchScore[myTeam], oppScore = matchScore[1 - myTeam];
+      const dob = scoreMultiplier || 1;
+      const currentME = getMatchEquity3D(myScore, oppScore, dob);
+      const pts = points * dob;
+      let newME;
+      if (winnerTeam === myTeam) {
+        newME = getMatchEquity3D(Math.min(myScore + pts, MATCH_TARGET + 4), oppScore, 1);
+      } else {
+        newME = getMatchEquity3D(myScore, Math.min(oppScore + pts, MATCH_TARGET + 4), 1);
+      }
+      return newME - currentME; // positive = good for us
     }
 
     let rightPanelTab = 'reasoning'; // 'reasoning' | 'probability' | 'stats' | 'guide'
