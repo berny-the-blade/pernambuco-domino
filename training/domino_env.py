@@ -151,6 +151,8 @@ class DominoEnv:
         hand = self.hands[self.current_player]
         has_play = False
 
+        symmetric = (len(self.board) > 0 and self.left_end == self.right_end)
+
         for tile_idx in hand:
             if not self._can_play_tile(tile_idx):
                 continue
@@ -161,7 +163,7 @@ class DominoEnv:
             else:
                 if self._can_play_on_side(tile_idx, 'left'):
                     mask[tile_idx] = 1.0
-                if self._can_play_on_side(tile_idx, 'right'):
+                if self._can_play_on_side(tile_idx, 'right') and not symmetric:
                     mask[28 + tile_idx] = 1.0
 
         if not has_play:
@@ -334,6 +336,10 @@ class DominoEnv:
         """Determinize unknown hands based on Bayesian belief matrix.
         belief_matrix: shape (28, 4) — probability tile t is in zone z.
         Zones: 0=partner, 1=LHO, 2=RHO, 3=dorme (relative to current player).
+
+        Uses rejection sampling: if greedy assignment hits a contradiction
+        (prob_sum == 0 for a tile), retry from scratch up to 100 times.
+        Falls back to constraint-ignoring random deal on failure.
         """
         me = self.current_player
         partner = (me + 2) % 4
@@ -347,43 +353,63 @@ class DominoEnv:
         targets = [len(self.hands[partner]), len(self.hands[lho]),
                    len(self.hands[rho]), len(self.dorme)]
 
-        assigned = [[] for _ in range(4)]
-        np.random.shuffle(unknown)
+        for attempt in range(100):
+            assigned = [[] for _ in range(4)]
+            order = list(unknown)
+            np.random.shuffle(order)
+            contradiction = False
 
-        for tile in unknown:
-            probs = belief_matrix[tile].copy().astype(np.float64)
+            for tile in order:
+                probs = belief_matrix[tile].copy().astype(np.float64)
 
-            # Mask full zones
-            for i in range(4):
-                if len(assigned[i]) >= targets[i]:
-                    probs[i] = 0.0
-
-            # Respect cantHave constraints
-            left, right = TILES[tile]
-            for i in range(3):  # zones 0-2 are players
-                p = zone_to_player[i]
-                if p is not None:
-                    if left in self.cant_have[p] or right in self.cant_have[p]:
+                # Mask full zones
+                for i in range(4):
+                    if len(assigned[i]) >= targets[i]:
                         probs[i] = 0.0
 
-            prob_sum = probs.sum()
-            if prob_sum > 0:
-                probs /= prob_sum
+                # Respect cantHave constraints
+                left, right = TILES[tile]
+                for i in range(3):  # zones 0-2 are players
+                    p = zone_to_player[i]
+                    if p is not None:
+                        if left in self.cant_have[p] or right in self.cant_have[p]:
+                            probs[i] = 0.0
+
+                prob_sum = probs.sum()
+                if prob_sum > 0:
+                    probs /= prob_sum
+                    owner = np.random.choice(4, p=probs)
+                    assigned[owner].append(tile)
+                else:
+                    # Contradiction — this deal is impossible, retry
+                    contradiction = True
+                    break
+
+            if not contradiction:
+                # Verify all zones filled exactly
+                valid = all(len(assigned[i]) == targets[i] for i in range(4))
+                if valid:
+                    self.hands[partner] = assigned[0]
+                    self.hands[lho] = assigned[1]
+                    self.hands[rho] = assigned[2]
+                    self.dorme = assigned[3]
+                    return
+
+        # Fallback: deal randomly ignoring beliefs (prevents deadlock)
+        order = list(unknown)
+        np.random.shuffle(order)
+        idx = 0
+        for zone, count in enumerate(targets):
+            zone_tiles = order[idx:idx + count]
+            idx += count
+            if zone == 0:
+                self.hands[partner] = zone_tiles
+            elif zone == 1:
+                self.hands[lho] = zone_tiles
+            elif zone == 2:
+                self.hands[rho] = zone_tiles
             else:
-                valid = [i for i in range(4) if len(assigned[i]) < targets[i]]
-                if not valid:
-                    continue
-                probs = np.zeros(4)
-                for v in valid:
-                    probs[v] = 1.0 / len(valid)
-
-            owner = np.random.choice(4, p=probs)
-            assigned[owner].append(tile)
-
-        self.hands[partner] = assigned[0]
-        self.hands[lho] = assigned[1]
-        self.hands[rho] = assigned[2]
-        self.dorme = assigned[3]
+                self.dorme = zone_tiles
 
 
 class DominoMatch:

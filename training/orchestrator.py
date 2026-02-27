@@ -102,14 +102,13 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
             obs, _, done, info = env.step(chosen_action)
 
             # Update encoder beliefs
-            if chosen_action == 56:
-                # Pass: the player who just acted (previous current_player) passed
-                passer = (env.current_player - 1) % 4
-                me_perspective = 0  # We encode from each player's perspective in turn
-                # For training, we track from the acting player's perspective
-            elif chosen_action < 56:
+            # Note: _sync_belief in encode() re-applies cant_have constraints from
+            # the env each call, so pass info flows automatically through env.cant_have.
+            # We only need explicit updates for played tiles to zero them immediately.
+            if chosen_action < 56:
                 tile = chosen_action if chosen_action < 28 else chosen_action - 28
-                encoder.update_on_play(0, tile)  # Mark tile as played
+                # Zero out this tile across ALL belief zones (it's on the table now)
+                encoder.update_on_play(0, tile)  # zeros belief[tile_idx, :] = 0.0
 
             step_count += 1
 
@@ -135,8 +134,74 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     result_queue.put(worker_data)
 
 
+def arena_game(champion_weights, challenger_weights, seed, challenger_team=0):
+    """
+    Play one deterministic game: challenger (team challenger_team) vs champion.
+    No noise, greedy policy (argmax). Returns (winner_team, points).
+    """
+    device = torch.device("cpu")
+    champion = DominoNet().to(device)
+    champion.load_state_dict(champion_weights)
+    champion.eval()
+
+    challenger = DominoNet().to(device)
+    challenger.load_state_dict(challenger_weights)
+    challenger.eval()
+
+    env = DominoEnv()
+    encoder = DominoEncoder()
+    obs = env.reset(seed=seed)
+    encoder.reset()
+    step = 0
+
+    with torch.no_grad():
+        while not env.is_over() and step < 200:
+            mask = env.get_legal_moves_mask()
+            if mask.sum() == 0:
+                break
+            state = encoder.encode(obs)
+            team = env.current_team
+
+            # Select model: challenger plays challenger_team, champion plays the other
+            model = challenger if team == challenger_team else champion
+            policy, _ = model.predict(state, mask, device)
+
+            # Greedy: argmax (no noise, no temperature)
+            action = int(np.argmax(policy))
+
+            obs, _, done, info = env.step(action)
+            if action < 56:
+                tile = action if action < 28 else action - 28
+                encoder.update_on_play(0, tile)
+            step += 1
+
+    return env.winner_team, env.points_won
+
+
+def arena_worker(worker_id, champion_weights, challenger_weights,
+                 game_seeds, result_queue):
+    """Run a batch of arena games in a subprocess."""
+    challenger_points = 0
+    champion_points = 0
+
+    for seed in game_seeds:
+        # Play twice per seed: challenger as team 0 and team 1 (fair)
+        for c_team in [0, 1]:
+            winner, pts = arena_game(champion_weights, challenger_weights,
+                                     seed, challenger_team=c_team)
+            if winner == c_team:
+                challenger_points += pts
+            elif winner >= 0:
+                champion_points += pts
+
+    result_queue.put((challenger_points, champion_points))
+
+
 class Orchestrator:
-    """Manages the generational self-play + training loop."""
+    """Manages the generational self-play + training loop with arena gatekeeper."""
+
+    ARENA_GAMES = 200       # seeds (×2 for side-swap = 400 games)
+    ARENA_THRESHOLD = 0.55  # challenger must win ≥55% of match points
 
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=False,
                  mcts_sims=50):
@@ -146,6 +211,9 @@ class Orchestrator:
               f"MCTS: {use_mcts} ({mcts_sims} sims)")
 
         self.model = DominoNet().to(self.device)
+        self.champion_weights = {
+            k: v.cpu().clone() for k, v in self.model.state_dict().items()
+        }
         self.trainer = Trainer(self.model, lr=1e-3)
 
         self.num_workers = num_workers
@@ -153,6 +221,7 @@ class Orchestrator:
         self.mcts_sims = mcts_sims
         self.replay_buffer = deque(maxlen=buffer_size)
         self.generation = 0
+        self.rejections = 0  # count of failed arena challenges
 
     def run(self, total_generations=100, games_per_worker=250):
         """Run the full generational training loop."""
@@ -232,24 +301,111 @@ class Orchestrator:
                     print(f"  Epoch {epoch+1}/5 | "
                           f"Loss: {loss:.4f} (V: {v_loss:.4f}, P: {p_loss:.4f})")
 
-                # Save checkpoint
-                ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
-                torch.save({
-                    'generation': gen,
-                    'model_state_dict': self.model.state_dict(),
-                    'buffer_size': len(self.replay_buffer),
-                }, ckpt_path)
-                print(f"Saved checkpoint: {ckpt_path}")
+                # === PHASE 3: ARENA EVALUATION ===
+                challenger_weights = {
+                    k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                }
+
+                # Skip arena for first generation (no champion to compare against)
+                if gen == 1:
+                    self.champion_weights = challenger_weights
+                    promoted = True
+                    print("First generation — auto-promoting to champion.")
+                else:
+                    promoted = self._arena_evaluate(challenger_weights)
+
+                if promoted:
+                    self.champion_weights = challenger_weights
+                    ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
+                    torch.save({
+                        'generation': gen,
+                        'model_state_dict': self.model.state_dict(),
+                        'buffer_size': len(self.replay_buffer),
+                    }, ckpt_path)
+                    print(f"Saved champion checkpoint: {ckpt_path}")
+                else:
+                    # Revert to champion weights
+                    self.model.load_state_dict(
+                        {k: v.to(self.device) for k, v in self.champion_weights.items()}
+                    )
+                    self.trainer = Trainer(self.model, lr=1e-3)
+                    self.rejections += 1
+                    print(f"Reverted to champion. "
+                          f"Total rejections: {self.rejections}")
             else:
                 print(f"Buffer too small ({len(self.replay_buffer)}/{min_buffer}). "
                       f"Gathering more data...")
 
-        print(f"\nTraining complete. {total_generations} generations.")
+        print(f"\nTraining complete. {total_generations} generations. "
+              f"Rejections: {self.rejections}")
+
+    def _arena_evaluate(self, challenger_weights):
+        """Run arena: challenger vs champion. Returns True if challenger promoted."""
+        print(f"Arena: {self.ARENA_GAMES} seeds × 2 sides = "
+              f"{self.ARENA_GAMES * 2} games (threshold: {self.ARENA_THRESHOLD:.0%})...")
+        t0 = time.time()
+
+        # Generate deterministic seeds
+        seeds = list(range(self.generation * 10000,
+                           self.generation * 10000 + self.ARENA_GAMES))
+
+        # Split seeds across workers
+        ctx = mp.get_context('spawn')
+        result_queue = ctx.Queue()
+        n_workers = min(self.num_workers, len(seeds))
+        chunk = len(seeds) // n_workers
+        processes = []
+
+        for w_id in range(n_workers):
+            start = w_id * chunk
+            end = start + chunk if w_id < n_workers - 1 else len(seeds)
+            worker_seeds = seeds[start:end]
+            p = ctx.Process(
+                target=arena_worker,
+                args=(w_id, self.champion_weights, challenger_weights,
+                      worker_seeds, result_queue)
+            )
+            p.start()
+            processes.append(p)
+
+        # Collect
+        challenger_total = 0
+        champion_total = 0
+        for _ in range(n_workers):
+            try:
+                c_pts, ch_pts = result_queue.get(timeout=300)
+                challenger_total += c_pts
+                champion_total += ch_pts
+            except Exception as e:
+                print(f"  Arena worker error: {e}")
+
+        for p in processes:
+            p.join(timeout=30)
+
+        total_pts = challenger_total + champion_total
+        if total_pts == 0:
+            win_rate = 0.5
+        else:
+            win_rate = challenger_total / total_pts
+
+        elapsed = time.time() - t0
+        print(f"  Arena result: Challenger {challenger_total} pts vs "
+              f"Champion {champion_total} pts ({win_rate:.1%}) in {elapsed:.1f}s")
+
+        if win_rate >= self.ARENA_THRESHOLD:
+            print(f"  PROMOTED! ({win_rate:.1%} >= {self.ARENA_THRESHOLD:.0%})")
+            return True
+        else:
+            print(f"  REJECTED. ({win_rate:.1%} < {self.ARENA_THRESHOLD:.0%})")
+            return False
 
     def load_checkpoint(self, path):
         """Resume training from a checkpoint."""
         ckpt = torch.load(path, map_location=self.device)
         self.model.load_state_dict(ckpt['model_state_dict'])
+        self.champion_weights = {
+            k: v.cpu().clone() for k, v in self.model.state_dict().items()
+        }
         self.generation = ckpt.get('generation', 0)
         print(f"Loaded checkpoint: {path} (gen {self.generation})")
 
