@@ -2980,20 +2980,20 @@
     }
 
     // Tunable AI weights — CMA-ES tuner modifies these via iframe.contentWindow.AI_WEIGHTS
-    const AI_WEIGHTS = {  // CMA-ES optimized (gen 30, pop 16, 150 games/eval)
-      deadEndPenalty: 35.8,
-      lockFavorable: 42,
-      lockUnfavorable: 50.7,
-      chicoteSelf: 22.3,
-      chicotePartner: 12,
-      chicoteOpponent: 31.9,
-      chicoteDorme: 14.5,
-      lockApproachGood: 19.7,
-      lockApproachBad: 17.7,
-      monopolyBonus: 14.7,
-      boardCountGradient: 7.1,
-      captiveEndBonus: 24.6,
-      probDeadPenalty: 25.1,
+    const AI_WEIGHTS = {
+      deadEndPenalty: 35,       // penalty for creating a dead board end
+      lockFavorable: 40,        // bonus for deliberate favorable lock
+      lockUnfavorable: 60,      // penalty for unfavorable lock
+      chicoteSelf: 25,          // bonus when we hold the chicote
+      chicotePartner: 15,       // bonus when partner holds chicote
+      chicoteOpponent: 25,      // penalty when opponent holds chicote
+      chicoteDorme: 12,         // penalty when chicote in dorme
+      lockApproachGood: 20,     // bonus when approaching lock favors us
+      lockApproachBad: 15,      // penalty when approaching lock hurts us
+      monopolyBonus: 20,        // bonus for total monopoly on a suit
+      boardCountGradient: 6,    // per-opponent tile gradient
+      captiveEndBonus: 20,      // bonus for captive end (prob-dead favorable)
+      probDeadPenalty: 25,      // penalty for prob-dead unfavorable
     };
 
     // Smart AI - returns all scored options (not just best)
