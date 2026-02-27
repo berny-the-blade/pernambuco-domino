@@ -534,13 +534,14 @@
         }
 
         // Deal with safety redeal if no doubles (virtually impossible: 7 doubles, 4 dormidas)
-        let hands, startPlayer, highestDouble, highestDoubleTile;
+        let hands, startPlayer, highestDouble, highestDoubleTile, dormidas;
         do {
           const deck = shuffleDeck(createDeck());
           hands = [[], [], [], []];
           for (let i = 0; i < 24; i++) {
             hands[i % 4].push(deck[i]);
           }
+          dormidas = deck.slice(24, 28);
           startPlayer = 0;
           highestDouble = -1;
           highestDoubleTile = null;
@@ -563,6 +564,7 @@
           ...gameState,
           gameStarted: true,
           hands: hands,
+          dormidas: dormidas,
           board: [highestDoubleTile],
           leftEnd: highestDoubleTile.left,
           rightEnd: highestDoubleTile.right,
@@ -2036,6 +2038,7 @@
         for (let i = 0; i < 24; i++) {
           hands[i % 4].push(deck[i]);
         }
+        const dormidas = deck.slice(24, 28);
 
         // After dobrada (tie): highest double holder starts, auto-play it
         if (gameState.isDobrada) {
@@ -2057,7 +2060,7 @@
           hands[startPlayer] = hands[startPlayer].filter(t => t.id !== highestDoubleTile.id);
           const nextPlayer = (startPlayer + 1) % 4;
           await db.ref('rooms/' + roomCode).update({
-            hands, board: [highestDoubleTile],
+            hands, dormidas, board: [highestDoubleTile],
             leftEnd: highestDoubleTile.left, rightEnd: highestDoubleTile.right,
             currentPlayer: nextPlayer, passCount: 0,
             isDobrada: false,
@@ -2075,7 +2078,7 @@
 
         if (winTeamHasHuman) {
           await db.ref('rooms/' + roomCode).update({
-            hands, board: [], leftEnd: null, rightEnd: null,
+            hands, dormidas, board: [], leftEnd: null, rightEnd: null,
             currentPlayer: -1, passCount: 0,
             isDobrada: false,
             waitingForStarterChoice: true,
@@ -2095,7 +2098,7 @@
             }
           }
           await db.ref('rooms/' + roomCode).update({
-            hands, board: [], leftEnd: null, rightEnd: null,
+            hands, dormidas, board: [], leftEnd: null, rightEnd: null,
             currentPlayer: bestSlot, passCount: 0,
             isDobrada: false,
             waitingForStarterChoice: false,
@@ -2666,7 +2669,19 @@
                 </div>
               </div>
 
-              {/* Revealed hands after round ends (blocked or won) */}
+              {/* Dormidas (4 removed tiles) — face-down during play */}
+              {gameState.dormidas && gameState.dormidas.length > 0 && gameState.currentPlayer !== -1 && (
+                <div className="flex items-center justify-center gap-2 mb-2 px-3">
+                  <span className="text-[10px] text-white/40 font-bold">Dorme:</span>
+                  <div className="flex gap-1">
+                    {gameState.dormidas.map((_, idx) => (
+                      <div key={idx} style={{ width: 18, height: 30, borderRadius: 3, background: 'linear-gradient(145deg, #3a2d1e, #2a1f14)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Revealed hands + dormidas after round ends */}
               {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (
                 <div className="p-3 rounded-xl mb-2" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
                   <div className="text-xs text-white/50 font-bold text-center mb-2">Maos reveladas</div>
@@ -2694,6 +2709,17 @@
                       );
                     })}
                   </div>
+                  {/* Dormidas revealed */}
+                  {gameState.dormidas && gameState.dormidas.length > 0 && (
+                    <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="text-[10px] text-white/40 font-bold text-center mb-1">Dormidas</div>
+                      <div className="flex gap-1 justify-center flex-wrap">
+                        {gameState.dormidas.map(tile => (
+                          <BoardTile key={tile.id} tile={tile} orientation={tile.left === tile.right ? 'vertical' : 'horizontal'} flipped={false} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
