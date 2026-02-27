@@ -5686,10 +5686,12 @@
       for (let p = 0; p < 4; p++) np[p] = rng.randomInt(0x7FFFFFFF);
       const pc = [];
       for (let c = 0; c < 5; c++) pc[c] = rng.randomInt(0x7FFFFFFF);
-      return { tp, le, re, np, pc };
+      const bl = []; // board length 0-24
+      for (let b = 0; b < 25; b++) bl[b] = rng.randomInt(0x7FFFFFFF);
+      return { tp, le, re, np, pc, bl };
     })();
 
-    function _endgameHash(hands, lE, rE, nextPlayer, passCount) {
+    function _endgameHash(hands, lE, rE, bLen, nextPlayer, passCount) {
       let h = 0;
       for (let p = 0; p < 4; p++) {
         for (let i = 0; i < hands[p].length; i++) {
@@ -5698,6 +5700,7 @@
       }
       if (lE >= 0 && lE <= 6) h ^= _ZOBRIST.le[lE];
       if (rE >= 0 && rE <= 6) h ^= _ZOBRIST.re[rE];
+      h ^= _ZOBRIST.bl[Math.min(bLen, 24)];
       h ^= _ZOBRIST.np[nextPlayer];
       h ^= _ZOBRIST.pc[Math.min(passCount, 4)];
       return h;
@@ -5717,7 +5720,7 @@
       }
 
       // TT lookup
-      const hash = _endgameHash(hands, lE, rE, nextPlayer, passCount);
+      const hash = _endgameHash(hands, lE, rE, bLen, nextPlayer, passCount);
       const ttEntry = tt.get(hash);
       if (ttEntry) {
         if (ttEntry.f === 0) return ttEntry.v; // EXACT
@@ -5727,6 +5730,7 @@
         if (ttEntry.f === 2 && ttEntry.v < beta) beta = ttEntry.v;
       }
       const origAlpha = alpha;
+      const origBeta = beta;
 
       const hand = hands[nextPlayer];
       // Build playable list inline (avoid allocation when possible)
@@ -5797,7 +5801,7 @@
       // Store in TT: determine bound type
       let flag;
       if (bestVal <= origAlpha) flag = 2; // UPPER bound (failed low)
-      else if (bestVal >= beta) flag = 1; // LOWER bound (failed high)
+      else if (bestVal >= origBeta) flag = 1; // LOWER bound (failed high)
       else flag = 0; // EXACT
       tt.set(hash, { v: bestVal, f: flag });
 
@@ -6232,7 +6236,7 @@
           );
           if (untriedMoves.length > 0 && node.children.length < Math.ceil(Math.sqrt(node.visits + 1))) {
             // Expand: pick a random untried move
-            const expandMove = untriedMoves[Math.floor(Math.random() * untriedMoves.length)];
+            const expandMove = untriedMoves[getRng().randomInt(untriedMoves.length)];
             const _prevNode = node;
             node = node.expand(expandMove);
             nodeCount++;
@@ -6279,7 +6283,7 @@
         if (node.children.length === 0) {
           const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
           if (legalMoves.length > 0) {
-            const expandMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+            const expandMove = legalMoves[getRng().randomInt(legalMoves.length)];
             const _leafParent = node;
             node = node.expand(expandMove);
             nodeCount++;
