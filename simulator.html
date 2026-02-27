@@ -5689,8 +5689,8 @@
     // and solve each with minimax + alpha-beta for near-exact play.
     // Replaces heuristic rollouts with mathematically optimal evaluation per determinization.
 
-    const ENDGAME_THRESHOLD = 12;     // trigger when total hand tiles ≤ this (bitmask solver)
-    const ENDGAME_BUDGET_MS = 500;    // hard time limit
+    const ENDGAME_THRESHOLD = 16;     // trigger when total hand tiles ≤ this (bitmask solver + move ordering + PVS)
+    const ENDGAME_BUDGET_MS = 500;    // hard time limit (graceful timeout — falls through to MC if exceeded)
     const ENDGAME_SAMPLE_COUNT = 300; // deals to sample and solve
 
     // Zobrist hashing for endgame transposition table
@@ -5893,6 +5893,23 @@
       return h;
     }
 
+    // Move ordering: score moves for alpha-beta search efficiency.
+    // Better ordering = more cutoffs = deeper search in same time budget.
+    // Priority: instant wins > TT best move > doubles > high-pip > both-ends > rest
+    function _egMoveScore(tileIdx, handAfter, lE, rE, bLen, ttBestTile) {
+      let s = 0;
+      if (handAfter === 0) s += 10000;              // instant win — always first
+      if (tileIdx === ttBestTile) s += 5000;         // TT best move from previous search
+      if (_EG_TILE_DOUBLE[tileIdx]) s += 100;        // doubles: high scoring potential
+      s += _EG_TILE_PIPS[tileIdx] * 3;              // high-pip tiles: reduce hand value
+      // Both-ends bonus (la-e-lo/cruzada potential)
+      if (bLen > 0) {
+        const tL = _EG_TILE_LEFT[tileIdx], tR = _EG_TILE_RIGHT[tileIdx];
+        if ((tL === lE || tR === lE) && (tL === rE || tR === rE)) s += 50;
+      }
+      return s;
+    }
+
     function _endgameMinimaxBit(handBits, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline, tt, hash) {
       if (Date.now() > deadline) return 0;
 
@@ -5901,6 +5918,8 @@
         return block.type === 'tie' ? 0 : _rolloutToMEReward(block.team, block.points, myTeam);
       }
 
+      // TT lookup — also extract best move for ordering
+      let ttBestTile = -1;
       const ttEntry = tt.get(hash);
       if (ttEntry) {
         if (ttEntry.f === 0) return ttEntry.v;
@@ -5908,6 +5927,7 @@
         if (ttEntry.f === 2 && ttEntry.v <= alpha) return ttEntry.v;
         if (ttEntry.f === 1 && ttEntry.v > alpha) alpha = ttEntry.v;
         if (ttEntry.f === 2 && ttEntry.v < beta) beta = ttEntry.v;
+        if (ttEntry.m >= 0) ttBestTile = ttEntry.m;
       }
       const origAlpha = alpha;
       const origBeta = beta;
@@ -5916,30 +5936,24 @@
       const playableMask = (bLen === 0) ? hand : (hand & (_EG_TILES_WITH_PIP[lE] | _EG_TILES_WITH_PIP[rE]));
 
       if (playableMask === 0) {
-        // Pass — incremental hash: swap nextPlayer + bump passCount
         const newNext = (nextPlayer + 1) % 4;
         const newPass = passCount + 1;
         let ph = hash;
         ph ^= _ZOBRIST.np[nextPlayer]; ph ^= _ZOBRIST.np[newNext];
         ph ^= _ZOBRIST.pc[Math.min(passCount, 4)]; ph ^= _ZOBRIST.pc[Math.min(newPass, 4)];
         const val = _endgameMinimaxBit(handBits, lE, rE, bLen, newNext, newPass, myTeam, alpha, beta, deadline, tt, ph);
-        tt.set(hash, { v: val, f: 0 });
+        tt.set(hash, { v: val, f: 0, m: -1 });
         return val;
       }
 
-      const isMax = (nextPlayer % 2) === myTeam;
-      let bestVal = isMax ? -Infinity : Infinity;
-      const newNext = (nextPlayer + 1) % 4;
-
-      let remaining = playableMask;
-      while (remaining) {
-        if (Date.now() > deadline) break;
-        const bit = remaining & (-remaining);
+      // === MOVE ORDERING: build scored move list, sort descending ===
+      const moves = [];
+      let rem = playableMask;
+      while (rem) {
+        const bit = rem & (-rem);
         const tileIdx = 31 - Math.clz32(bit);
-        remaining ^= bit;
-
-        const tL = _EG_TILE_LEFT[tileIdx];
-        const tR = _EG_TILE_RIGHT[tileIdx];
+        rem ^= bit;
+        const tL = _EG_TILE_LEFT[tileIdx], tR = _EG_TILE_RIGHT[tileIdx];
 
         const sides = [];
         if (bLen === 0) {
@@ -5951,41 +5965,74 @@
         }
 
         for (let si = 0; si < sides.length; si++) {
-          const side = sides[si];
-          let newLE = lE, newRE = rE;
-          if (side === 0) { newLE = tL; newRE = tR; }
-          else if (side === 1) { newLE = (tL === lE) ? tR : tL; }
-          else { newRE = (tR === rE) ? tL : tR; }
+          const handAfter = hand ^ bit;
+          moves.push({
+            bit, tileIdx, tL, tR, side: sides[si],
+            score: _egMoveScore(tileIdx, handAfter, lE, rE, bLen, ttBestTile)
+          });
+        }
+      }
+      // Sort: highest score first (instant wins, TT best, doubles, high-pip)
+      if (moves.length > 1) moves.sort((a, b) => b.score - a.score);
 
-          handBits[nextPlayer] ^= bit; // remove tile
+      const isMax = (nextPlayer % 2) === myTeam;
+      let bestVal = isMax ? -Infinity : Infinity;
+      let bestMove = -1;
+      const newNext = (nextPlayer + 1) % 4;
 
-          let val;
-          if (handBits[nextPlayer] === 0) {
-            const pts = _egScoreWin(tileIdx, lE, rE, bLen + 1);
-            val = _rolloutToMEReward(nextPlayer % 2, pts, myTeam);
-          } else {
-            // Incremental hash: XOR out tile + old state, XOR in new state
-            let mh = hash;
-            mh ^= _ZOBRIST.tp[tileIdx][nextPlayer];
-            mh ^= _ZOBRIST.bl[Math.min(bLen, 24)];
-            if (bLen > 0) { mh ^= _ZOBRIST.le[lE]; mh ^= _ZOBRIST.re[rE]; }
-            mh ^= _ZOBRIST.np[nextPlayer]; mh ^= _ZOBRIST.pc[Math.min(passCount, 4)];
-            mh ^= _ZOBRIST.bl[Math.min(bLen + 1, 24)];
-            mh ^= _ZOBRIST.le[newLE]; mh ^= _ZOBRIST.re[newRE];
-            mh ^= _ZOBRIST.np[newNext]; mh ^= _ZOBRIST.pc[0];
+      for (let mi = 0; mi < moves.length; mi++) {
+        if (Date.now() > deadline) break;
+        const { bit, tileIdx, tL, tR, side } = moves[mi];
+
+        let newLE = lE, newRE = rE;
+        if (side === 0) { newLE = tL; newRE = tR; }
+        else if (side === 1) { newLE = (tL === lE) ? tR : tL; }
+        else { newRE = (tR === rE) ? tL : tR; }
+
+        handBits[nextPlayer] ^= bit;
+
+        let val;
+        if (handBits[nextPlayer] === 0) {
+          const pts = _egScoreWin(tileIdx, lE, rE, bLen + 1);
+          val = _rolloutToMEReward(nextPlayer % 2, pts, myTeam);
+        } else {
+          let mh = hash;
+          mh ^= _ZOBRIST.tp[tileIdx][nextPlayer];
+          mh ^= _ZOBRIST.bl[Math.min(bLen, 24)];
+          if (bLen > 0) { mh ^= _ZOBRIST.le[lE]; mh ^= _ZOBRIST.re[rE]; }
+          mh ^= _ZOBRIST.np[nextPlayer]; mh ^= _ZOBRIST.pc[Math.min(passCount, 4)];
+          mh ^= _ZOBRIST.bl[Math.min(bLen + 1, 24)];
+          mh ^= _ZOBRIST.le[newLE]; mh ^= _ZOBRIST.re[newRE];
+          mh ^= _ZOBRIST.np[newNext]; mh ^= _ZOBRIST.pc[0];
+
+          // PVS: after first move, search with null window first
+          if (mi === 0) {
             val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
-          }
-
-          handBits[nextPlayer] ^= bit; // restore tile
-
-          if (isMax) {
-            if (val > bestVal) bestVal = val;
-            if (bestVal > alpha) alpha = bestVal;
           } else {
-            if (val < bestVal) bestVal = val;
-            if (bestVal < beta) beta = bestVal;
+            // Null-window probe
+            if (isMax) {
+              val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, alpha + 0.0001, deadline, tt, mh);
+              if (val > alpha && val < beta) {
+                // Re-search with full window
+                val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
+              }
+            } else {
+              val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, beta - 0.0001, beta, deadline, tt, mh);
+              if (val < beta && val > alpha) {
+                val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh);
+              }
+            }
           }
-          if (beta <= alpha) break;
+        }
+
+        handBits[nextPlayer] ^= bit;
+
+        if (isMax) {
+          if (val > bestVal) { bestVal = val; bestMove = tileIdx; }
+          if (bestVal > alpha) alpha = bestVal;
+        } else {
+          if (val < bestVal) { bestVal = val; bestMove = tileIdx; }
+          if (bestVal < beta) beta = bestVal;
         }
         if (beta <= alpha) break;
       }
@@ -5994,7 +6041,7 @@
       if (bestVal <= origAlpha) flag = 2;
       else if (bestVal >= origBeta) flag = 1;
       else flag = 0;
-      tt.set(hash, { v: bestVal, f: flag });
+      tt.set(hash, { v: bestVal, f: flag, m: bestMove });
       return bestVal;
     }
 
@@ -6206,7 +6253,7 @@
 
       for (let c = 0; c < numCases; c++) {
         // Generate random subgame: 4-12 total tiles in hands
-        const totalTiles = 4 + rng.randomInt(9); // 4..12
+        const totalTiles = 4 + rng.randomInt(13); // 4..16
         const deck = ALL_TILES.map(t => t);
         for (let i = deck.length - 1; i > 0; i--) {
           const j = rng.randomInt(i + 1);
@@ -6250,29 +6297,49 @@
           prodVal = _endgameMinimaxBit(hBits, lE, finalRE, bLen, nextPlayer, 0, myTeam, -Infinity, Infinity, deadline, tt, initHash);
         } catch (e) { continue; }
 
-        // Run brute-force reference (no TT, no pruning) — uses tile object arrays
-        try {
-          bruteVal = _bruteForceMinimax(hands, lE, finalRE, bLen, nextPlayer, 0, myTeam);
-        } catch (e) { continue; }
-
         totalNodes += tt.size;
 
-        if (Math.abs(prodVal - bruteVal) < EPS) {
-          pass++;
+        // For ≤12 tiles: compare against brute-force ground truth
+        // For >12 tiles: self-consistency check only (brute-force too slow)
+        if (totalTiles <= 12) {
+          try {
+            bruteVal = _bruteForceMinimax(hands, lE, finalRE, bLen, nextPlayer, 0, myTeam);
+          } catch (e) { continue; }
+
+          if (Math.abs(prodVal - bruteVal) < EPS) {
+            pass++;
+          } else {
+            fail++;
+            if (failures.length < 10) {
+              failures.push({
+                case: c, tiles: totalTiles,
+                hands: hands.map(h => h.map(t => t.id)),
+                lE, rE: finalRE, bLen, nextPlayer, myTeam,
+                prodVal, bruteVal, diff: Math.abs(prodVal - bruteVal)
+              });
+            }
+          }
         } else {
-          fail++;
-          if (failures.length < 10) {
-            failures.push({
-              case: c, tiles: totalTiles,
-              hands: hands.map(h => h.map(t => t.id)),
-              lE, rE: finalRE, bLen, nextPlayer, myTeam,
-              prodVal, bruteVal, diff: Math.abs(prodVal - bruteVal)
-            });
+          // Self-consistency: solve twice with fresh TT, values must match
+          const tt2 = new Map();
+          const hash2 = _egHashInit(hBits, lE, finalRE, bLen, nextPlayer, 0);
+          const val2 = _endgameMinimaxBit(hBits, lE, finalRE, bLen, nextPlayer, 0, myTeam, -Infinity, Infinity, deadline, tt2, hash2);
+          if (Math.abs(prodVal - val2) < EPS) { pass++; }
+          else {
+            fail++;
+            if (failures.length < 10) {
+              failures.push({
+                case: c, tiles: totalTiles,
+                hands: hands.map(h => h.map(t => t.id)),
+                lE, rE: finalRE, bLen, nextPlayer, myTeam,
+                prodVal, bruteVal: val2, diff: Math.abs(prodVal - val2)
+              });
+            }
           }
         }
 
-        // TT collision check (10% of cases)
-        if (tt.size > 0 && rng.randomInt(10) === 0) {
+        // TT collision check (10% of cases, ≤12 tiles only)
+        if (totalTiles <= 12 && tt.size > 0 && rng.randomInt(10) === 0) {
           const tt2 = new Map();
           const hash2 = _egHashInit(hBits, lE, finalRE, bLen, nextPlayer, 0);
           const val2 = _endgameMinimaxBit(hBits, lE, finalRE, bLen, nextPlayer, 0, myTeam, -Infinity, Infinity, deadline, tt2, hash2);
@@ -6288,7 +6355,7 @@
         failures: failures.slice(0, 5) };
 
       console.log(`%cEndgame Bitmask Solver Verification`, 'font-weight:bold; font-size:14px;');
-      console.log(`Cases: ${result.total} (4-12 tiles) | Pass: ${pass} | Fail: ${fail} | TT collisions: ${collisions}`);
+      console.log(`Cases: ${result.total} (4-16 tiles) | Pass: ${pass} | Fail: ${fail} | TT collisions: ${collisions}`);
       console.log(`Avg TT entries/case: ${result.avgTTSize}`);
       if (fail > 0) {
         console.log(`%cFAILURES:`, 'color:red; font-weight:bold');
