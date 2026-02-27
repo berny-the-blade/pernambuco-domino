@@ -898,7 +898,11 @@
         };
 
         if (newScores[winningTeam] >= gameState.matchTarget) {
-          updates.message = 'PARTIDA GANHA! Time ' + (winningTeam + 1) + ' venceu com ' + newScores[winningTeam] + ' pontos!';
+          const losingTeam = 1 - winningTeam;
+          const isBuchuda = newScores[losingTeam] === 0;
+          updates.message = isBuchuda
+            ? 'BUCHUDA! Time ' + (winningTeam + 1) + ' venceu ' + newScores[winningTeam] + ' a 0!'
+            : 'PARTIDA GANHA! Time ' + (winningTeam + 1) + ' venceu com ' + newScores[winningTeam] + ' pontos!';
         }
 
         await db.ref('rooms/' + roomCode).update(updates);
@@ -974,13 +978,22 @@
         const newScores = [...gameState.teamScores];
         newScores[winningTeam] += points;
 
+        let blockedMsg = 'Jogo travado! ' + handSummary + '. ' + gameState.players[winner].name + ' ganhou! Time ' + (winningTeam + 1) + ' marcou ' + points + '!';
+        if (newScores[winningTeam] >= gameState.matchTarget) {
+          const losingTeam = 1 - winningTeam;
+          const isBuchuda = newScores[losingTeam] === 0;
+          blockedMsg = isBuchuda
+            ? 'BUCHUDA! ' + handSummary + '. Time ' + (winningTeam + 1) + ' venceu ' + newScores[winningTeam] + ' a 0!'
+            : 'PARTIDA GANHA! ' + handSummary + '. Time ' + (winningTeam + 1) + ' venceu com ' + newScores[winningTeam] + ' pontos!';
+        }
+
         await db.ref('rooms/' + roomCode).update({
           teamScores: newScores,
           scoreMultiplier: 1,
           currentPlayer: -1,
           lastWinningTeam: winningTeam,
           gameEnded: newScores[winningTeam] >= gameState.matchTarget,
-          message: 'Jogo travado! ' + handSummary + '. ' + gameState.players[winner].name + ' ganhou! Time ' + (winningTeam + 1) + ' marcou ' + points + '!'
+          message: blockedMsg
         });
       };
 
@@ -1615,6 +1628,37 @@
                   )}
                 </div>
               </div>
+
+              {/* Revealed hands after round ends (blocked or won) */}
+              {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (
+                <div className="p-3 rounded-xl mb-2" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="text-xs text-white/50 font-bold text-center mb-2">Maos reveladas</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[0, 1, 2, 3].map(slot => {
+                      const hand = gameState.hands?.[slot] || [];
+                      const pts = hand.reduce((s, t) => s + t.left + t.right, 0);
+                      const team = slot % 2;
+                      const teamColor = team === 0 ? 'text-blue-300' : 'text-orange-300';
+                      return (
+                        <div key={slot} className="p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] text-white/70 font-bold truncate">{gameState.players?.[slot]?.name}</span>
+                            <span className={'text-[10px] font-bold ' + teamColor}>{pts} pts</span>
+                          </div>
+                          {hand.length === 0
+                            ? <div className="text-[10px] text-green-400 font-bold text-center">Bateu!</div>
+                            : <div className="flex gap-1 flex-wrap">
+                                {hand.map(tile => (
+                                  <BoardTile key={tile.id} tile={tile} orientation={tile.left === tile.right ? 'vertical' : 'horizontal'} flipped={false} />
+                                ))}
+                              </div>
+                          }
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Action buttons */}
               {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
