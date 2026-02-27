@@ -2732,7 +2732,7 @@
     }
 
     function couldPlayBothEnds(t, l, r) {
-      if (l === null || r === null) return false;
+      if (l == null || r == null || l < 0 || r < 0) return false;
       if (l === r) {
         // Both ends same number: only a double of that number plays both ends
         return t.left === l && t.right === l;
@@ -5698,9 +5698,12 @@
           h ^= _ZOBRIST.tp[TILE_INDEX[hands[p][i].id]][p];
         }
       }
-      if (lE >= 0 && lE <= 6) h ^= _ZOBRIST.le[lE];
-      if (rE >= 0 && rE <= 6) h ^= _ZOBRIST.re[rE];
       h ^= _ZOBRIST.bl[Math.min(bLen, 24)];
+      // Only hash ends when board is non-empty (ends are defined)
+      if (bLen > 0) {
+        h ^= _ZOBRIST.le[lE];
+        h ^= _ZOBRIST.re[rE];
+      }
       h ^= _ZOBRIST.np[nextPlayer];
       h ^= _ZOBRIST.pc[Math.min(passCount, 4)];
       return h;
@@ -5711,6 +5714,8 @@
     // Uses in-place mutation with undo for zero-allocation recursion
     // Returns ME delta relative to myTeam
     function _endgameMinimax(hands, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline, tt) {
+      if (bLen === 0) throw new Error('Endgame solver invariant violated: bLen===0');
+      if (lE < 0 || lE > 6 || rE < 0 || rE > 6) throw new Error(`Endgame solver invariant violated: ends out of range (lE=${lE}, rE=${rE})`);
       if (Date.now() > deadline) return 0;
 
       // Terminal: 4 consecutive passes → blocked game
@@ -5812,6 +5817,8 @@
     // Samples consistent deals, solves each with minimax, returns weighted-average move values
     // Output format matches monteCarloEval for seamless integration
     function endgameSolve(hand, lE, rE, bLen, player, knowledge, handSizes) {
+      if (bLen === 0) throw new Error('endgameSolve invariant violated: bLen===0');
+      if (lE < 0 || lE > 6 || rE < 0 || rE > 6) throw new Error(`endgameSolve invariant violated: ends out of range (lE=${lE}, rE=${rE})`);
       const deadline = Date.now() + ENDGAME_BUDGET_MS;
       const myTeam = player % 2;
 
