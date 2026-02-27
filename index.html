@@ -1557,47 +1557,12 @@
                       </div>
                     ) : (() => {
                       const board = gameState.board;
-                      const HW = 52, VW = 26, GAP = 3;
-                      const el = boardRef.current;
-                      const MAX_W = el ? el.clientWidth - 28 : 280;
-
-                      const rows = [];
-                      let cur = [], w = 0;
-                      for (let i = 0; i < board.length; i++) {
-                        const isD = board[i].left === board[i].right;
-                        const tw = isD ? VW : HW;
-                        const need = cur.length > 0 ? tw + GAP : tw;
-                        if (w + need > MAX_W && cur.length > 0) {
-                          rows.push(cur);
-                          cur = [i]; w = tw;
-                        } else {
-                          cur.push(i); w += need;
-                        }
-                      }
-                      if (cur.length > 0) rows.push(cur);
-
+                      const GAP = 3;
                       return (
-                        <div style={{ margin: 'auto 0', width: '100%' }}>
-                          {rows.map((row, rIdx) => {
-                            const isOdd = rIdx % 2 === 1;
-                            const single = rows.length === 1;
-                            let flexDir = 'row';
-                            let justify = 'center';
-                            if (!single) {
-                              if (rIdx === 0) { justify = 'flex-end'; }
-                              else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
-                              else { justify = 'flex-start'; }
-                            }
-                            return (
-                              <div key={rIdx} style={{ display: 'flex', flexDirection: flexDir, justifyContent: justify, alignItems: 'center', gap: GAP, marginBottom: rIdx < rows.length - 1 ? GAP : 0 }}>
-                                {row.map(idx => {
-                                  const tile = board[idx];
-                                  const isD = tile.left === tile.right;
-                                  const isTurn = idx === row[0] && rIdx > 0;
-                                  return <BoardTile key={tile.id || idx} tile={tile} orientation={(isD || isTurn) ? 'vertical' : 'horizontal'} flipped={isOdd && !single} />;
-                                })}
-                              </div>
-                            );
+                        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: GAP }}>
+                          {board.map((tile, idx) => {
+                            const isD = tile.left === tile.right;
+                            return <BoardTile key={tile.id || idx} tile={tile} orientation={isD ? 'vertical' : 'horizontal'} flipped={false} />;
                           })}
                         </div>
                       );
