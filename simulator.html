@@ -4048,10 +4048,26 @@
         // Compute Bayesian beliefs before search — importance-weighted tile probabilities
         const handSizes = liveHands.map(h => h.length);
         computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
-        // Expert: use ISMCTS when mid-game, fall back to MC
+        // Expert: use ISMCTS when mid-game, fall back to MC. Neural net blends if loaded.
         let searchRes = null;
         if (liveBoard.length >= 6 && hand.length >= 2) {
           try { searchRes = ismctsEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, belief); } catch(e) {}
+        }
+        // Neural net policy blend: boost search results with NN policy if model is loaded
+        if (_nnModel && searchRes && searchRes.length > 1) {
+          try {
+            const nnRes = neuralEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge);
+            if (nnRes && nnRes.length > 0) {
+              const nnMap = new Map();
+              for (const r of nnRes) nnMap.set(r.tile.id + ':' + r.side, r.score);
+              // Blend: add 20% of NN policy score to search score
+              for (const r of searchRes) {
+                const nnScore = nnMap.get(r.tile.id + ':' + r.side) || 0;
+                r.score = r.score + Math.round(nnScore * 0.2);
+              }
+              searchRes.sort((a, b) => b.score - a.score);
+            }
+          } catch(e) {}
         }
         if (!searchRes || searchRes.length === 0) {
           const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
@@ -6546,6 +6562,261 @@
       return results;
     }
 
+    // ========== NEURAL NET INFERENCE ENGINE ==========
+    // Lightweight inference for DominoNet (4-block ResNet, 185→57+1).
+    // Loads binary weights exported by training/export_model.py.
+
+    let _nnModel = null; // loaded model weights + config
+    const NN_STATE_DIM = 185;
+    const NN_NUM_ACTIONS = 57;
+
+    // Load binary model file. Call: await loadNeuralModel('domino_model.bin')
+    async function loadNeuralModel(url) {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to load model: ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const view = new DataView(buf);
+
+      // Read header
+      const headerLen = view.getUint32(0, true);
+      const headerBytes = new Uint8Array(buf, 4, headerLen);
+      const header = JSON.parse(new TextDecoder().decode(headerBytes));
+
+      // Read float32 data
+      const dataOffset = 4 + headerLen;
+      const floats = new Float32Array(buf, dataOffset, header.total_floats);
+
+      // Build weight map: name → Float32Array
+      const w = {};
+      for (const layer of header.layers) {
+        w[layer.name] = {
+          shape: layer.shape,
+          data: floats.subarray(layer.offset, layer.offset + layer.length),
+        };
+      }
+
+      _nnModel = { weights: w, arch: header.architecture, generation: header.generation };
+      console.log(`Neural model loaded: gen ${header.generation}, ${header.total_floats.toLocaleString()} params`);
+      return _nnModel;
+    }
+
+    // Matrix-vector multiply: out = W @ x + b (W is [rows, cols], x is [cols])
+    function _nnMatVec(W, b, x) {
+      const rows = W.shape[0], cols = W.shape[1];
+      const out = new Float32Array(rows);
+      for (let r = 0; r < rows; r++) {
+        let sum = b.data[r];
+        const rOff = r * cols;
+        for (let c = 0; c < cols; c++) sum += W.data[rOff + c] * x[c];
+        out[r] = sum;
+      }
+      return out;
+    }
+
+    // BatchNorm in eval mode: y = (x - running_mean) / sqrt(running_var + eps) * weight + bias
+    function _nnBatchNorm(x, weight, bias, mean, variance) {
+      const n = x.length;
+      const out = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        out[i] = (x[i] - mean.data[i]) / Math.sqrt(variance.data[i] + 1e-5) * weight.data[i] + bias.data[i];
+      }
+      return out;
+    }
+
+    function _nnRelu(x) {
+      const out = new Float32Array(x.length);
+      for (let i = 0; i < x.length; i++) out[i] = x[i] > 0 ? x[i] : 0;
+      return out;
+    }
+
+    function _nnAdd(a, b) {
+      const out = new Float32Array(a.length);
+      for (let i = 0; i < a.length; i++) out[i] = a[i] + b[i];
+      return out;
+    }
+
+    function _nnSoftmax(x, mask) {
+      const out = new Float32Array(x.length);
+      let maxVal = -Infinity;
+      for (let i = 0; i < x.length; i++) {
+        if (mask[i] > 0 && x[i] > maxVal) maxVal = x[i];
+      }
+      let sum = 0;
+      for (let i = 0; i < x.length; i++) {
+        if (mask[i] > 0) { out[i] = Math.exp(x[i] - maxVal); sum += out[i]; }
+        else out[i] = 0;
+      }
+      if (sum > 0) for (let i = 0; i < x.length; i++) out[i] /= sum;
+      return out;
+    }
+
+    // Full forward pass through DominoNet
+    function _nnForward(state, mask) {
+      const w = _nnModel.weights;
+
+      // Input projection: relu(BN(Linear(x)))
+      let h = _nnMatVec(w['input_fc.weight'], w['input_fc.bias'], state);
+      h = _nnBatchNorm(h, w['input_bn.weight'], w['input_bn.bias'], w['input_bn.running_mean'], w['input_bn.running_var']);
+      h = _nnRelu(h);
+
+      // 4 residual blocks
+      for (let b = 0; b < 4; b++) {
+        const prefix = `res_blocks.${b}`;
+        let out = _nnMatVec(w[`${prefix}.fc1.weight`], w[`${prefix}.fc1.bias`], h);
+        out = _nnBatchNorm(out, w[`${prefix}.bn1.weight`], w[`${prefix}.bn1.bias`], w[`${prefix}.bn1.running_mean`], w[`${prefix}.bn1.running_var`]);
+        out = _nnRelu(out);
+        out = _nnMatVec(w[`${prefix}.fc2.weight`], w[`${prefix}.fc2.bias`], out);
+        out = _nnBatchNorm(out, w[`${prefix}.bn2.weight`], w[`${prefix}.bn2.bias`], w[`${prefix}.bn2.running_mean`], w[`${prefix}.bn2.running_var`]);
+        h = _nnRelu(_nnAdd(out, h));
+      }
+
+      // Policy head
+      let p = _nnMatVec(w['policy_fc1.weight'], w['policy_fc1.bias'], h);
+      p = _nnBatchNorm(p, w['policy_bn.weight'], w['policy_bn.bias'], w['policy_bn.running_mean'], w['policy_bn.running_var']);
+      p = _nnRelu(p);
+      p = _nnMatVec(w['policy_fc2.weight'], w['policy_fc2.bias'], p);
+      const policy = _nnSoftmax(p, mask);
+
+      // Value head
+      let v = _nnMatVec(w['value_fc1.weight'], w['value_fc1.bias'], h);
+      v = _nnBatchNorm(v, w['value_bn.weight'], w['value_bn.bias'], w['value_bn.running_mean'], w['value_bn.running_var']);
+      v = _nnRelu(v);
+      v = _nnMatVec(w['value_fc2.weight'], w['value_fc2.bias'], v);
+      const value = Math.tanh(v[0]);
+
+      return { policy, value };
+    }
+
+    // Encode game state to 185-dim vector (mirrors Python DominoEncoder.encode)
+    function _nnEncodeState(hand, lE, rE, bLen, player, knowledge) {
+      const state = new Float32Array(NN_STATE_DIM);
+      const me = player;
+      const partner = (me + 2) % 4;
+      const lho = (me + 1) % 4;
+      const rho = (me + 3) % 4;
+
+      // [0:28] My hand
+      for (const t of hand) state[TILE_INDEX[t.id]] = 1.0;
+
+      // [28:56] Played tiles
+      for (const id of knowledge.played) state[28 + TILE_INDEX[id]] = 1.0;
+
+      // [56:63] Left end one-hot
+      if (lE >= 0 && lE <= 6) state[56 + lE] = 1.0;
+
+      // [63:70] Right end one-hot
+      if (rE >= 0 && rE <= 6) state[63 + rE] = 1.0;
+
+      // [70:91] CantHave: 3 players × 7 numbers
+      const others = [partner, lho, rho];
+      for (let i = 0; i < 3; i++) {
+        for (const n of knowledge.cantHave[others[i]]) {
+          if (n >= 0 && n <= 6) state[70 + i * 7 + n] = 1.0;
+        }
+      }
+
+      // [91:175] Belief probabilities (simplified: use uniform over possible locations)
+      for (let t = 0; t < 28; t++) {
+        const tile = ALL_TILES[t];
+        if (hand.some(h => h.id === tile.id) || knowledge.played.has(tile.id)) continue;
+        // Count how many of the 3 other players could hold this tile
+        let canHold = [];
+        for (let i = 0; i < 3; i++) {
+          const p = others[i];
+          if (!knowledge.cantHave[p].has(tile.left) && !knowledge.cantHave[p].has(tile.right)) {
+            canHold.push(i);
+          }
+        }
+        if (canHold.length > 0) {
+          const prob = 1.0 / canHold.length;
+          for (const i of canHold) state[91 + i * 28 + t] = prob;
+        }
+      }
+
+      // [175:179] Hand sizes (normalized)
+      const playedBy = knowledge.playsBy;
+      state[175] = hand.length / 6.0;
+      for (let i = 0; i < 3; i++) {
+        state[176 + i] = Math.max(0, 6 - playedBy[others[i]].length) / 6.0;
+      }
+
+      // [179:181] Match scores
+      const myTeam = me % 2;
+      state[179] = matchScore[myTeam] / 6.0;
+      state[180] = matchScore[1 - myTeam] / 6.0;
+
+      // [181:182] Multiplier
+      state[181] = Math.min(scoreMultiplier, 4) / 4.0;
+
+      // [182:183] Board length
+      state[182] = bLen / 24.0;
+
+      // [183:184] Game phase
+      state[183] = knowledge.played.size / 24.0;
+
+      // [184:185] My team
+      state[184] = myTeam;
+
+      return state;
+    }
+
+    // Build action mask (57-dim: 0-27 = tile on left, 28-55 = tile on right, 56 = pass)
+    function _nnActionMask(hand, lE, rE, bLen) {
+      const mask = new Float32Array(NN_NUM_ACTIONS);
+      const playable = hand.filter(t => canPlay(t, lE, rE, bLen));
+      if (playable.length === 0) {
+        mask[56] = 1.0; // pass
+        return mask;
+      }
+      for (const tile of playable) {
+        const idx = TILE_INDEX[tile.id];
+        if (bLen === 0) {
+          mask[idx] = 1.0; // left side for opening
+        } else {
+          if (tile.left === lE || tile.right === lE) mask[idx] = 1.0;        // left
+          if (tile.left === rE || tile.right === rE) mask[28 + idx] = 1.0;  // right
+        }
+      }
+      return mask;
+    }
+
+    // Decode policy action index to {tile, side}
+    function _nnDecodeAction(actionIdx, hand) {
+      if (actionIdx === 56) return null; // pass
+      const tileIdx = actionIdx < 28 ? actionIdx : actionIdx - 28;
+      const side = actionIdx < 28 ? 'left' : 'right';
+      const tile = hand.find(t => TILE_INDEX[t.id] === tileIdx);
+      return tile ? { tile, side: side } : null;
+    }
+
+    // Neural net guided move selection (requires model loaded)
+    // Returns array of {tile, side, score, reasons} sorted by neural policy probability
+    function neuralEval(hand, lE, rE, bLen, player, knowledge) {
+      if (!_nnModel) return null;
+      const state = _nnEncodeState(hand, lE, rE, bLen, player, knowledge);
+      const mask = _nnActionMask(hand, lE, rE, bLen);
+      const { policy, value } = _nnForward(state, mask);
+
+      // Convert policy distribution to move list
+      const results = [];
+      for (let a = 0; a < NN_NUM_ACTIONS; a++) {
+        if (mask[a] < 0.5 || policy[a] < 0.001) continue;
+        const decoded = _nnDecodeAction(a, hand);
+        if (!decoded) continue;
+        results.push({
+          tile: decoded.tile,
+          side: decoded.side,
+          score: Math.round(policy[a] * 1000),
+          reasons: [`NN policy: ${(policy[a] * 100).toFixed(1)}%, value: ${value.toFixed(3)}`],
+        });
+      }
+      results.sort((a, b) => b.score - a.score);
+      return results;
+    }
+
+    window.loadNeuralModel = loadNeuralModel;
+    window.neuralEval = neuralEval;
+
     // ========== ISMCTS (Information Set Monte Carlo Tree Search) ==========
 
     class ISMCTSNode {
@@ -6614,23 +6885,52 @@
       const { tile, side } = move;
       let h = 0;
       const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
-      // Compute new end after move
-      let newEnd;
-      if (bLen === 0) { newEnd = tile.right; }
-      else if (side === 'left') { newEnd = tile.left === lE ? tile.right : tile.left; }
-      else { newEnd = tile.right === rE ? tile.left : tile.right; }
+      const partner = (player + 2) % 4;
+      // Compute new end and other end after move
+      let newEnd, otherEnd;
+      if (bLen === 0) { newEnd = tile.right; otherEnd = tile.left; }
+      else if (side === 'left') { newEnd = tile.left === lE ? tile.right : tile.left; otherEnd = rE; }
+      else { newEnd = tile.right === rE ? tile.left : tile.right; otherEnd = lE; }
       // Suit control: tiles in hand matching new board end
       for (const t of hand) {
         if (t.id !== tile.id && (t.left === newEnd || t.right === newEnd)) h += 0.04;
       }
       // Double clearing bonus
       if (tile.left === tile.right) h += 0.03;
-      // Blocking bonus
-      if (knowledge.cantHave[opp1].has(newEnd)) h += 0.04;
-      if (knowledge.cantHave[opp2].has(newEnd)) h += 0.03;
-      // Near-win bonus
+      // Blocking: opponent void on BOTH ends
+      if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) h += 0.06;
+      else if (knowledge.cantHave[opp1].has(newEnd)) h += 0.04;
+      if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) h += 0.05;
+      else if (knowledge.cantHave[opp2].has(newEnd)) h += 0.03;
+      // Partner void penalty
+      if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) h -= 0.03;
+      // Dead number detection
+      if (bLen > 0) {
+        const remNew = knowledge.remainingWithNumber(newEnd);
+        if (remNew <= 1 && newEnd !== otherEnd) {
+          const tileHasOther = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+          const remOther = knowledge.remainingWithNumber(otherEnd) - tileHasOther;
+          if (remOther > 0) h -= 0.06; // one end dead, bad
+          else h -= 0.02; // both dead, depends on pips (mild penalty)
+        }
+      }
+      // Near-win / closing bonus
       if (hand.length === 1) h += 0.5;
-      else if (hand.length === 2) h += 0.05;
+      else if (hand.length === 2) {
+        const last = hand.find(t => t.id !== tile.id);
+        if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) h += 0.12;
+        else h -= 0.04;
+      } else if (hand.length === 3) {
+        let cover = 0;
+        for (const t of hand) {
+          if (t.id !== tile.id && (t.left === newEnd || t.right === newEnd || t.left === otherEnd || t.right === otherEnd)) cover++;
+        }
+        if (cover === 2) h += 0.04;
+        else if (cover === 0) h -= 0.03;
+      }
+      // Phase-dependent pip weight (favor high-pip dumps in endgame)
+      const pipMul = bLen <= 4 ? 0.001 : (bLen <= 14 ? 0.003 : 0.005);
+      h += (tile.left + tile.right) * pipMul;
       return h;
     }
 
