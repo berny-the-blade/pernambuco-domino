@@ -1058,6 +1058,760 @@
         return best;
       };
 
+      // === TILE INDEX LOOKUP ===
+      const TILE_INDEX = {};
+      ALL_TILES.forEach((t, i) => { TILE_INDEX[t.id] = i; });
+
+      // === BITMASK ENDGAME LOOKUP TABLES ===
+      const _EG_TILE_LEFT   = new Int8Array(28);
+      const _EG_TILE_RIGHT  = new Int8Array(28);
+      const _EG_TILE_PIPS   = new Int8Array(28);
+      const _EG_TILE_DOUBLE = new Uint8Array(28);
+      const _EG_TILES_WITH_PIP = new Int32Array(7);
+      (() => {
+        for (let i = 0; i < 28; i++) {
+          const t = ALL_TILES[i];
+          _EG_TILE_LEFT[i] = t.left;
+          _EG_TILE_RIGHT[i] = t.right;
+          _EG_TILE_PIPS[i] = t.left + t.right;
+          _EG_TILE_DOUBLE[i] = (t.left === t.right) ? 1 : 0;
+        }
+        for (let n = 0; n < 7; n++) {
+          let mask = 0;
+          for (let i = 0; i < 28; i++) {
+            if (_EG_TILE_LEFT[i] === n || _EG_TILE_RIGHT[i] === n) mask |= (1 << i);
+          }
+          _EG_TILES_WITH_PIP[n] = mask;
+        }
+      })();
+
+      // === SplitMix64 PRNG for Zobrist hashing ===
+      class SplitMix64 {
+        constructor(seed) {
+          this.s0 = seed >>> 0;
+          this.s1 = (seed / 0x100000000) >>> 0;
+        }
+        _add64(aLo, aHi, bLo, bHi) {
+          const lo = (aLo + bLo) >>> 0;
+          const hi = (aHi + bHi + (lo < aLo ? 1 : 0)) >>> 0;
+          return [lo, hi];
+        }
+        _xorshift(lo, hi, bits) {
+          if (bits < 32) {
+            const rLo = ((lo >>> bits) | (hi << (32 - bits))) >>> 0;
+            const rHi = (hi >>> bits) >>> 0;
+            return [(lo ^ rLo) >>> 0, (hi ^ rHi) >>> 0];
+          }
+          const b = bits - 32;
+          return [(lo ^ (hi >>> b)) >>> 0, hi];
+        }
+        _mul64(aLo, aHi, bLo, bHi) {
+          const al = aLo & 0xFFFF, ah = aLo >>> 16;
+          const bl = bLo & 0xFFFF, bh = bLo >>> 16;
+          let lo = al * bl;
+          let mid = ah * bl + (lo >>> 16);
+          mid += al * bh;
+          let hi = (mid >>> 16) + ah * bh;
+          lo = ((mid & 0xFFFF) << 16) | (lo & 0xFFFF);
+          hi = (hi + aLo * bHi + aHi * bLo) >>> 0;
+          return [lo >>> 0, hi >>> 0];
+        }
+        next() {
+          const [lo, hi] = this._add64(this.s0, this.s1, 0x7f4a7c15, 0x9e3779b9);
+          this.s0 = lo; this.s1 = hi;
+          let [zLo, zHi] = [lo, hi];
+          [zLo, zHi] = this._xorshift(zLo, zHi, 30);
+          [zLo, zHi] = this._mul64(zLo, zHi, 0x1ce4e5b9, 0xbf58476d);
+          [zLo, zHi] = this._xorshift(zLo, zHi, 27);
+          [zLo, zHi] = this._mul64(zLo, zHi, 0x133111eb, 0x94d049bb);
+          [zLo, zHi] = this._xorshift(zLo, zHi, 31);
+          return [zLo, zHi];
+        }
+        random() { const [lo] = this.next(); return (lo >>> 0) / 0x100000000; }
+        randomInt(max) { return Math.floor(this.random() * max); }
+      }
+
+      // === ZOBRIST HASH TABLES ===
+      const _ZOBRIST = (() => {
+        const rng = new SplitMix64(0xDEADBEEF);
+        const tp = [];
+        for (let t = 0; t < 28; t++) {
+          tp[t] = [];
+          for (let p = 0; p < 4; p++) tp[t][p] = rng.randomInt(0x7FFFFFFF);
+        }
+        const le = [], re = [];
+        for (let n = 0; n < 7; n++) { le[n] = rng.randomInt(0x7FFFFFFF); re[n] = rng.randomInt(0x7FFFFFFF); }
+        const np = [];
+        for (let p = 0; p < 4; p++) np[p] = rng.randomInt(0x7FFFFFFF);
+        const pc = [];
+        for (let c = 0; c < 5; c++) pc[c] = rng.randomInt(0x7FFFFFFF);
+        const bl = [];
+        for (let b = 0; b < 25; b++) bl[b] = rng.randomInt(0x7FFFFFFF);
+        return { tp, le, re, np, pc, bl };
+      })();
+
+      // === MATCH EQUITY TABLE ===
+      const MATCH_TARGET = 6;
+      const POINT_DIST = [
+        { pts: 1, prob: 0.70 },
+        { pts: 2, prob: 0.16 },
+        { pts: 3, prob: 0.10 },
+        { pts: 4, prob: 0.04 }
+      ];
+      const DOB_VALUES = [1, 2, 4, 8];
+      const ME3D = (() => {
+        const T = MATCH_TARGET;
+        const S = T + 5;
+        const me = Array.from({length: S}, () =>
+          Array.from({length: S}, () => new Float64Array(DOB_VALUES.length))
+        );
+        for (let d = 0; d < DOB_VALUES.length; d++) {
+          for (let s2 = 0; s2 < S; s2++) {
+            for (let s1 = T; s1 < S; s1++) me[s1][s2][d] = s2 >= T ? 0.5 : 1.0;
+          }
+          for (let s1 = 0; s1 < T; s1++) {
+            for (let s2 = T; s2 < S; s2++) me[s1][s2][d] = 0.0;
+          }
+        }
+        const TIE_PROB = 0.03;
+        for (let s1 = T - 1; s1 >= 0; s1--) {
+          for (let s2 = T - 1; s2 >= 0; s2--) {
+            for (let d = DOB_VALUES.length - 1; d >= 0; d--) {
+              const dob = DOB_VALUES[d];
+              let decisive = 0;
+              for (const { pts: basePts, prob } of POINT_DIST) {
+                const pts = basePts * dob;
+                const s1w = Math.min(s1 + pts, T + 4);
+                const s2w = Math.min(s2 + pts, T + 4);
+                decisive += 0.5 * prob * me[s1w][s2][0] + 0.5 * prob * me[s1][s2w][0];
+              }
+              const nextDobIdx = Math.min(d + 1, DOB_VALUES.length - 1);
+              if (d === DOB_VALUES.length - 1) {
+                me[s1][s2][d] = decisive;
+              } else {
+                me[s1][s2][d] = decisive * (1 - TIE_PROB) + TIE_PROB * me[s1][s2][nextDobIdx];
+              }
+            }
+          }
+        }
+        return me;
+      })();
+
+      const getMatchEquity3D = (s1, s2, dobMultiplier) => {
+        const dIdx = DOB_VALUES.indexOf(dobMultiplier);
+        const d = dIdx >= 0 ? dIdx : 0;
+        return ME3D[Math.min(s1, MATCH_TARGET + 4)][Math.min(s2, MATCH_TARGET + 4)][d];
+      };
+
+      // Convert rollout result to match equity delta
+      const _rolloutToMEReward = (winnerTeam, points, myTeam, matchScores, dobMultiplier) => {
+        if (winnerTeam < 0) return 0;
+        const myScore = matchScores[myTeam], oppScore = matchScores[1 - myTeam];
+        const dob = dobMultiplier || 1;
+        const currentME = getMatchEquity3D(myScore, oppScore, dob);
+        const pts = points * dob;
+        let newME;
+        if (winnerTeam === myTeam) {
+          newME = getMatchEquity3D(Math.min(myScore + pts, MATCH_TARGET + 4), oppScore, 1);
+        } else {
+          newME = getMatchEquity3D(myScore, Math.min(oppScore + pts, MATCH_TARGET + 4), 1);
+        }
+        return newME - currentME;
+      };
+
+      // === BITMASK ENDGAME SOLVER ===
+      const ENDGAME_BUDGET_MS = 500;
+      const ENDGAME_SAMPLE_COUNT = 100;
+
+      const _egResolveBlock = (handBits) => {
+        const pts = [0, 0, 0, 0];
+        for (let p = 0; p < 4; p++) {
+          let mask = handBits[p];
+          while (mask) {
+            const bit = mask & (-mask);
+            pts[p] += _EG_TILE_PIPS[31 - Math.clz32(bit)];
+            mask ^= bit;
+          }
+        }
+        const min = Math.min(pts[0], pts[1], pts[2], pts[3]);
+        const winners = [];
+        for (let p = 0; p < 4; p++) { if (pts[p] === min) winners.push(p); }
+        if (winners.length > 1 && winners.some(w => (w % 2) === 0) && winners.some(w => (w % 2) === 1)) {
+          return { type: 'tie', points: 0 };
+        }
+        return { type: 'blocked', team: winners[0] % 2, points: 1 };
+      };
+
+      const _egScoreWin = (tileIdx, prevLE, prevRE, boardLen) => {
+        const isD = _EG_TILE_DOUBLE[tileIdx];
+        let wasBoth = false;
+        if (boardLen > 1 && prevLE >= 0 && prevRE >= 0) {
+          const tL = _EG_TILE_LEFT[tileIdx], tR = _EG_TILE_RIGHT[tileIdx];
+          if (prevLE === prevRE) {
+            wasBoth = (tL === prevLE && tR === prevLE);
+          } else {
+            wasBoth = (tL === prevLE || tR === prevLE) && (tL === prevRE || tR === prevRE);
+          }
+        }
+        if (isD && wasBoth) return 4;
+        if (isD) return 2;
+        if (wasBoth) return 3;
+        return 1;
+      };
+
+      const _egHashInit = (handBits, lE, rE, bLen, nextPlayer, passCount) => {
+        let h = 0;
+        for (let p = 0; p < 4; p++) {
+          let mask = handBits[p];
+          while (mask) {
+            const bit = mask & (-mask);
+            h ^= _ZOBRIST.tp[31 - Math.clz32(bit)][p];
+            mask ^= bit;
+          }
+        }
+        h ^= _ZOBRIST.bl[Math.min(bLen, 24)];
+        if (bLen > 0) { h ^= _ZOBRIST.le[lE]; h ^= _ZOBRIST.re[rE]; }
+        h ^= _ZOBRIST.np[nextPlayer];
+        h ^= _ZOBRIST.pc[Math.min(passCount, 4)];
+        return h;
+      };
+
+      const _egMoveScore = (tileIdx, handAfter, lE, rE, bLen, ttBestTile) => {
+        let s = 0;
+        if (handAfter === 0) s += 10000;
+        if (tileIdx === ttBestTile) s += 5000;
+        if (_EG_TILE_DOUBLE[tileIdx]) s += 100;
+        s += _EG_TILE_PIPS[tileIdx] * 3;
+        if (bLen > 0) {
+          const tL = _EG_TILE_LEFT[tileIdx], tR = _EG_TILE_RIGHT[tileIdx];
+          if ((tL === lE || tR === lE) && (tL === rE || tR === rE)) s += 50;
+        }
+        return s;
+      };
+
+      const _endgameMinimaxBit = (handBits, lE, rE, bLen, nextPlayer, passCount, myTeam, alpha, beta, deadline, tt, hash, matchScores, dobMul) => {
+        if (Date.now() > deadline) return 0;
+        if (passCount >= 4) {
+          const block = _egResolveBlock(handBits);
+          return block.type === 'tie' ? 0 : _rolloutToMEReward(block.team, block.points, myTeam, matchScores, dobMul);
+        }
+
+        let ttBestTile = -1;
+        const ttEntry = tt.get(hash);
+        if (ttEntry) {
+          if (ttEntry.f === 0) return ttEntry.v;
+          if (ttEntry.f === 1 && ttEntry.v >= beta) return ttEntry.v;
+          if (ttEntry.f === 2 && ttEntry.v <= alpha) return ttEntry.v;
+          if (ttEntry.f === 1 && ttEntry.v > alpha) alpha = ttEntry.v;
+          if (ttEntry.f === 2 && ttEntry.v < beta) beta = ttEntry.v;
+          if (ttEntry.m >= 0) ttBestTile = ttEntry.m;
+        }
+        const origAlpha = alpha;
+        const origBeta = beta;
+
+        const hand = handBits[nextPlayer];
+        const playableMask = (bLen === 0) ? hand : (hand & (_EG_TILES_WITH_PIP[lE] | _EG_TILES_WITH_PIP[rE]));
+
+        if (playableMask === 0) {
+          const newNext = (nextPlayer + 1) % 4;
+          const newPass = passCount + 1;
+          let ph = hash;
+          ph ^= _ZOBRIST.np[nextPlayer]; ph ^= _ZOBRIST.np[newNext];
+          ph ^= _ZOBRIST.pc[Math.min(passCount, 4)]; ph ^= _ZOBRIST.pc[Math.min(newPass, 4)];
+          const val = _endgameMinimaxBit(handBits, lE, rE, bLen, newNext, newPass, myTeam, alpha, beta, deadline, tt, ph, matchScores, dobMul);
+          tt.set(hash, { v: val, f: 0, m: -1 });
+          return val;
+        }
+
+        const moves = [];
+        let rem = playableMask;
+        while (rem) {
+          const bit = rem & (-rem);
+          const tileIdx = 31 - Math.clz32(bit);
+          rem ^= bit;
+          const tL = _EG_TILE_LEFT[tileIdx], tR = _EG_TILE_RIGHT[tileIdx];
+          const sides = [];
+          if (bLen === 0) {
+            sides.push(0);
+          } else {
+            if (tL === lE || tR === lE) sides.push(1);
+            if ((tL === rE || tR === rE) && lE !== rE) sides.push(2);
+            if (sides.length === 0 && (tL === rE || tR === rE)) sides.push(2);
+          }
+          for (let si = 0; si < sides.length; si++) {
+            const handAfter = hand ^ bit;
+            moves.push({ bit, tileIdx, tL, tR, side: sides[si], score: _egMoveScore(tileIdx, handAfter, lE, rE, bLen, ttBestTile) });
+          }
+        }
+        if (moves.length > 1) moves.sort((a, b) => b.score - a.score);
+
+        const isMax = (nextPlayer % 2) === myTeam;
+        let bestVal = isMax ? -Infinity : Infinity;
+        let bestMove = -1;
+        const newNext = (nextPlayer + 1) % 4;
+
+        for (let mi = 0; mi < moves.length; mi++) {
+          if (Date.now() > deadline) break;
+          const { bit, tileIdx, tL, tR, side } = moves[mi];
+          let newLE = lE, newRE = rE;
+          if (side === 0) { newLE = tL; newRE = tR; }
+          else if (side === 1) { newLE = (tL === lE) ? tR : tL; }
+          else { newRE = (tR === rE) ? tL : tR; }
+
+          handBits[nextPlayer] ^= bit;
+          let val;
+          if (handBits[nextPlayer] === 0) {
+            const pts = _egScoreWin(tileIdx, lE, rE, bLen + 1);
+            val = _rolloutToMEReward(nextPlayer % 2, pts, myTeam, matchScores, dobMul);
+          } else {
+            let mh = hash;
+            mh ^= _ZOBRIST.tp[tileIdx][nextPlayer];
+            mh ^= _ZOBRIST.bl[Math.min(bLen, 24)];
+            if (bLen > 0) { mh ^= _ZOBRIST.le[lE]; mh ^= _ZOBRIST.re[rE]; }
+            mh ^= _ZOBRIST.np[nextPlayer]; mh ^= _ZOBRIST.pc[Math.min(passCount, 4)];
+            mh ^= _ZOBRIST.bl[Math.min(bLen + 1, 24)];
+            mh ^= _ZOBRIST.le[newLE]; mh ^= _ZOBRIST.re[newRE];
+            mh ^= _ZOBRIST.np[newNext]; mh ^= _ZOBRIST.pc[0];
+            val = _endgameMinimaxBit(handBits, newLE, newRE, bLen + 1, newNext, 0, myTeam, alpha, beta, deadline, tt, mh, matchScores, dobMul);
+          }
+          handBits[nextPlayer] ^= bit;
+
+          if (isMax) {
+            if (val > bestVal) { bestVal = val; bestMove = tileIdx; }
+            if (bestVal > alpha) alpha = bestVal;
+          } else {
+            if (val < bestVal) { bestVal = val; bestMove = tileIdx; }
+            if (bestVal < beta) beta = bestVal;
+          }
+          if (beta <= alpha) break;
+        }
+
+        let flag;
+        if (bestVal <= origAlpha) flag = 2;
+        else if (bestVal >= origBeta) flag = 1;
+        else flag = 0;
+        tt.set(hash, { v: bestVal, f: flag, m: bestMove });
+        return bestVal;
+      };
+
+      // Endgame solver entry point
+      const endgameSolve = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+        if (bLen === 0) return null;
+        const deadline = Date.now() + ENDGAME_BUDGET_MS;
+        const myTeam = player % 2;
+        const canPlayTile = (t) => t.left === lE || t.right === lE || t.left === rE || t.right === rE;
+        const playable = hand.filter(canPlayTile);
+        if (playable.length === 0) return null;
+        if (playable.length === 1) return { tile: playable[0], side: null };
+
+        // Compute hand sizes from knowledge
+        const playedPerPlayer = knowledge.playsBy.map(a => a.length);
+        const handSizes = [0, 0, 0, 0];
+        for (let p = 0; p < 4; p++) {
+          handSizes[p] = p === player ? hand.length : Math.max(1, 6 - playedPerPlayer[p]);
+        }
+
+        // Sample consistent deals and solve with minimax
+        const deals = [];
+        for (let i = 0; i < ENDGAME_SAMPLE_COUNT && Date.now() < deadline; i++) {
+          try {
+            const deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+            deals.push(deal);
+          } catch(e) { /* skip failed samples */ }
+        }
+        if (deals.length === 0) return null;
+
+        // Build move registry
+        const moveEntries = [];
+        for (const tile of playable) {
+          const sides = [];
+          if (tile.left === lE || tile.right === lE) sides.push('left');
+          if ((tile.left === rE || tile.right === rE) && lE !== rE) sides.push('right');
+          if (sides.length === 0 && (tile.left === rE || tile.right === rE)) sides.push('right');
+          for (const side of sides) {
+            moveEntries.push({ tile, side, totalME: 0, solvedWeight: 0, deals: 0 });
+          }
+        }
+
+        const ms = matchScores || [0, 0];
+        const dm = dobMultiplier || 1;
+
+        for (let d = 0; d < deals.length && Date.now() < deadline; d++) {
+          const deal = deals[d];
+          const w = 1 / deals.length;
+          const tt = new Map();
+
+          const dealBits = new Int32Array(4);
+          for (let p = 0; p < 4; p++) {
+            let mask = 0;
+            const src = (p === player) ? hand : deal[p];
+            for (let i = 0; i < src.length; i++) mask |= (1 << TILE_INDEX[src[i].id]);
+            dealBits[p] = mask;
+          }
+
+          for (let m = 0; m < moveEntries.length; m++) {
+            if (Date.now() > deadline) break;
+            const entry = moveEntries[m];
+            const { tile, side } = entry;
+            const tileIdx = TILE_INDEX[tile.id];
+            const tileBit = 1 << tileIdx;
+
+            let newLE = lE, newRE = rE;
+            if (side === 'left') { newLE = tile.left === lE ? tile.right : tile.left; }
+            else { newRE = tile.right === rE ? tile.left : tile.right; }
+
+            const solveBits = new Int32Array(dealBits);
+            solveBits[player] ^= tileBit;
+
+            if (solveBits[player] === 0) {
+              const pts = _egScoreWin(tileIdx, lE, rE, bLen + 1);
+              const reward = _rolloutToMEReward(player % 2, pts, myTeam, ms, dm);
+              entry.totalME += w * reward;
+              entry.solvedWeight += w;
+              entry.deals++;
+              continue;
+            }
+
+            const initHash = _egHashInit(solveBits, newLE, newRE, bLen + 1, (player + 1) % 4, 0);
+            const val = _endgameMinimaxBit(solveBits, newLE, newRE, bLen + 1, (player + 1) % 4, 0, myTeam, -Infinity, Infinity, deadline, tt, initHash, ms, dm);
+            entry.totalME += w * val;
+            entry.solvedWeight += w;
+            entry.deals++;
+          }
+        }
+
+        // Pick best move per tile
+        const tileResults = new Map();
+        for (const entry of moveEntries) {
+          if (entry.solvedWeight === 0) continue;
+          const me = entry.totalME / entry.solvedWeight;
+          const result = { tile: entry.tile, side: entry.side, expectedPoints: me * 4 };
+          const tileKey = entry.tile.id;
+          if (!tileResults.has(tileKey) || result.expectedPoints > tileResults.get(tileKey).expectedPoints) {
+            tileResults.set(tileKey, result);
+          }
+        }
+
+        const results = [...tileResults.values()];
+        results.sort((a, b) => b.expectedPoints - a.expectedPoints);
+        return results.length > 0 ? results[0] : null;
+      };
+
+      // === ISMCTS (Information Set Monte Carlo Tree Search) ===
+      class ISMCTSNode {
+        constructor(move = null, parent = null) {
+          this.move = move;
+          this.parent = parent;
+          this.children = [];
+          this.visits = 0;
+          this.totalReward = 0;
+          this.hBias = 0;
+        }
+        ucb1(C = 1.41) {
+          if (this.visits === 0) return Infinity;
+          return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits) + this.hBias / (this.visits + 1);
+        }
+        selectChild(legalMoves) {
+          const legal = this.children.filter(c =>
+            legalMoves.some(m => m.tile.id === c.move.tile.id && m.side === c.move.side)
+          );
+          if (legal.length === 0) return null;
+          let best = legal[0], bestUCB = legal[0].ucb1();
+          for (let i = 1; i < legal.length; i++) {
+            const u = legal[i].ucb1();
+            if (u > bestUCB) { best = legal[i]; bestUCB = u; }
+          }
+          return best;
+        }
+        expand(move) {
+          const child = new ISMCTSNode(move, this);
+          this.children.push(child);
+          return child;
+        }
+        update(reward) { this.visits++; this.totalReward += reward; }
+      }
+
+      const ismctsGetLegalMoves = (hand, lE, rE, bLen) => {
+        const playable = hand.filter(t => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE);
+        const moves = [];
+        for (const tile of playable) {
+          if (bLen === 0) {
+            moves.push({ tile, side: null });
+          } else {
+            if (tile.left === lE || tile.right === lE) moves.push({ tile, side: 'left' });
+            if ((tile.left === rE || tile.right === rE) && lE !== rE) moves.push({ tile, side: 'right' });
+            if (moves.length === 0 || moves[moves.length-1].tile.id !== tile.id) {
+              if (tile.left === rE || tile.right === rE) moves.push({ tile, side: 'right' });
+            }
+          }
+        }
+        return moves;
+      };
+
+      const ismctsApplyMove = (tile, side, lE, rE, bLen) => {
+        if (bLen === 0) return { newLE: tile.left, newRE: tile.right };
+        if (side === 'left') return { newLE: tile.left === lE ? tile.right : tile.left, newRE: rE };
+        return { newLE: lE, newRE: tile.right === rE ? tile.left : tile.right };
+      };
+
+      // Heuristic bias for ISMCTS progressive bias
+      const _ismctsHeuristic = (move, hand, lE, rE, bLen, knowledge, player) => {
+        const { tile, side } = move;
+        let h = 0;
+        const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+        const partner = (player + 2) % 4;
+        let newEnd, otherEnd;
+        if (bLen === 0) { newEnd = tile.right; otherEnd = tile.left; }
+        else if (side === 'left') { newEnd = tile.left === lE ? tile.right : tile.left; otherEnd = rE; }
+        else { newEnd = tile.right === rE ? tile.left : tile.right; otherEnd = lE; }
+        for (const t of hand) {
+          if (t.id !== tile.id && (t.left === newEnd || t.right === newEnd)) h += 0.04;
+        }
+        if (tile.left === tile.right) h += 0.03;
+        if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) h += 0.06;
+        else if (knowledge.cantHave[opp1].has(newEnd)) h += 0.04;
+        if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) h += 0.05;
+        else if (knowledge.cantHave[opp2].has(newEnd)) h += 0.03;
+        if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) h -= 0.03;
+        if (bLen > 0) {
+          const remNew = knowledge.remainingWithNumber(newEnd);
+          if (remNew <= 1 && newEnd !== otherEnd) {
+            const tileHasOther = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+            const remOther = knowledge.remainingWithNumber(otherEnd) - tileHasOther;
+            if (remOther > 0) h -= 0.06;
+            else h -= 0.02;
+          }
+        }
+        if (hand.length === 1) h += 0.5;
+        else if (hand.length === 2) {
+          const last = hand.find(t => t.id !== tile.id);
+          if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) h += 0.12;
+          else h -= 0.04;
+        } else if (hand.length === 3) {
+          let cover = 0;
+          for (const t of hand) {
+            if (t.id !== tile.id && (t.left === newEnd || t.right === newEnd || t.left === otherEnd || t.right === otherEnd)) cover++;
+          }
+          if (cover === 2) h += 0.04;
+          else if (cover === 0) h -= 0.03;
+        }
+        const pipMul = bLen <= 4 ? 0.001 : (bLen <= 14 ? 0.003 : 0.005);
+        h += (tile.left + tile.right) * pipMul;
+        return h;
+      };
+
+      const _ismctsBackprop = (node, reward) => {
+        while (node) { node.update(reward); node = node.parent; }
+      };
+
+      // Score a win for ISMCTS (object-based hands)
+      const _ismctsScoreWin = (tile, prevLE, prevRE, boardLen) => {
+        const isD = tile.left === tile.right;
+        let wasBoth = false;
+        if (boardLen > 1 && prevLE >= 0 && prevRE >= 0) {
+          if (prevLE === prevRE) {
+            wasBoth = (tile.left === prevLE && tile.right === prevLE);
+          } else {
+            wasBoth = (tile.left === prevLE || tile.right === prevLE) && (tile.left === prevRE || tile.right === prevRE);
+          }
+        }
+        if (isD && wasBoth) return 4;
+        if (isD) return 2;
+        if (wasBoth) return 3;
+        return 1;
+      };
+
+      const ismctsEval = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+        const MAX_ITERATIONS = 600;
+        const TIME_LIMIT = 300;
+        const MAX_NODES = 5000;
+        const myTeam = player % 2;
+        const ms = matchScores || [0, 0];
+        const dm = dobMultiplier || 1;
+
+        const playedPerPlayer = knowledge.playsBy.map(a => a.length);
+        const handSizes = [0, 0, 0, 0];
+        for (let p = 0; p < 4; p++) {
+          handSizes[p] = p === player ? hand.length : Math.max(1, 6 - playedPerPlayer[p]);
+        }
+
+        const root = new ISMCTSNode();
+        let nodeCount = 1;
+        const startTime = Date.now();
+
+        for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+          if (Date.now() - startTime > TIME_LIMIT) break;
+          if (nodeCount >= MAX_NODES) break;
+
+          // 1. DETERMINIZE: sample a consistent deal
+          let deal;
+          try { deal = generateConsistentDeal(hand, handSizes, knowledge, player); }
+          catch(e) { continue; }
+
+          // 2. SELECT + EXPAND + ROLLOUT
+          let node = root;
+          let simHands = deal.map(h => [...h]);
+          simHands[player] = [...hand];
+          let simLE = lE, simRE = rE, simBLen = bLen;
+          let simK = {
+            cantHave: knowledge.cantHave.map(s => new Set(s)),
+            played: new Set(knowledge.played),
+            playsBy: knowledge.playsBy.map(a => [...a]),
+            _rc: [...Array(7)].map((_, n) => knowledge.remainingWithNumber(n)),
+            _sc: [null, null, null, null],
+            remainingWithNumber(n) { return this._rc[n]; },
+            inferStrength(p) {
+              if (this._sc[p]) return this._sc[p];
+              const s = [0,0,0,0,0,0,0];
+              for (const t of this.playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+              this._sc[p] = s; return s;
+            },
+            recordPlay(p, t) {
+              if (!this.played.has(t.id)) {
+                this.played.add(t.id);
+                this._rc[t.left]--;
+                if (t.left !== t.right) this._rc[t.right]--;
+              }
+              this.playsBy[p].push(t);
+              this._sc[p] = null;
+            },
+            recordPass(p, le, re) { this.cantHave[p].add(le); this.cantHave[p].add(re); }
+          };
+          let curPlayer = player;
+
+          // Selection phase
+          while (node.children.length > 0) {
+            const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
+            if (legalMoves.length === 0) break;
+
+            const child = node.selectChild(legalMoves);
+            if (!child) break;
+
+            // Progressive widening
+            const untriedMoves = legalMoves.filter(m =>
+              !node.children.some(c => c.move.tile.id === m.tile.id && c.move.side === m.side)
+            );
+            if (untriedMoves.length > 0 && node.children.length < Math.ceil(Math.sqrt(node.visits + 1))) {
+              const expandMove = untriedMoves[Math.floor(Math.random() * untriedMoves.length)];
+              const _prevNode = node;
+              node = node.expand(expandMove);
+              nodeCount++;
+              if (_prevNode === root && curPlayer === player) {
+                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+              }
+              const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
+              simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
+              simK.recordPlay(curPlayer, expandMove.tile);
+              simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+              if (simHands[curPlayer].length === 0) {
+                const pts = _ismctsScoreWin(expandMove.tile, lE, rE, simBLen);
+                const reward = _rolloutToMEReward(curPlayer % 2, pts, myTeam, ms, dm);
+                _ismctsBackprop(node, reward);
+                break;
+              }
+              curPlayer = (curPlayer + 1) % 4;
+              break;
+            }
+
+            // Follow selected child
+            const { tile, side } = child.move;
+            const applied = ismctsApplyMove(tile, side, simLE, simRE, simBLen);
+            simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== tile.id);
+            simK.recordPlay(curPlayer, tile);
+            simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+            if (simHands[curPlayer].length === 0) {
+              const pts = _ismctsScoreWin(tile, lE, rE, simBLen);
+              const reward = _rolloutToMEReward(curPlayer % 2, pts, myTeam, ms, dm);
+              _ismctsBackprop(child, reward);
+              node = null;
+              break;
+            }
+            curPlayer = (curPlayer + 1) % 4;
+            node = child;
+          }
+
+          if (node === null) continue;
+
+          // Expansion at leaf
+          if (node.children.length === 0) {
+            const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
+            if (legalMoves.length > 0) {
+              const expandMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+              const _leafParent = node;
+              node = node.expand(expandMove);
+              nodeCount++;
+              if (_leafParent === root && curPlayer === player) {
+                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+              }
+              const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
+              simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
+              simK.recordPlay(curPlayer, expandMove.tile);
+              simLE = applied.newLE; simRE = applied.newRE; simBLen++;
+              if (simHands[curPlayer].length === 0) {
+                const pts = _ismctsScoreWin(expandMove.tile, lE, rE, simBLen);
+                const reward = _rolloutToMEReward(curPlayer % 2, pts, myTeam, ms, dm);
+                _ismctsBackprop(node, reward);
+                continue;
+              }
+              curPlayer = (curPlayer + 1) % 4;
+            }
+          }
+
+          // 3. ROLLOUT using fastAI
+          const result = simulateFromPosition(simHands, simLE, simRE, curPlayer, simK, simBLen);
+          const winTeam = result.winnerTeam !== undefined ? result.winnerTeam : result.team;
+          const reward = (winTeam >= 0)
+            ? _rolloutToMEReward(winTeam, result.points, myTeam, ms, dm)
+            : 0;
+          _ismctsBackprop(node, reward);
+        }
+
+        // Extract best move from root children
+        if (root.children.length === 0) return null;
+
+        const tileResults = new Map();
+        for (const child of root.children) {
+          if (child.visits === 0) continue;
+          const avgReward = child.totalReward / child.visits;
+          const tileKey = child.move.tile.id;
+          const r = { tile: child.move.tile, side: child.move.side, expectedPoints: avgReward * 4, visits: child.visits };
+          if (!tileResults.has(tileKey) || r.expectedPoints > tileResults.get(tileKey).expectedPoints) {
+            tileResults.set(tileKey, r);
+          }
+        }
+        const finalResults = [...tileResults.values()];
+        finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+        return finalResults.length > 0 ? finalResults[0] : null;
+      };
+
+      // === Expert AI router: endgame solver → ISMCTS → MC → smartAI ===
+      const expertAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+        if (bLen === 0) {
+          return smartAI(hand, lE, rE, bLen, player, knowledge);
+        }
+        // Count total remaining tiles (not played, not in dormidas)
+        const totalRemaining = 24 - (knowledge.played?.size || 0);
+
+        // Endgame: when few tiles remain, exact solver is tractable
+        if (totalRemaining <= 16) {
+          const egResult = endgameSolve(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+          if (egResult) return egResult;
+        }
+
+        // Mid-game: ISMCTS tree search for deeper strategic play
+        if (bLen >= 6) {
+          const ismctsResult = ismctsEval(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+          if (ismctsResult) return ismctsResult;
+        }
+
+        // Fallback: Monte Carlo rollouts
+        const mcResult = monteCarloEval(hand, lE, rE, bLen, player, knowledge);
+        if (mcResult) return mcResult;
+
+        // Last resort: heuristic
+        return smartAI(hand, lE, rE, bLen, player, knowledge);
+      };
+
       const executeTilePlay = async (tile, slot, side = null) => {
         const newHands = gameState.hands.map(h => [...h]);
         newHands[slot] = newHands[slot].filter(t => t.id !== tile.id);
@@ -1370,16 +2124,9 @@
           const knowledge = buildKnowledge(gameState.moveHistory);
           const bLen = gameState.board?.length || 0;
 
-          let result;
-          if (bLen === 0) {
-            // Opening move: use smartAI heuristic (no MC needed)
-            result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
-          } else {
-            // Mid/late game: use Monte Carlo rollouts for strongest play
-            result = monteCarloEval(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
-            // Fallback to smartAI if MC returns null
-            if (!result) result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
-          }
+          const matchScores = gameState.teamScores || [0, 0];
+          const dobMultiplier = gameState.scoreMultiplier || 1;
+          const result = expertAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge, matchScores, dobMultiplier);
 
           if (result) {
             await executeTilePlay(result.tile, currentSlot, result.side);
