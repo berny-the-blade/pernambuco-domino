@@ -779,6 +779,285 @@
         return scored[0] || null;
       };
 
+      // === Monte Carlo Rollout System ===
+      const ALL_TILES = createDeck(); // 28 tiles, immutable reference
+
+      // Fast rollout AI — lightweight scoring for MC simulations
+      const fastAI = (hand, lE, rE, bLen, player, knowledge) => {
+        const playable = hand.filter(t => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE);
+        if (playable.length === 0) return null;
+        if (playable.length === 1) return { tile: playable[0], side: null };
+
+        const partner = (player + 2) % 4;
+        const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+        const sc = new Array(7).fill(0);
+        for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
+
+        if (bLen === 0) {
+          let best = null, bestS = -Infinity;
+          for (const t of playable) {
+            const s = sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2;
+            if (s > bestS) { bestS = s; best = t; }
+          }
+          return { tile: best, side: null };
+        }
+
+        const deadMul = bLen <= 4 ? 0.4 : (bLen <= 14 ? 1.0 : 1.4);
+        let bestTile = null, bestSide = null, bestScore = -Infinity;
+        for (const tile of playable) {
+          for (const side of ['left', 'right']) {
+            const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
+            if (!cS) continue;
+            let newEnd = side === 'left' ? (tile.left === lE ? tile.right : tile.left) : (tile.right === rE ? tile.left : tile.right);
+            const otherEnd = side === 'left' ? rE : lE;
+            let ss = 0;
+            if (hand.length === 1) return { tile, side };
+            let mc = 0;
+            for (const h of hand) {
+              if (h.id !== tile.id && (h.left === newEnd || h.right === newEnd || h.left === otherEnd || h.right === otherEnd)) mc++;
+            }
+            ss += mc * 12;
+            if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 25;
+            if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) ss += 18;
+            if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) ss -= 15;
+            ss += Math.round((tile.left + tile.right) * 2 * deadMul);
+            if (tile.left === tile.right) ss += 10;
+            if (hand.length === 2) {
+              const last = hand.find(t => t.id !== tile.id);
+              if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) ss += 60;
+              else ss -= 30;
+            }
+            if (ss > bestScore) { bestScore = ss; bestTile = tile; bestSide = side; }
+          }
+        }
+        return bestTile ? { tile: bestTile, side: bestSide } : { tile: playable[0], side: null };
+      };
+
+      // Resolve a blocked game — returns { team, points, type }
+      const resolveBlock = (hands) => {
+        const vals = hands.map((h, i) => ({ p: i, pts: h.reduce((s, t) => s + t.left + t.right, 0) }));
+        const min = Math.min(...vals.map(v => v.pts));
+        const winners = vals.filter(v => v.pts === min);
+        if (winners.length > 1 && winners.some(w => w.p % 2 === 0) && winners.some(w => w.p % 2 === 1)) {
+          return { team: -1, points: 0, type: 'tie' };
+        }
+        return { team: winners[0].p % 2, points: 1, type: 'blocked' };
+      };
+
+      // Simulate a complete game from a position using fastAI
+      const simulateFromPosition = (hands, lE, rE, nextPlayer, knowledge, bLen) => {
+        const simHands = hands.map(h => [...h]);
+        let simLE = lE, simRE = rE, cur = nextPlayer, passCount = 0;
+        const simK = {
+          cantHave: knowledge.cantHave.map(s => new Set(s)),
+          played: new Set(knowledge.played),
+          playsBy: knowledge.playsBy.map(a => [...a]),
+          _rc: [...Array(7)].map((_, n) => knowledge.remainingWithNumber(n)),
+          _sc: [null, null, null, null],
+          remainingWithNumber(n) { return this._rc[n]; },
+          inferStrength(p) {
+            if (this._sc[p]) return this._sc[p];
+            const s = [0,0,0,0,0,0,0];
+            for (const t of this.playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+            this._sc[p] = s; return s;
+          },
+          recordPlay(p, t) {
+            if (!this.played.has(t.id)) {
+              this.played.add(t.id);
+              this._rc[t.left]--;
+              if (t.left !== t.right) this._rc[t.right]--;
+            }
+            this.playsBy[p].push(t);
+            this._sc[p] = null;
+          },
+          recordPass(p, le, re) {
+            this.cantHave[p].add(le);
+            this.cantHave[p].add(re);
+          }
+        };
+
+        for (let move = 0; move < 100; move++) {
+          const decision = fastAI(simHands[cur], simLE, simRE, bLen, cur, simK);
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (!side) side = (tile.left === simLE || tile.right === simLE) ? 'left' : 'right';
+            simHands[cur] = simHands[cur].filter(t => t.id !== tile.id);
+            simK.recordPlay(cur, tile);
+            const prevLE = simLE, prevRE = simRE;
+            if (bLen === 0) { simLE = tile.left; simRE = tile.right; }
+            else if (side === 'left') simLE = tile.left === simLE ? tile.right : tile.left;
+            else simRE = tile.right === simRE ? tile.left : tile.right;
+            bLen++;
+            if (simHands[cur].length === 0) {
+              const isD = tile.left === tile.right;
+              const wasBoth = couldPlayOnBothEnds(tile, prevLE, prevRE);
+              const pts = isD && wasBoth ? 4 : isD ? 2 : wasBoth ? 3 : 1;
+              return { winnerTeam: cur % 2, points: pts };
+            }
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            simK.recordPass(cur, simLE, simRE);
+            if (passCount >= 4) return resolveBlock(simHands);
+            cur = (cur + 1) % 4;
+          }
+        }
+        return { winnerTeam: -1, points: 0, type: 'tie' };
+      };
+
+      // Generate a random deal consistent with knowledge constraints
+      const generateConsistentDeal = (myHand, handSizes, knowledge, mySlot) => {
+        const pool = ALL_TILES.filter(t => !knowledge.played.has(t.id) && !myHand.some(h => h.id === t.id));
+        for (let attempt = 0; attempt < 50; attempt++) {
+          const shuffled = [...pool];
+          for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+          }
+          const deal = [[], [], [], []];
+          deal[mySlot] = [...myHand];
+          let cursor = 0, valid = true;
+          for (let p = 0; p < 4; p++) {
+            if (p === mySlot) continue;
+            for (let i = 0; i < handSizes[p] && cursor < shuffled.length; i++) {
+              const t = shuffled[cursor++];
+              if (knowledge.cantHave[p].has(t.left) || knowledge.cantHave[p].has(t.right)) { valid = false; break; }
+              deal[p].push(t);
+            }
+            if (!valid) break;
+          }
+          if (valid) return deal;
+        }
+        // Fallback: deal without constraints
+        const shuffled = [...pool];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        const deal = [[], [], [], []];
+        deal[mySlot] = [...myHand];
+        let cursor = 0;
+        for (let p = 0; p < 4; p++) {
+          if (p === mySlot) continue;
+          for (let i = 0; i < handSizes[p]; i++) deal[p].push(shuffled[cursor++]);
+        }
+        return deal;
+      };
+
+      // Monte Carlo evaluation — run N simulations per move, pick best
+      const MC_SIMS = 80;
+      const monteCarloEval = (hand, lE, rE, bLen, player, knowledge) => {
+        const canPlayMC = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
+        const playable = hand.filter(canPlayMC);
+        if (playable.length === 0) return null;
+        if (playable.length === 1) {
+          const t = playable[0];
+          const side = bLen === 0 ? null : (t.left === lE || t.right === lE) ? 'left' : 'right';
+          return { tile: t, side };
+        }
+
+        const myTeam = player % 2;
+        const handSizes = [0, 0, 0, 0];
+        // Estimate hand sizes from knowledge
+        for (let p = 0; p < 4; p++) {
+          if (p === player) { handSizes[p] = hand.length; continue; }
+          handSizes[p] = Math.max(0, 6 - knowledge.playsBy[p].length);
+        }
+
+        // Build all move options
+        const options = [];
+        for (const tile of playable) {
+          for (const side of ['left', 'right']) {
+            if (bLen === 0) {
+              options.push({ tile, side: null, wins: 0, totalPts: 0, sims: 0 });
+              break;
+            }
+            const cS = side === 'left' ? (tile.left === lE || tile.right === lE) : (tile.left === rE || tile.right === rE);
+            if (!cS) continue;
+            options.push({ tile, side, wins: 0, totalPts: 0, sims: 0 });
+          }
+        }
+
+        // Run simulations
+        for (let sim = 0; sim < MC_SIMS; sim++) {
+          for (const opt of options) {
+            // Apply this move
+            const newHand = hand.filter(t => t.id !== opt.tile.id);
+            let newLE = lE, newRE = rE, newBLen = bLen;
+            if (bLen === 0) { newLE = opt.tile.left; newRE = opt.tile.right; }
+            else if (opt.side === 'left') newLE = opt.tile.left === lE ? opt.tile.right : opt.tile.left;
+            else newRE = opt.tile.right === rE ? opt.tile.left : opt.tile.right;
+            newBLen++;
+
+            // Instant win
+            if (newHand.length === 0) {
+              const isD = opt.tile.left === opt.tile.right;
+              const wasBoth = couldPlayOnBothEnds(opt.tile, lE, rE);
+              const pts = isD && wasBoth ? 4 : isD ? 2 : wasBoth ? 3 : 1;
+              opt.wins += 1;
+              opt.totalPts += pts;
+              opt.sims++;
+              continue;
+            }
+
+            // Clone knowledge and record our play
+            const rc = [...Array(7)].map((_, n) => knowledge.remainingWithNumber(n));
+            rc[opt.tile.left]--;
+            if (opt.tile.left !== opt.tile.right) rc[opt.tile.right]--;
+            const playsBy = knowledge.playsBy.map(a => [...a]);
+            playsBy[player].push(opt.tile);
+            const simK = {
+              cantHave: knowledge.cantHave.map(s => new Set(s)),
+              played: new Set([...knowledge.played, opt.tile.id]),
+              playsBy,
+              remainingWithNumber: (n) => rc[n],
+              inferStrength: (p) => {
+                const s = [0,0,0,0,0,0,0];
+                for (const t of playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+                return s;
+              }
+            };
+
+            // Generate consistent deal and simulate
+            const newHandSizes = [...handSizes];
+            newHandSizes[player] = newHand.length;
+            const deal = generateConsistentDeal(newHand, newHandSizes, simK, player);
+            const result = simulateFromPosition(deal, newLE, newRE, (player + 1) % 4, simK, newBLen);
+
+            if (result.winnerTeam === myTeam) {
+              opt.wins++;
+              opt.totalPts += result.points;
+            } else if (result.winnerTeam >= 0) {
+              opt.totalPts -= result.points;
+            }
+            opt.sims++;
+          }
+        }
+
+        // Pick best: highest win rate, break ties by expected points
+        let best = null, bestWinRate = -1, bestPts = -Infinity;
+        const tileResults = new Map();
+        for (const opt of options) {
+          if (opt.sims === 0) continue;
+          const wr = opt.wins / opt.sims;
+          const ep = opt.totalPts / opt.sims;
+          const key = opt.tile.id + '|' + opt.side;
+          if (!tileResults.has(opt.tile.id) || wr > tileResults.get(opt.tile.id).wr || (wr === tileResults.get(opt.tile.id).wr && ep > tileResults.get(opt.tile.id).ep)) {
+            tileResults.set(opt.tile.id, { tile: opt.tile, side: opt.side, wr, ep });
+          }
+        }
+        for (const [, r] of tileResults) {
+          if (r.wr > bestWinRate || (r.wr === bestWinRate && r.ep > bestPts)) {
+            bestWinRate = r.wr;
+            bestPts = r.ep;
+            best = { tile: r.tile, side: r.side };
+          }
+        }
+        return best;
+      };
+
       const executeTilePlay = async (tile, slot, side = null) => {
         const newHands = gameState.hands.map(h => [...h]);
         newHands[slot] = newHands[slot].filter(t => t.id !== tile.id);
@@ -1089,7 +1368,18 @@
         const timeout = setTimeout(async () => {
           const botHand = gameState.hands[currentSlot];
           const knowledge = buildKnowledge(gameState.moveHistory);
-          const result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, gameState.board?.length || 0, currentSlot, knowledge);
+          const bLen = gameState.board?.length || 0;
+
+          let result;
+          if (bLen === 0) {
+            // Opening move: use smartAI heuristic (no MC needed)
+            result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
+          } else {
+            // Mid/late game: use Monte Carlo rollouts for strongest play
+            result = monteCarloEval(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
+            // Fallback to smartAI if MC returns null
+            if (!result) result = smartAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge);
+          }
 
           if (result) {
             await executeTilePlay(result.tile, currentSlot, result.side);
