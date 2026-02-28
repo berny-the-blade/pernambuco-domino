@@ -2730,11 +2730,41 @@
                 </button>
               )}
 
-              {gameState.gameEnded && playerSlot === 0 && (
-                <button onClick={startGame} className="btn-primary w-full text-lg animate-celebrate">
-                  Nova Partida
-                </button>
-              )}
+              {gameState.gameEnded && (() => {
+                const myTeam = playerSlot % 2;
+                const won = (gameState.teamScores?.[myTeam] || 0) >= (gameState.matchTarget || 6);
+                const s0 = gameState.teamScores?.[0] || 0;
+                const s1 = gameState.teamScores?.[1] || 0;
+                return (
+                  <div className="animate-bounce-in" style={{
+                    position: 'fixed', inset: 0, zIndex: 40,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)',
+                    borderRadius: 16, pointerEvents: 'auto'
+                  }}>
+                    <div className="text-center p-6 rounded-2xl" style={{
+                      background: 'rgba(30,40,60,0.85)', border: '2px solid ' + (won ? 'rgba(250,204,21,0.5)' : 'rgba(239,68,68,0.5)'),
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.5)', maxWidth: 280
+                    }}>
+                      <div className="text-4xl mb-2">{won ? '\uD83C\uDFC6' : '\uD83D\uDC80'}</div>
+                      <div className={'text-xl font-extrabold mb-1 ' + (won ? 'text-yellow-400' : 'text-red-400')}>
+                        {won ? 'PARTIDA GANHA!' : 'PARTIDA PERDIDA!'}
+                      </div>
+                      <div className="text-white/70 text-sm mb-2">
+                        {won ? 'Seu time venceu a partida!' : 'Adversarios venceram a partida!'}
+                      </div>
+                      <div className="text-3xl font-extrabold text-white mb-1">{s0} - {s1}</div>
+                      <div className="text-xs text-white/40 mb-4">Primeiro a {gameState.matchTarget || 6} pontos</div>
+                      {playerSlot === 0 && (
+                        <div className="flex gap-2 justify-center">
+                          <button onClick={startGame} className="btn-primary px-5 py-2 text-sm font-bold">Nova Partida</button>
+                          <button onClick={() => { db.ref('rooms/' + roomCode).remove(); setGameState(null); setRoomCode(''); setScreen('menu'); }} className="px-5 py-2 text-sm font-bold rounded-xl" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>Menu</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {error && (
                 <div className="mt-2 p-3 rounded-xl bg-red-500/20 border border-red-400/30 text-red-200 text-center text-sm font-semibold animate-slide-down">
