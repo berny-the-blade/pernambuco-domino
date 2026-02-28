@@ -608,59 +608,168 @@
         return canLeft && canRight;
       };
 
-      // === Knowledge builder: reconstructs game knowledge from move history ===
+      // === 28 immutable tiles ===
+      const ALL_TILES = createDeck();
+
+      // === Knowledge class — full belief model ported from simulator ===
+      class Knowledge {
+        constructor() {
+          this.cantHave = [new Set(), new Set(), new Set(), new Set()];
+          this.played = new Set();
+          this.playsBy = [[], [], [], []];
+          this.passedOn = [[], [], [], []];
+          this._strengthCache = [null, null, null, null];
+          this._remainingCount = [7, 7, 7, 7, 7, 7, 7];
+          this.openingSuits = [null, null, null, null];
+          this.sacrificeFlags = [new Set(), new Set(), new Set(), new Set()];
+          this._moveCount = 0;
+        }
+        clone() {
+          const k = new Knowledge();
+          k.cantHave = this.cantHave.map(s => new Set(s));
+          k.played = new Set(this.played);
+          k.playsBy = this.playsBy.map(a => [...a]);
+          k.passedOn = this.passedOn.map(a => [...a]);
+          k._strengthCache = [null, null, null, null];
+          k._remainingCount = [...this._remainingCount];
+          k.openingSuits = [...this.openingSuits];
+          k.sacrificeFlags = this.sacrificeFlags.map(s => new Set(s));
+          k._moveCount = this._moveCount;
+          return k;
+        }
+        recordPlay(p, t) {
+          if (!this.played.has(t.id)) {
+            this.played.add(t.id);
+            this._remainingCount[t.left]--;
+            if (t.left !== t.right) this._remainingCount[t.right]--;
+          }
+          if (p >= 0 && p <= 3) {
+            this.playsBy[p].push(t);
+            this._strengthCache[p] = null;
+            if (this.openingSuits[p] === null && this.playsBy[p].length <= 2 && this._moveCount < 8) {
+              this.openingSuits[p] = t.left === t.right ? t.left : t.left;
+            }
+            if (this.playsBy[p].length >= 2 && t.left + t.right >= 9 && t.left !== t.right) {
+              this.sacrificeFlags[p].add(t.left);
+              this.sacrificeFlags[p].add(t.right);
+            }
+          }
+          this._moveCount++;
+        }
+        recordPass(p, lE, rE) {
+          this.cantHave[p].add(lE);
+          this.cantHave[p].add(rE);
+          this.passedOn[p].push({ lE, rE, move: this._moveCount });
+        }
+        avoidanceStrength(p, n) {
+          let strength = 0;
+          for (const pass of this.passedOn[p]) {
+            if (pass.lE === n || pass.rE === n) {
+              const age = this._moveCount - (pass.move || 0);
+              strength += age < 5 ? 1.0 : (age < 10 ? 0.7 : 0.4);
+            }
+          }
+          return strength;
+        }
+        inferStrength(p) {
+          if (this._strengthCache[p]) return this._strengthCache[p];
+          const s = [0,0,0,0,0,0,0];
+          for (const t of this.playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+          this._strengthCache[p] = s;
+          return s;
+        }
+        remainingWithNumber(n) { return this._remainingCount[n]; }
+        deadNumbers(p) { return [...this.cantHave[p]]; }
+        possibleTilesFor(p) {
+          const possible = [];
+          for (const t of ALL_TILES) {
+            if (this.played.has(t.id)) continue;
+            if (this.cantHave[p].has(t.left) || this.cantHave[p].has(t.right)) continue;
+            possible.push(t);
+          }
+          return possible;
+        }
+        chicoteFor(n, myHand) {
+          if (this._remainingCount[n] !== 1) return null;
+          let ct = null;
+          for (const t of ALL_TILES) {
+            if (this.played.has(t.id)) continue;
+            if (t.left === n || t.right === n) { ct = t; break; }
+          }
+          if (!ct) return null;
+          if (myHand && myHand.some(h => h.id === ct.id)) return { tile: ct, holder: 'self', confidence: 1 };
+          const elig = [];
+          for (let p = 0; p < 4; p++) {
+            const blocked = ct.left === ct.right
+              ? this.cantHave[p].has(ct.left)
+              : (this.cantHave[p].has(ct.left) && this.cantHave[p].has(ct.right));
+            if (!blocked) elig.push(p);
+          }
+          if (elig.length === 0) return { tile: ct, holder: 'dorme', confidence: 1 };
+          if (elig.length === 1) return { tile: ct, holder: elig[0], confidence: 1 };
+          return { tile: ct, holder: 'unknown', candidates: elig, confidence: 1 / elig.length };
+        }
+        isProbablyDead(n, myIdx) {
+          if (this._remainingCount[n] === 0) return true;
+          for (let p = 0; p < 4; p++) {
+            if (p === myIdx) continue;
+            if (!this.cantHave[p].has(n)) return false;
+          }
+          return true;
+        }
+      }
+
+      // Build Knowledge from moveHistory (for mobile game's Firebase-based state)
       const buildKnowledge = (moveHistory) => {
-        const cantHave = [new Set(), new Set(), new Set(), new Set()];
-        const played = new Set();
-        const playsBy = [[], [], [], []];
-        const remainingCount = [7, 7, 7, 7, 7, 7, 7];
+        const k = new Knowledge();
         for (const move of (moveHistory || [])) {
           if (move.t === 'play') {
-            if (!played.has(move.tile.id)) {
-              played.add(move.tile.id);
-              remainingCount[move.tile.left]--;
-              if (move.tile.left !== move.tile.right) remainingCount[move.tile.right]--;
-            }
-            playsBy[move.p].push(move.tile);
+            k.recordPlay(move.p, move.tile);
           } else if (move.t === 'pass') {
-            cantHave[move.p].add(move.lE);
-            cantHave[move.p].add(move.rE);
+            k.recordPass(move.p, move.lE, move.rE);
           }
         }
-        const strengthCache = [null, null, null, null];
-        return {
-          cantHave, played, playsBy,
-          remainingWithNumber: (n) => remainingCount[n],
-          inferStrength: (p) => {
-            if (strengthCache[p]) return strengthCache[p];
-            const s = [0,0,0,0,0,0,0];
-            for (const t of playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
-            strengthCache[p] = s;
-            return s;
-          }
-        };
+        return k;
       };
 
-      // === Expert bot AI ported from simulator ===
-      const smartAI = (hand, lE, rE, bLen, player, knowledge) => {
+      // === AI WEIGHTS — tunable scoring parameters ===
+      const AI_WEIGHTS = {
+        deadEndPenalty: 35, lockFavorable: 40, lockUnfavorable: 60,
+        chicoteSelf: 25, chicotePartner: 15, chicoteOpponent: 25, chicoteDorme: 12,
+        lockApproachGood: 20, lockApproachBad: 15, monopolyBonus: 20,
+        boardCountGradient: 6, captiveEndBonus: 20, probDeadPenalty: 25,
+      };
+
+      // Standalone scoreWin for smartAI closing bonus
+      const scoreWin = (tile, prevLE, prevRE, boardLen) => {
+        const isD = tile.left === tile.right;
+        const wasBoth = boardLen > 1 && couldPlayOnBothEnds(tile, prevLE, prevRE);
+        if (isD && wasBoth) return { pts: 4, type: 'CRUZADA' };
+        if (isD) return { pts: 2, type: 'CARROCA' };
+        if (wasBoth) return { pts: 3, type: 'LA E LO' };
+        return { pts: 1, type: 'NORMAL' };
+      };
+
+      // === Full smartAI — ported from simulator with all strategic features ===
+      const smartAI = (hand, lE, rE, bLen, player, knowledge, matchScores, returnAll = false) => {
         const canPlay = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
         const playable = hand.filter(canPlay);
-        if (playable.length === 0) return null;
+        if (playable.length === 0) return returnAll ? [] : null;
 
-        // Opening move: prefer doubles, deep suits, high pips
         if (bLen === 0) {
           const sc = [0,0,0,0,0,0,0];
           for (const t of hand) { sc[t.left]++; if (t.left !== t.right) sc[t.right]++; }
-          const scored = playable.map(t => ({
-            tile: t, side: null,
-            score: sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2
-          }));
+          const scored = playable.map(t => {
+            let s = sc[t.left]*10 + sc[t.right]*10 + (t.left===t.right?15:0) + (t.left+t.right)*2;
+            return { tile: t, score: s, side: null };
+          });
           scored.sort((a, b) => b.score - a.score);
-          return scored[0];
+          return returnAll ? scored : scored[0];
         }
 
         const partner = (player + 2) % 4;
         const opp1 = (player + 1) % 4, opp2 = (player + 3) % 4;
+        const deadMul = bLen <= 4 ? 0.4 : (bLen <= 14 ? 1.0 : 1.4);
 
         const suitCount = new Array(7).fill(0);
         const tilesByNum = Array.from({length: 7}, () => []);
@@ -697,11 +806,27 @@
             }
             ss += myCount * 15;
 
-            // Blocking opponents
-            if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 25;
+            // Blocking — opp1 plays next (higher value), opp2 after partner (lower)
+            if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 35;
             if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) ss += 25;
 
-            // Partner support
+            // Signaling inference: opening suit and sacrifice awareness
+            if (knowledge.openingSuits && knowledge.openingSuits[partner] !== null) {
+              const partnerSuit = knowledge.openingSuits[partner];
+              if (newEnd === partnerSuit && !knowledge.cantHave[partner].has(partnerSuit)) {
+                ss += 6;
+              }
+            }
+            if (knowledge.sacrificeFlags) {
+              for (const opp of [opp1, opp2]) {
+                if (knowledge.sacrificeFlags[opp] && knowledge.sacrificeFlags[opp].has(newEnd) &&
+                    knowledge.avoidanceStrength && knowledge.avoidanceStrength(opp, newEnd) > 0) {
+                  ss += 4;
+                }
+              }
+            }
+
+            // Partner support with inference confidence
             const pStr = knowledge.inferStrength(partner);
             let pAff = 0;
             const endNums = newEnd === otherEnd ? [newEnd] : [newEnd, otherEnd];
@@ -721,10 +846,30 @@
             if (pAff > 0) ss += pAff * 8;
             if (knowledge.cantHave[partner].has(newEnd)) ss -= 10;
 
-            // Pip weight — dump heavy tiles early
-            ss += (tile.left + tile.right) * 2;
+            // Partner forward modeling
+            const partnerVoidNew = knowledge.cantHave[partner].has(newEnd);
+            const partnerVoidOther = knowledge.cantHave[partner].has(otherEnd);
+            if (partnerVoidNew && partnerVoidOther) {
+              ss -= 20;
+            } else if (!partnerVoidNew && !partnerVoidOther) {
+              const myIds = new Set(hand.map(h => h.id));
+              myIds.add(tile.id);
+              let pTilesNew = 0, pTilesOther = 0;
+              for (const pt of ALL_TILES) {
+                if (knowledge.played.has(pt.id) || myIds.has(pt.id)) continue;
+                if (knowledge.cantHave[partner].has(pt.left) || knowledge.cantHave[partner].has(pt.right)) continue;
+                if (pt.left === newEnd || pt.right === newEnd) pTilesNew++;
+                if (pt.left === otherEnd || pt.right === otherEnd) pTilesOther++;
+              }
+              if (pTilesNew >= 3 && pTilesOther >= 3) ss += 8;
+              else if (pTilesNew === 0 && !partnerVoidNew) ss -= 8;
+            }
 
-            // Play doubles early (inflexible)
+            // Pip weight — phase-dependent
+            const tilePips = tile.left + tile.right;
+            ss += Math.round(tilePips * 2 * deadMul);
+
+            // Play doubles early
             if (tile.left === tile.right) ss += 12;
 
             // Isolated double setup
@@ -735,33 +880,227 @@
               if (sup === 0 && (newEnd === h.left || otherEnd === h.left)) ss += 20;
             }
 
-            // Board counting — prefer ends with numbers mostly played
+            // Board counting with gradient
             const remNew = knowledge.remainingWithNumber(newEnd);
             let weHoldNew = 0;
             for (const x of tilesByNum[newEnd]) { if (x.id !== tile.id) weHoldNew++; }
             const unknownWithNew = Math.max(0, remNew - weHoldNew - 1);
             const totalUnknown = 28 - knowledge.played.size - hand.length;
             const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
-            ss += (2 - oppCouldHaveNew) * 6;
+            ss += (2 - oppCouldHaveNew) * AI_WEIGHTS.boardCountGradient;
+
+            // Dead number detection — POST-PLAY remaining counts
+            const remNewAfterPlay = knowledge.remainingWithNumber(newEnd) - 1;
+            const tileHasOtherEnd = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+            const remOtherAfterPlay = knowledge.remainingWithNumber(otherEnd) - tileHasOtherEnd;
+            const deadNew = remNewAfterPlay === 0;
+            const deadOther = remOtherAfterPlay === 0;
+            if (deadNew && !deadOther) {
+              ss -= Math.round(AI_WEIGHTS.deadEndPenalty * deadMul);
+            } else if (deadNew && deadOther) {
+              const myPipsLock = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
+              const myIdsLock = new Set(hand.map(h => h.id));
+              let unseenPipLock = 0, unseenCntLock = 0;
+              for (const t of ALL_TILES) {
+                if (knowledge.played.has(t.id) || myIdsLock.has(t.id)) continue;
+                unseenPipLock += t.left + t.right;
+                unseenCntLock++;
+              }
+              const avgPipLock = unseenCntLock > 0 ? unseenPipLock / unseenCntLock : 5;
+              const estPartPips = Math.round(Math.max(0, 6 - knowledge.playsBy[partner].length) * avgPipLock);
+              const estOpp1T = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+              const estOpp2T = Math.max(0, 6 - knowledge.playsBy[opp2].length);
+              const estOppPips = Math.round((estOpp1T + estOpp2T) * avgPipLock);
+              const myTeamBest = Math.min(myPipsLock, estPartPips);
+              const oppTeamBest = Math.min(Math.round(estOpp1T * avgPipLock), Math.round(estOpp2T * avgPipLock));
+              if (myTeamBest <= oppTeamBest - 2) {
+                ss += Math.round(AI_WEIGHTS.lockFavorable * deadMul);
+              } else {
+                ss -= Math.round(AI_WEIGHTS.lockUnfavorable * deadMul);
+              }
+            }
+
+            // Chicote detection
+            if (!deadNew && remNewAfterPlay === 1 && newEnd !== otherEnd) {
+              const chic = knowledge.chicoteFor ? knowledge.chicoteFor(newEnd, hand) : null;
+              if (chic && chic.holder === 'self') {
+                ss += Math.round(AI_WEIGHTS.chicoteSelf * deadMul);
+                if (knowledge.cantHave[opp1].has(otherEnd) || knowledge.cantHave[opp2].has(otherEnd)) ss += 12;
+              } else if (chic && chic.holder === partner) {
+                ss += Math.round(AI_WEIGHTS.chicotePartner * deadMul);
+              } else if (chic && typeof chic.holder === 'number' && chic.holder !== partner) {
+                ss -= Math.round(AI_WEIGHTS.chicoteOpponent * deadMul);
+              } else if (chic && chic.holder === 'dorme') {
+                ss -= AI_WEIGHTS.chicoteDorme;
+              } else if (chic && chic.holder === 'unknown') {
+                const oppCount = chic.candidates.filter(c => c !== partner && c !== player).length;
+                const oppProb = oppCount / Math.max(chic.candidates.length, 1);
+                ss -= Math.round(15 * oppProb);
+              } else if (chic) {
+                ss -= 12;
+              }
+            }
+
+            // Probabilistic dead number
+            if (!deadNew && remNewAfterPlay > 0 && knowledge.isProbablyDead && knowledge.isProbablyDead(newEnd, player)) {
+              let myEndTiles = 0;
+              for (const h of hand) {
+                if (h.id === tile.id) continue;
+                if (h.left === newEnd || h.right === newEnd) myEndTiles++;
+              }
+              if (myEndTiles > 0) {
+                ss += Math.round(AI_WEIGHTS.captiveEndBonus * deadMul);
+              } else {
+                ss -= Math.round(AI_WEIGHTS.probDeadPenalty * deadMul);
+              }
+            }
+
+            // Trancar risk/reward
+            const remNewT = knowledge.remainingWithNumber(newEnd);
+            const remOtherT = knowledge.remainingWithNumber(otherEnd);
+            if (remNewT + remOtherT <= 3 && bLen >= 8 && hand.length >= 2) {
+              const myPips = hand.reduce((s, h) => s + (h.id === tile.id ? 0 : h.left + h.right), 0);
+              const myIds = new Set(hand.map(h => h.id));
+              let unseenPipSum = 0, unseenCount = 0;
+              for (const t of ALL_TILES) {
+                if (knowledge.played.has(t.id) || myIds.has(t.id)) continue;
+                unseenPipSum += t.left + t.right;
+                unseenCount++;
+              }
+              const avgPipPerTile = unseenCount > 0 ? unseenPipSum / unseenCount : 5;
+              const estOpp1Tiles = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+              const estOpp2Tiles = Math.max(0, 6 - knowledge.playsBy[opp2].length);
+              const estPartnerTiles = Math.max(0, 6 - knowledge.playsBy[partner].length);
+              const estPartnerPips = Math.round(estPartnerTiles * avgPipPerTile);
+              const myTeamMin = Math.min(myPips, estPartnerPips);
+              const oppTeamMin = Math.min(Math.round(estOpp1Tiles * avgPipPerTile), Math.round(estOpp2Tiles * avgPipPerTile));
+              if (myTeamMin < oppTeamMin - 3) {
+                ss += AI_WEIGHTS.lockApproachGood;
+              } else if (myTeamMin > oppTeamMin + 5) {
+                ss -= AI_WEIGHTS.lockApproachBad;
+              }
+            }
+
+            // Suit exhaustion
+            const tNums = tile.left === tile.right ? [tile.left] : [tile.left, tile.right];
+            for (const n of tNums) {
+              const remAfter = knowledge.remainingWithNumber(n) - 1;
+              if (remAfter >= 1 && remAfter <= 3) {
+                let weStillHold = 0;
+                for (const h of hand) {
+                  if (h.id === tile.id) continue;
+                  if (h.left === n || h.right === n) weStillHold++;
+                }
+                if (weStillHold > 0 && weStillHold >= remAfter) {
+                  ss += 8 + (3 - remAfter) * 5;
+                }
+              }
+            }
+
+            // True monopoly
+            for (const endN of [newEnd, otherEnd]) {
+              const remEnd = knowledge.remainingWithNumber(endN);
+              if (remEnd >= 1 && remEnd <= 3) {
+                let weHoldAll = 0;
+                for (const h of hand) {
+                  if (h.id === tile.id) continue;
+                  if (h.left === endN || h.right === endN) weHoldAll++;
+                }
+                if (weHoldAll === remEnd) {
+                  ss += Math.round(AI_WEIGHTS.monopolyBonus * deadMul);
+                }
+              }
+            }
+
+            // Near-monopoly
+            for (const endN of [newEnd, otherEnd]) {
+              const remEnd = knowledge.remainingWithNumber(endN);
+              if (remEnd >= 2 && remEnd <= 4) {
+                let weHoldEnd = 0;
+                for (const h of hand) {
+                  if (h.id === tile.id) continue;
+                  if (h.left === endN || h.right === endN) weHoldEnd++;
+                }
+                if (weHoldEnd >= 2 && weHoldEnd >= remEnd - 1) {
+                  ss += Math.round((weHoldEnd / remEnd) * 12 * deadMul);
+                }
+              }
+            }
+
+            // Information hiding — opening only
+            if (bLen >= 1 && bLen <= 6 && hand.length >= 4) {
+              const maxSC = Math.max(...suitCount);
+              if (suitCount[newEnd] >= 3 && suitCount[newEnd] === maxSC) ss -= 8;
+              else if (suitCount[newEnd] <= 1 && newEnd !== otherEnd) ss += 5;
+            }
 
             // Partner close to winning
             const estPHand = Math.max(0, 6 - knowledge.playsBy[partner].length);
-            if (estPHand <= 2 && estPHand > 0) ss += 15;
+            if (estPHand <= 2 && estPHand > 0) {
+              const partStr = knowledge.inferStrength(partner);
+              if (estPHand === 1) {
+                if (partStr[newEnd] >= 2) ss += 25;
+                else if (partStr[otherEnd] >= 2) ss += 10;
+                else if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) ss += 15;
+              } else {
+                if (partStr[newEnd] >= 1 || partStr[otherEnd] >= 1) ss += 15;
+              }
+            }
 
-            // Go-out bonus
+            // Match score awareness
+            const ms = matchScores || [0, 0];
+            const myTeam = player % 2;
+            const ourScore = ms[myTeam], oppScore = ms[1 - myTeam];
+            if (ourScore >= 5) {
+              ss += Math.round(tilePips * 1.5);
+              if (myCount >= 2) ss += 8;
+            } else if (oppScore >= 5 && ourScore < 4) {
+              if (tile.left === tile.right) ss += 8;
+            }
+
+            // Point denial
+            for (const opp of [opp1, opp2]) {
+              const estOppHand = Math.max(0, 6 - knowledge.playsBy[opp].length);
+              if (estOppHand === 1) {
+                const oppStr = knowledge.inferStrength(opp);
+                for (const eN of [newEnd, otherEnd]) {
+                  if (oppStr[eN] >= 2) {
+                    const wasThere = (eN === lE || eN === rE);
+                    if (!wasThere) {
+                      ss += (tile.left === tile.right) ? -15 : -8;
+                    }
+                  }
+                }
+              }
+            }
+
+            // Closing bonus
             const remainAfter = hand.length - 1;
             if (remainAfter === 0) {
-              const isD = tile.left === tile.right;
-              const wasBoth = couldPlayOnBothEnds(tile, lE, rE);
-              const pts = isD && wasBoth ? 4 : isD ? 2 : wasBoth ? 3 : 1;
-              ss += 200 + pts * 30;
+              const w = scoreWin(tile, lE, rE, bLen + 1);
+              ss += 200 + w.pts * 30;
             } else if (remainAfter === 1) {
               const lastTile = hand.find(t => t.id !== tile.id);
               if (lastTile) {
                 const canPlayLast = (lastTile.left === newEnd || lastTile.right === newEnd ||
                                      lastTile.left === otherEnd || lastTile.right === otherEnd);
                 if (canPlayLast) ss += 80;
-                else ss -= 30;
+                else {
+                  const allStrand = hand.filter(t => t.id !== tile.id).length === 1 && (() => {
+                    const ot = lastTile;
+                    const otherPlayable = (ot.left === lE || ot.right === lE || ot.left === rE || ot.right === rE);
+                    if (!otherPlayable) return false;
+                    for (const oSide of ['left', 'right']) {
+                      const oEnd = oSide === 'left' ? lE : rE;
+                      if (ot.left !== oEnd && ot.right !== oEnd) continue;
+                      const oNewEnd = (ot.left === oEnd) ? ot.right : ot.left;
+                      const oOtherEnd = oSide === 'left' ? rE : lE;
+                      if (tile.left === oNewEnd || tile.right === oNewEnd || tile.left === oOtherEnd || tile.right === oOtherEnd) return false;
+                    }
+                    return true;
+                  })();
+                  ss -= 30;
+                }
               }
             } else if (remainAfter === 2) {
               const others = hand.filter(t => t.id !== tile.id);
@@ -778,13 +1117,42 @@
         });
 
         scored.sort((a, b) => b.score - a.score);
+
+        // Two-ply lookahead in endgame
+        if (hand.length <= 3 && scored.length >= 2 && bLen >= 10) {
+          for (const opt of scored) {
+            const { tile: oTile, side: oSide } = opt;
+            let oppNewEnd;
+            if (oSide === 'left') oppNewEnd = oTile.left === lE ? oTile.right : oTile.left;
+            else oppNewEnd = oTile.right === rE ? oTile.left : oTile.right;
+            const oppOtherEnd = oSide === 'left' ? rE : lE;
+
+            if (knowledge.possibleTilesFor) {
+              const oppPossible = knowledge.possibleTilesFor(opp1);
+              const estOpp1Hand = Math.max(0, 6 - knowledge.playsBy[opp1].length);
+              if (estOpp1Hand === 1) {
+                const oppCanGo = oppPossible.some(t =>
+                  t.left === oppNewEnd || t.right === oppNewEnd || t.left === oppOtherEnd || t.right === oppOtherEnd
+                );
+                if (oppCanGo) opt.score -= 25;
+              } else if (estOpp1Hand === 2) {
+                const oppPlayable = oppPossible.filter(t =>
+                  t.left === oppNewEnd || t.right === oppNewEnd || t.left === oppOtherEnd || t.right === oppOtherEnd
+                ).length;
+                if (oppPlayable >= 2) opt.score -= 10;
+              }
+            }
+          }
+          scored.sort((a, b) => b.score - a.score);
+        }
+
+        if (returnAll) return scored;
         return scored[0] || null;
       };
 
       // === Monte Carlo Rollout System ===
-      const ALL_TILES = createDeck(); // 28 tiles, immutable reference
 
-      // Fast rollout AI — lightweight scoring for MC simulations
+      // Fast rollout AI — lightweight scoring for MC simulations (with dead number detection)
       const fastAI = (hand, lE, rE, bLen, player, knowledge) => {
         const playable = hand.filter(t => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE);
         if (playable.length === 0) return null;
@@ -824,11 +1192,40 @@
             if (knowledge.cantHave[partner].has(newEnd) && knowledge.cantHave[partner].has(otherEnd)) ss -= 15;
             ss += Math.round((tile.left + tile.right) * 2 * deadMul);
             if (tile.left === tile.right) ss += 10;
+
+            // Dead number detection
+            {
+              const remNew = knowledge.remainingWithNumber(newEnd);
+              const remNewAfter = remNew - 1;
+              if (remNewAfter === 0 && newEnd !== otherEnd) {
+                const tileHasOther = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
+                const remOther = knowledge.remainingWithNumber(otherEnd) - tileHasOther;
+                if (remOther > 0) {
+                  ss -= 30;
+                } else {
+                  let myPips = 0;
+                  for (const h of hand) { if (h.id !== tile.id) myPips += h.left + h.right; }
+                  ss += myPips <= 6 ? 20 : -25;
+                }
+              }
+            }
+
+            // Near-close checks
             if (hand.length === 2) {
               const last = hand.find(t => t.id !== tile.id);
               if (last && (last.left === newEnd || last.right === newEnd || last.left === otherEnd || last.right === otherEnd)) ss += 60;
               else ss -= 30;
             }
+            if (hand.length === 3) {
+              let coverCount = 0;
+              for (const h of hand) {
+                if (h.id === tile.id) continue;
+                if (h.left === newEnd || h.right === newEnd || h.left === otherEnd || h.right === otherEnd) coverCount++;
+              }
+              if (coverCount === 2) ss += 20;
+              else if (coverCount === 0) ss -= 15;
+            }
+
             if (ss > bestScore) { bestScore = ss; bestTile = tile; bestSide = side; }
           }
         }
@@ -909,43 +1306,132 @@
         return { winnerTeam: -1, points: 0, type: 'tie' };
       };
 
-      // Generate a random deal consistent with knowledge constraints
+      // Helper: can player hold this tile given knowledge constraints?
+      const canPlayerHold = (p, t, knowledge) => {
+        if (knowledge.cantHave[p].has(t.left)) return false;
+        if (knowledge.cantHave[p].has(t.right)) return false;
+        return true;
+      };
+
+      // Soft-belief weighted shuffle: bias tile assignment toward play-pattern plausibility
+      const softWeightedShuffle = (avail, player, knowledge) => {
+        if (knowledge.played.size <= 4 || avail.length <= 1) {
+          for (let i = avail.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [avail[i], avail[j]] = [avail[j], avail[i]];
+          }
+          return;
+        }
+        const str = knowledge.inferStrength(player);
+        const hasSignal = str.some(s => s >= 2);
+        if (!hasSignal) {
+          for (let i = avail.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [avail[i], avail[j]] = [avail[j], avail[i]];
+          }
+          return;
+        }
+        for (let i = avail.length - 1; i > 0; i--) {
+          let wSum = 0;
+          for (let j = 0; j <= i; j++) {
+            const t = avail[j];
+            const w = 1 + 0.6 * ((str[t.left] || 0) + (str[t.right] || 0));
+            avail[j]._sw = w;
+            wSum += w;
+          }
+          let r = Math.random() * wSum;
+          let pick = 0;
+          for (; pick < i; pick++) {
+            r -= avail[pick]._sw;
+            if (r <= 0) break;
+          }
+          if (pick !== i) { const tmp = avail[i]; avail[i] = avail[pick]; avail[pick] = tmp; }
+        }
+        for (const t of avail) delete t._sw;
+      };
+
+      // Generate a consistent deal using constraint propagation (most-constrained-first)
       const generateConsistentDeal = (myHand, handSizes, knowledge, mySlot) => {
-        const pool = ALL_TILES.filter(t => !knowledge.played.has(t.id) && !myHand.some(h => h.id === t.id));
-        for (let attempt = 0; attempt < 50; attempt++) {
-          const shuffled = [...pool];
+        const myIds = new Set(myHand.map(t => t.id));
+        const pool = [];
+        for (const t of ALL_TILES) {
+          if (knowledge.played.has(t.id) || myIds.has(t.id)) continue;
+          pool.push(t);
+        }
+        const players = [0, 1, 2, 3].filter(p => p !== mySlot);
+
+        // Pre-compute per-player eligible tiles
+        const eligible = {};
+        for (const p of players) {
+          eligible[p] = pool.filter(t => canPlayerHold(p, t, knowledge));
+        }
+
+        // Sort players by slack (eligible - needed) ascending = most constrained first
+        const sortedPlayers = [...players].sort((a, b) =>
+          (eligible[a].length - handSizes[a]) - (eligible[b].length - handSizes[b])
+        );
+
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const hands = [[], [], [], []];
+          hands[mySlot] = myHand;
+          const assigned = new Set();
+          let valid = true;
+
+          for (const p of sortedPlayers) {
+            const avail = eligible[p].filter(t => !assigned.has(t.id));
+            if (avail.length < handSizes[p]) { valid = false; break; }
+            softWeightedShuffle(avail, p, knowledge);
+            for (let i = 0; i < handSizes[p]; i++) {
+              hands[p].push(avail[i]);
+              assigned.add(avail[i].id);
+            }
+            for (const t of hands[p]) {
+              if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
+            }
+            if (!valid) break;
+          }
+          if (valid) return hands;
+        }
+
+        // Fallback: rejection sampling
+        const shuffled = new Array(pool.length);
+        for (let attempt = 0; attempt < 200; attempt++) {
+          for (let i = 0; i < pool.length; i++) shuffled[i] = pool[i];
           for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
           }
-          const deal = [[], [], [], []];
-          deal[mySlot] = [...myHand];
-          let cursor = 0, valid = true;
-          for (let p = 0; p < 4; p++) {
-            if (p === mySlot) continue;
-            for (let i = 0; i < handSizes[p] && cursor < shuffled.length; i++) {
-              const t = shuffled[cursor++];
-              if (knowledge.cantHave[p].has(t.left) || knowledge.cantHave[p].has(t.right)) { valid = false; break; }
-              deal[p].push(t);
+          const hands = [[], [], [], []];
+          hands[mySlot] = myHand;
+          let idx = 0, valid = true;
+          for (const p of players) {
+            for (let i = 0; i < handSizes[p]; i++) {
+              if (idx >= shuffled.length) { valid = false; break; }
+              const t = shuffled[idx++];
+              if (!canPlayerHold(p, t, knowledge)) { valid = false; break; }
+              hands[p].push(t);
             }
             if (!valid) break;
           }
-          if (valid) return deal;
+          if (valid) return hands;
         }
-        // Fallback: deal without constraints
-        const shuffled = [...pool];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+
+        // Last resort: partial deal
+        const hands = [[], [], [], []];
+        hands[mySlot] = myHand;
+        const assigned = new Set();
+        for (const p of sortedPlayers) {
+          const avail = eligible[p].filter(t => !assigned.has(t.id));
+          for (let i = avail.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [avail[i], avail[j]] = [avail[j], avail[i]];
+          }
+          for (let i = 0; i < Math.min(handSizes[p], avail.length); i++) {
+            hands[p].push(avail[i]);
+            assigned.add(avail[i].id);
+          }
         }
-        const deal = [[], [], [], []];
-        deal[mySlot] = [...myHand];
-        let cursor = 0;
-        for (let p = 0; p < 4; p++) {
-          if (p === mySlot) continue;
-          for (let i = 0; i < handSizes[p]; i++) deal[p].push(shuffled[cursor++]);
-        }
-        return deal;
+        return hands;
       };
 
       // Monte Carlo evaluation — run N simulations per move, pick best
@@ -1005,22 +1491,29 @@
             }
 
             // Clone knowledge and record our play
-            const rc = [...Array(7)].map((_, n) => knowledge.remainingWithNumber(n));
-            rc[opt.tile.left]--;
-            if (opt.tile.left !== opt.tile.right) rc[opt.tile.right]--;
-            const playsBy = knowledge.playsBy.map(a => [...a]);
-            playsBy[player].push(opt.tile);
-            const simK = {
-              cantHave: knowledge.cantHave.map(s => new Set(s)),
-              played: new Set([...knowledge.played, opt.tile.id]),
-              playsBy,
-              remainingWithNumber: (n) => rc[n],
-              inferStrength: (p) => {
-                const s = [0,0,0,0,0,0,0];
-                for (const t of playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
-                return s;
-              }
-            };
+            const simK = knowledge.clone ? knowledge.clone() : (() => {
+              const rc = [...Array(7)].map((_, n) => knowledge.remainingWithNumber(n));
+              rc[opt.tile.left]--;
+              if (opt.tile.left !== opt.tile.right) rc[opt.tile.right]--;
+              const playsBy = knowledge.playsBy.map(a => [...a]);
+              playsBy[player].push(opt.tile);
+              return {
+                cantHave: knowledge.cantHave.map(s => new Set(s)),
+                played: new Set([...knowledge.played, opt.tile.id]),
+                playsBy,
+                remainingWithNumber: (n) => rc[n],
+                inferStrength: (p) => {
+                  const s = [0,0,0,0,0,0,0];
+                  for (const t of playsBy[p]) { s[t.left]++; if (t.left !== t.right) s[t.right]++; }
+                  return s;
+                }
+              };
+            })();
+            if (simK.recordPlay) simK.recordPlay(player, opt.tile);
+            else {
+              simK.played.add(opt.tile.id);
+              simK.playsBy[player].push(opt.tile);
+            }
 
             // Generate consistent deal and simulate
             const newHandSizes = [...handSizes];
@@ -1789,7 +2282,7 @@
       // === Expert AI router: endgame solver → ISMCTS → MC → smartAI ===
       const expertAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         if (bLen === 0) {
-          return smartAI(hand, lE, rE, bLen, player, knowledge);
+          return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
         }
         // Count total remaining tiles (not played, not in dormidas)
         const totalRemaining = 24 - (knowledge.played?.size || 0);
@@ -1811,7 +2304,7 @@
         if (mcResult) return mcResult;
 
         // Last resort: heuristic
-        return smartAI(hand, lE, rE, bLen, player, knowledge);
+        return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
       };
 
       const executeTilePlay = async (tile, slot, side = null) => {
