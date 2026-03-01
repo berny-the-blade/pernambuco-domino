@@ -74,8 +74,8 @@
     /* === Board tile === */
     .board-tile {
       background: linear-gradient(145deg, #f5f0e1, #e8e0cc);
-      border: 1px solid #a89878;
-      border-radius: 2px;
+      border: 1.5px solid #a89878;
+      border-radius: 3px;
       box-shadow: inset 0 0.5px 1px rgba(255,255,255,0.5);
     }
 
@@ -3590,29 +3590,29 @@
         );
 
         // Compact SVG scoring dial — semicircular arc with both teams
-        const ScoreDial = ({ s0, s1, total }) => {
-          const W = 70, H = 42;
-          const cx = W / 2, cy = H - 5;
-          const r = 26;
+        // Single-team score dial
+        const TeamDial = ({ score, total, color, lightColor, label }) => {
+          const W = 62, H = 38;
+          const cx = W / 2, cy = H - 4;
+          const r = 22;
           const steps = total || 6;
-          // Semicircle: PI (left) to 0 (right)
           const angleFor = (val) => Math.PI - (val / steps) * Math.PI;
 
           const ticks = [];
           for (let i = 0; i <= steps; i++) {
             const a = angleFor(i);
             const cos = Math.cos(a), sin = Math.sin(a);
-            const x1 = cx + (r - 4) * cos, y1 = cy - (r - 4) * sin;
+            const x1 = cx + (r - 3) * cos, y1 = cy - (r - 3) * sin;
             const x2 = cx + r * cos, y2 = cy - r * sin;
             const tx = cx + (r + 6) * cos, ty = cy - (r + 6) * sin;
             ticks.push(
-              <line key={'t' + i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8} />,
-              <text key={'n' + i} x={tx} y={ty} fill="rgba(255,255,255,0.6)" fontSize={6} fontWeight={700} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>
+              <line key={'t' + i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.3)" strokeWidth={0.8} />,
+              <text key={'n' + i} x={tx} y={ty} fill={i <= score ? lightColor : 'rgba(255,255,255,0.4)'} fontSize={6} fontWeight={i <= score ? 800 : 600} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>
             );
           }
 
-          // Arc path helper
           const arcD = (startVal, endVal, radius) => {
+            if (startVal === endVal) return '';
             const a1 = angleFor(startVal), a2 = angleFor(endVal);
             const sx = cx + radius * Math.cos(a1), sy = cy - radius * Math.sin(a1);
             const ex = cx + radius * Math.cos(a2), ey = cy - radius * Math.sin(a2);
@@ -3620,33 +3620,17 @@
             return 'M' + sx + ',' + sy + ' A' + radius + ',' + radius + ' 0 ' + large + ' 0 ' + ex + ',' + ey;
           };
 
-          // Team dots
-          const a0 = angleFor(s0), a1 = angleFor(s1);
-          const dotR = r - 9;
-          const dx0 = cx + dotR * Math.cos(a0), dy0 = cy - dotR * Math.sin(a0);
-          const dx1 = cx + dotR * Math.cos(a1), dy1 = cy - dotR * Math.sin(a1);
+          const dotA = angleFor(score);
+          const dotX = cx + (r - 2) * Math.cos(dotA), dotY = cy - (r - 2) * Math.sin(dotA);
 
           return (
-            <div>
-              <svg width={W} height={H} viewBox={'0 0 ' + W + ' ' + H}>
-                {/* Background arc */}
-                <path d={arcD(0, steps, r - 2)} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={2.5} />
-                {/* T1 filled arc (blue) */}
-                {s0 > 0 && <path d={arcD(0, s0, r - 2)} fill="none" stroke="#3b82f6" strokeWidth={2.5} opacity={0.7} />}
-                {/* T2 filled arc (red) — slightly offset radius to avoid overlap */}
-                {s1 > 0 && <path d={arcD(0, s1, r + 2)} fill="none" stroke="#ef4444" strokeWidth={2} opacity={0.7} />}
-                {/* Tick marks and numbers */}
-                {ticks}
-                {/* T1 dot (blue) */}
-                <circle cx={dx0} cy={dy0} r={3.5} fill="#3b82f6" stroke="#fff" strokeWidth={1.2} />
-                {/* T2 dot (red) */}
-                <circle cx={dx1} cy={dy1} r={3.5} fill="#ef4444" stroke="#fff" strokeWidth={1.2} />
-                {/* T1 label */}
-                <text x={5} y={H - 2} fill="#93c5fd" fontSize={6} fontWeight={800}>T1</text>
-                {/* T2 label */}
-                <text x={W - 5} y={H - 2} fill="#fca5a5" fontSize={6} fontWeight={800} textAnchor="end">T2</text>
-              </svg>
-            </div>
+            <svg width={W} height={H} viewBox={'0 0 ' + W + ' ' + H}>
+              <path d={arcD(0, steps, r - 2)} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={2.5} />
+              {score > 0 && <path d={arcD(0, score, r - 2)} fill="none" stroke={color} strokeWidth={2.5} opacity={0.8} />}
+              {ticks}
+              <circle cx={dotX} cy={dotY} r={3.5} fill={color} stroke="#fff" strokeWidth={1} />
+              <text x={cx} y={H - 1} fill={lightColor} fontSize={7} fontWeight={800} textAnchor="middle">{label}</text>
+            </svg>
           );
         };
 
@@ -3654,9 +3638,8 @@
           <div className="min-h-screen felt-bg p-2 animate-fade-in">
             <div className="max-w-2xl mx-auto">
 
-              {/* Size toggle bar with compact scores */}
-              <div className="score-bar px-2 py-1 mb-1 flex items-center justify-between">
-                <span style={{ fontSize: 11, fontWeight: 800, color: '#93c5fd', fontFamily: 'monospace', minWidth: 40 }}>T1 {score0}</span>
+              {/* Size toggle only */}
+              <div className="flex justify-center mb-1">
                 <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
                   {['S','M','L'].map(sz => (
                     <button key={sz} onClick={() => setBoardSize(sz)}
@@ -3666,7 +3649,6 @@
                     </button>
                   ))}
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 800, color: '#fca5a5', fontFamily: 'monospace', minWidth: 40, textAlign: 'right' }}>{score1} T2</span>
               </div>
 
               {/* Message toast */}
@@ -3875,6 +3857,7 @@
                               flexDirection: goesRight ? 'row' : 'row-reverse',
                               justifyContent: rIdx === 0 ? 'flex-end' : 'flex-start',
                               alignItems: 'center',
+                              gap: 0,
                             };
 
                             // Turn connector: sits at the edge connecting to row above
@@ -3936,9 +3919,12 @@
                         </div>
                       );
                     })()}
-                    {/* Score dial — compact, bottom-right corner */}
-                    <div style={{ position: 'absolute', bottom: 4, right: 4, opacity: 0.7, zIndex: 10, pointerEvents: 'none' }}>
-                      <ScoreDial s0={score0} s1={score1} total={mt} />
+                    {/* Score dials — T1 bottom-left, T2 bottom-right */}
+                    <div style={{ position: 'absolute', bottom: 2, left: 2, opacity: 0.75, zIndex: 10, pointerEvents: 'none' }}>
+                      <TeamDial score={score0} total={mt} color="#3b82f6" lightColor="#93c5fd" label="T1" />
+                    </div>
+                    <div style={{ position: 'absolute', bottom: 2, right: 2, opacity: 0.75, zIndex: 10, pointerEvents: 'none' }}>
+                      <TeamDial score={score1} total={mt} color="#ef4444" lightColor="#fca5a5" label="T2" />
                     </div>
                   </div>
 
