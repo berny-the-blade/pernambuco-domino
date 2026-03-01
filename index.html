@@ -3563,6 +3563,8 @@
         const leftSlot = (playerSlot + 1) % 4;
         const rightSlot = (playerSlot + 3) % 4;
         const isMyTurn = gameState.currentPlayer === playerSlot;
+        /* Auto-clear side-choice modal when turn changes or tile leaves hand */
+        if (choosingTile && (!isMyTurn || !myHand.some(t => t.id === choosingTile.id))) setChoosingTile(null);
         const isBot = (slot) => gameState.players?.[slot] && !gameState.players[slot].isHuman;
         const isPartner = (slot) => slot === topSlot;
         const score0 = gameState.teamScores?.[0] || 0;
@@ -3734,8 +3736,8 @@
                 );
               })()}
 
-              {/* Side choice modal */}
-              {choosingTile && (
+              {/* Side choice modal — only when it's still my turn and tile still in hand */}
+              {choosingTile && isMyTurn && myHand.some(t => t.id === choosingTile.id) && (
                 <div className="glass-card p-4 mb-2 text-center animate-bounce-in">
                   <p className="font-bold mb-3 text-gray-800">Jogar {choosingTile.left}-{choosingTile.right} em qual lado?</p>
                   <div className="flex gap-3 justify-center">
