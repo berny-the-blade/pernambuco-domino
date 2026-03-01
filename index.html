@@ -374,6 +374,7 @@
       const [handVisible, setHandVisible] = useState(true);
       const [humanCount, setHumanCount] = useState(2);
       const [starterCountdown, setStarterCountdown] = useState(null);
+      const [roundCountdown, setRoundCountdown] = useState(null);
       // === Player Profile System ===
       const HUMAN_PROFILES = [
         { key: 'ze', name: 'Zé', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
@@ -2890,6 +2891,21 @@
         }
       };
 
+      // Auto-start next round after 5 seconds
+      useEffect(() => {
+        const shouldCount = gameState && gameState.gameStarted && !gameState.gameEnded
+          && gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && playerSlot === 0;
+        if (!shouldCount) { setRoundCountdown(null); return; }
+        setRoundCountdown(5);
+        const iv = setInterval(() => {
+          setRoundCountdown(prev => {
+            if (prev <= 1) { clearInterval(iv); newRound(); return null; }
+            return prev - 1;
+          });
+        }, 1000);
+        return () => clearInterval(iv);
+      }, [gameState?.currentPlayer, gameState?.gameEnded, gameState?.waitingForStarterChoice]);
+
       // Bot AI - runs when it's a bot's turn
       useEffect(() => {
         if (!gameState || !gameState.gameStarted || gameState.gameEnded) return;
@@ -3569,8 +3585,8 @@
 
               {/* Action buttons */}
               {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
-                <button onClick={newRound} className="btn-primary w-full text-lg animate-bounce-in">
-                  Proxima Rodada
+                <button onClick={() => { setRoundCountdown(null); newRound(); }} className="btn-primary w-full text-lg animate-bounce-in">
+                  Proxima Rodada{roundCountdown ? ' (' + roundCountdown + 's)' : ''}
                 </button>
               )}
 
