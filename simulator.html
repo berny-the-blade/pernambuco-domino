@@ -24,7 +24,7 @@
     .tile-good { border-color: #f59e0b !important; box-shadow: 0 0 8px rgba(245,158,11,0.4); }
     .dot { width: 6px; height: 6px; background: #1e293b; border-radius: 50%; position: absolute; }
     .dot-sm { width: 4px; height: 4px; }
-    .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 4px; background: #fef3c7; flex-shrink: 0; }
+    .board-tile { display: inline-flex; border: 1.5px solid #78716c; border-radius: 3px; background: #fef3c7; flex-shrink: 0; }
     .board-tile-v { flex-direction: column; width: 26px; height: 52px; }
     .board-tile-h { flex-direction: row; width: 52px; height: 26px; }
     .board-tile-v .tile-half:first-child { border-bottom: 1px solid #94a3b8; }
@@ -9213,7 +9213,7 @@
       }
 
       // Tile dimensions must match CSS: board-tile-h = 52x26, board-tile-v = 26x52
-      const HW = 52, VW = 26, GAP = 3;
+      const HW = 52, VW = 26, GAP = 1;
 
       const boardEl = document.getElementById('board-area');
       const MAX_W = boardEl ? boardEl.clientWidth - 28 : 280;
