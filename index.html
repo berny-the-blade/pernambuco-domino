@@ -3626,17 +3626,15 @@
                 <div className="flex items-stretch mb-2 gap-2">
 
                   {/* Left opponent — opposing team = red */}
-                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 52, borderTop: '3px solid #ef4444' }}>
-                    <div className="mb-1 flex flex-col items-center gap-1">
-                      <div style={{ position: 'relative' }}>
-                        <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={32} />
-                        <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
-                        </div>
+                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 56, borderTop: '3px solid #ef4444' }}>
+                    <div style={{ position: 'relative' }}>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={32} />
+                      <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
                       </div>
-                      {gameState.currentPlayer === leftSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</div>}
                     </div>
-                    <div className="text-[8px] text-white/60 mt-1 text-center truncate font-bold" style={{ maxWidth: 48 }}>{gameState.players?.[leftSlot]?.name}</div>
+                    <div className="text-[9px] text-white/70 mt-1 text-center truncate font-bold" style={{ maxWidth: 52 }}>{gameState.players?.[leftSlot]?.name}</div>
+                    {gameState.currentPlayer === leftSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
                   </div>
 
                   {/* Board */}
@@ -3667,10 +3665,10 @@
                       if (cur.length > 0) rows.push(cur);
 
                       const EndBadge = ({ num }) => (
-                        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.35)',
-                          border: '1.5px solid rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', flexShrink: 0 }}>
-                          <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{num}</span>
+                        <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#10b981',
+                          border: '2px solid #064e3b', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', flexShrink: 0, boxShadow: '0 0 6px rgba(16,185,129,0.5)' }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{num}</span>
                         </div>
                       );
 
@@ -3736,17 +3734,15 @@
                   </div>
 
                   {/* Right opponent — opposing team = red */}
-                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 52, borderTop: '3px solid #ef4444' }}>
-                    <div className="mb-1 flex flex-col items-center gap-1">
-                      <div style={{ position: 'relative' }}>
-                        <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={32} />
-                        <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
-                        </div>
+                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 56, borderTop: '3px solid #ef4444' }}>
+                    <div style={{ position: 'relative' }}>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={32} />
+                      <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
                       </div>
-                      {gameState.currentPlayer === rightSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</div>}
                     </div>
-                    <div className="text-[8px] text-white/60 mt-1 text-center truncate font-bold" style={{ maxWidth: 48 }}>{gameState.players?.[rightSlot]?.name}</div>
+                    <div className="text-[9px] text-white/70 mt-1 text-center truncate font-bold" style={{ maxWidth: 52 }}>{gameState.players?.[rightSlot]?.name}</div>
+                    {gameState.currentPlayer === rightSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
                   </div>
                 </div>
 
