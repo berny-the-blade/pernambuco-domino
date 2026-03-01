@@ -3094,7 +3094,7 @@
           } else {
             await botPass(currentSlot);
           }
-        }, (() => { const spd = gameState?.config?.botSpeed || botSpeed; return spd === 'slow' ? 9000 + Math.random() * 2000 : spd === 'fast' ? 2000 + Math.random() * 2000 : 4000 + Math.random() * 2000; })());
+        }, (() => { const spd = gameState?.config?.botSpeed || botSpeed; return spd === 'instant' ? 100 : spd === 'slow' ? 9000 + Math.random() * 2000 : spd === 'fast' ? 2000 + Math.random() * 2000 : 4000 + Math.random() * 2000; })());
 
         return () => clearTimeout(timeout);
       }, [gameState?.currentPlayer, gameState?.gameStarted]);
@@ -3404,13 +3404,13 @@
               <div className="mb-5">
                 <label className="block text-sm font-semibold text-gray-600 mb-2">Velocidade dos Bots</label>
                 <div className="flex gap-2">
-                  {[{k:'slow',label:'Lento',emoji:'🐢'},{k:'medium',label:'Medio',emoji:'⚡'},{k:'fast',label:'Rapido',emoji:'🚀'}].map(d => (
+                  {[{k:'slow',label:'Lento',emoji:'🐢'},{k:'medium',label:'Medio',emoji:'⚡'},{k:'fast',label:'Rapido',emoji:'🚀'},{k:'instant',label:'Teste',emoji:'⏩'}].map(d => (
                     <button
                       key={d.k}
                       onClick={() => setBotSpd(d.k)}
                       className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-200"
                       style={botSpeed === d.k
-                        ? { background: d.k === 'slow' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : d.k === 'medium' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #ef4444, #b91c1c)', color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }
+                        ? { background: d.k === 'slow' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : d.k === 'medium' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : d.k === 'instant' ? 'linear-gradient(135deg, #8b5cf6, #6d28d9)' : 'linear-gradient(135deg, #ef4444, #b91c1c)', color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }
                         : { background: '#f3f4f6', color: '#4b5563' }}
                     >
                       {d.emoji} {d.label}
@@ -3421,6 +3421,7 @@
                   {botSpeed === 'slow' && 'Bots pensam ~10 segundos'}
                   {botSpeed === 'medium' && 'Bots pensam ~5 segundos'}
                   {botSpeed === 'fast' && 'Bots pensam ~3 segundos'}
+                  {botSpeed === 'instant' && 'Bots jogam instantaneamente (teste)'}
                 </p>
               </div>
               )}
@@ -3800,7 +3801,7 @@
                       const HW = bDims.hw, VW = bDims.vw;
                       const ROW_H = HW + 2;
                       const BADGE = 24;
-                      const containerW = boardRef.current ? Math.floor(boardRef.current.getBoundingClientRect().width) - 16 : 300;
+                      const containerW = boardRef.current ? boardRef.current.clientWidth - 16 : 300;
                       const maxTileW = containerW - BADGE * 2 - 8;
                       const offX = BADGE + 4;
 
