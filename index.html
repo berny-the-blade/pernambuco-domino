@@ -3212,27 +3212,24 @@
         return () => clearTimeout(timeout);
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
-      /* Freeze board dimensions — only update on actual resize, not every render */
+      /* Lock board dimensions: measure ONCE when entering game, then never change */
       useEffect(() => {
         if (screen !== 'game') return;
         if (!boardRef.current) return;
-        let raf = 0;
-        const el = boardRef.current;
-        const update = () => {
-          cancelAnimationFrame(raf);
-          raf = requestAnimationFrame(() => {
-            if (!el) return;
-            const w = Math.floor(el.clientWidth);
-            const h = Math.floor(el.clientHeight);
-            setBoardBox(prev => (prev.w === w && prev.h === h) ? prev : { w, h });
-          });
+        let cancelled = false;
+        let tries = 0;
+        const measureAndLock = () => {
+          if (cancelled) return;
+          const el = boardRef.current;
+          if (!el) return;
+          const w = Math.floor(el.clientWidth);
+          const h = Math.floor(el.clientHeight);
+          if ((w < 50 || h < 50) && tries < 30) { tries++; requestAnimationFrame(measureAndLock); return; }
+          setBoardBox(prev => (prev.w === w && prev.h === h) ? prev : { w, h });
         };
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        window.addEventListener('resize', update);
-        return () => { ro.disconnect(); window.removeEventListener('resize', update); cancelAnimationFrame(raf); };
-      }, [screen, boardSize, gameState?.board?.length]);
+        requestAnimationFrame(() => requestAnimationFrame(measureAndLock));
+        return () => { cancelled = true; };
+      }, [screen]);
 
       // Domino dots pattern
       const DominoDots = ({ value, size = 'normal', dotPxProp, containerPxProp }) => {
@@ -3816,7 +3813,7 @@
                   </div>
 
                   {/* Board */}
-                  <div ref={boardRef} className="board-area p-2 flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <div ref={boardRef} className="board-area p-2 flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', height: boardBox.h ? boardBox.h : 'auto' }}>
                     {(!gameState.board || gameState.board.length === 0) ? (
                       <div className="flex-1 flex items-center justify-center">
                         <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
@@ -3825,8 +3822,8 @@
                       const board = gameState.board;
                       const HW = bDims.hw, VW = bDims.vw;
                       const BADGE = 24;
-                      /* Use frozen boardBox dimensions (stable across renders) */
-                      const containerW = boardBox.w ? (boardBox.w - 16) : 300;
+                      /* Use locked boardBox dimensions (measured once, never changes) */
+                      const containerW = boardBox.w || 300;
                       const containerH = boardBox.h || 300;
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
