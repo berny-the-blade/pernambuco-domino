@@ -313,6 +313,7 @@
 </head>
 <body>
   <div id="root"></div>
+  <script>window.onerror=function(m,s,l,c,e){document.getElementById('root').innerHTML='<pre style="color:red;padding:20px;font-size:14px">ERROR: '+m+'\nLine: '+l+', Col: '+c+'\n'+(e&&e.stack||'')+'</pre>';}</script>
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
@@ -377,6 +378,8 @@
       // === Player Profile System ===
       const HUMAN_PROFILES = [
         { key: 'ze', name: 'Zé', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
+        { key: 'alexandre', name: 'Alexandre', avatarType: 'image', avatarSrc: 'avatars/alexandre.png', color: '#3b82f6' },
+        { key: 'carlinhos', name: 'Carlinhos', avatarType: 'image', avatarSrc: 'avatars/carlinhos.png', color: '#22c55e' },
       ];
       const BOT_PROFILES = [
         { key: 'dona-maria', name: 'Dona Maria', avatarType: 'initials', initials: 'DM', color: '#ef4444', bgGradient: 'linear-gradient(135deg, #ef4444, #b91c1c)' },
