@@ -3003,19 +3003,19 @@
 
     // Tunable AI weights — CMA-ES tuner modifies these via iframe.contentWindow.AI_WEIGHTS
     const AI_WEIGHTS = {
-      deadEndPenalty: 35,       // penalty for creating a dead board end
-      lockFavorable: 40,        // bonus for deliberate favorable lock
-      lockUnfavorable: 60,      // penalty for unfavorable lock
-      chicoteSelf: 25,          // bonus when we hold the chicote
-      chicotePartner: 15,       // bonus when partner holds chicote
-      chicoteOpponent: 25,      // penalty when opponent holds chicote
-      chicoteDorme: 12,         // penalty when chicote in dorme
-      lockApproachGood: 20,     // bonus when approaching lock favors us
-      lockApproachBad: 15,      // penalty when approaching lock hurts us
-      monopolyBonus: 20,        // bonus for total monopoly on a suit
-      boardCountGradient: 6,    // per-opponent tile gradient
-      captiveEndBonus: 20,      // bonus for captive end (prob-dead favorable)
-      probDeadPenalty: 25,      // penalty for prob-dead unfavorable
+      deadEndPenalty: 34.7,     // penalty for creating a dead board end (CMA-ES tuned)
+      lockFavorable: 42.5,      // bonus for deliberate favorable lock
+      lockUnfavorable: 62.8,    // penalty for unfavorable lock
+      chicoteSelf: 26.9,        // bonus when we hold the chicote
+      chicotePartner: 23.4,     // bonus when partner holds chicote (+56%)
+      chicoteOpponent: 23.7,    // penalty when opponent holds chicote
+      chicoteDorme: 16.9,       // penalty when chicote in dorme (+41%)
+      lockApproachGood: 13.5,   // bonus when approaching lock favors us (-33%)
+      lockApproachBad: 17.5,    // penalty when approaching lock hurts us
+      monopolyBonus: 17.5,      // bonus for total monopoly on a suit
+      boardCountGradient: 6.3,  // per-opponent tile gradient
+      captiveEndBonus: 16,      // bonus for captive end (prob-dead favorable)
+      probDeadPenalty: 21.9,    // penalty for prob-dead unfavorable
     };
 
     // Smart AI - returns all scored options (not just best)
@@ -12310,6 +12310,35 @@
         console.log(`│ ${r.label.padEnd(26)} │ ${elo.padStart(6)} │ ${r.elapsed.padStart(5)}s │        │`);
       }
       console.log(`└────────────────────────────┴────────┴────────┴────────┘`);
+      return results;
+    };
+
+    // ========== MODEL A/B COMPARISON ==========
+    // Usage: runModelAB('domino_model.bin', 'domino_model_mcts_gen2.bin', 400)
+    // Loads each model, benchmarks against heuristic-only AI, compares Elo.
+    window.runModelAB = async function(modelA = 'domino_model.bin', modelB = 'domino_model_mcts_gen2.bin', games = 400) {
+      const results = [];
+      for (const url of [modelA, modelB]) {
+        console.log(`\n%c▶ Loading ${url}...`, 'font-size:14px;font-weight:bold;color:#38bdf8');
+        await loadNeuralModel(url);
+        setNNLeafValue(true);
+        _nnLeafStats.calls = 0; _nnLeafStats.totalMs = 0; _nnLeafStats.cacheHits = 0;
+        const r = await runAIBenchmark(games);
+        const stats = getNNLeafStats();
+        results.push({ model: url, ...r, nnStats: stats });
+      }
+      console.log(`\n%c═══ MODEL A/B SUMMARY ═══`, 'font-size:14px;font-weight:bold;color:#22c55e');
+      console.log(`┌──────────────────────────────────────┬────────┬────────┐`);
+      console.log(`│ Model                                │  Elo   │ Time   │`);
+      console.log(`├──────────────────────────────────────┼────────┼────────┤`);
+      for (const r of results) {
+        const elo = (r.eloDiff > 0 ? '+' : '') + r.eloDiff;
+        const name = r.model.length > 36 ? '...' + r.model.slice(-33) : r.model;
+        console.log(`│ ${name.padEnd(36)} │ ${elo.padStart(6)} │ ${r.elapsed.padStart(5)}s │`);
+      }
+      console.log(`└──────────────────────────────────────┴────────┴────────┘`);
+      const delta = results[1].eloDiff - results[0].eloDiff;
+      console.log(`%cModel B vs Model A: ${delta > 0 ? '+' : ''}${delta} Elo`, `font-weight:bold;color:${delta > 0 ? '#22c55e' : '#ef4444'}`);
       return results;
     };
 
