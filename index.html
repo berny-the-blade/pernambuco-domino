@@ -485,7 +485,7 @@
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
-      const BOARD_DIMS = { S: { hw: 44, vw: 22, minH: 180 }, M: { hw: 52, vw: 26, minH: 240 }, L: { hw: 58, vw: 29, minH: 280 } };
+      const BOARD_DIMS = { S: { hw: 44, vw: 22 }, M: { hw: 52, vw: 26 }, L: { hw: 58, vw: 29 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
       const roomRef = useRef(null);
@@ -3645,8 +3645,8 @@
         };
 
         return (
-          <div className="min-h-screen felt-bg p-2 animate-fade-in">
-            <div className="max-w-2xl mx-auto">
+          <div className="felt-bg animate-fade-in" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="max-w-2xl mx-auto" style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'column', padding: 8 }}>
 
               {/* Size toggle only */}
               <div className="flex justify-center mb-1">
@@ -3747,7 +3747,7 @@
               )}
 
               {/* Game Table */}
-              <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
                 {/* Partner (top) — same team = blue */}
                 <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
@@ -3771,7 +3771,7 @@
                 </div>
 
                 {/* Middle row */}
-                <div className="flex items-stretch mb-1 gap-1">
+                <div className="flex items-stretch mb-1 gap-1" style={{ flex: 1, minHeight: 0 }}>
 
                   {/* Left opponent — opposing team = red */}
                   <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48, borderTop: '2px solid #ef4444' }}>
@@ -3791,7 +3791,7 @@
                   </div>
 
                   {/* Board */}
-                  <div ref={boardRef} className="board-area flex-1 p-2 overflow-auto flex flex-col items-center justify-center" style={{ position: 'relative', minHeight: bDims.minH }}>
+                  <div ref={boardRef} className="board-area p-2 flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                     {(!gameState.board || gameState.board.length === 0) ? (
                       <div className="flex-1 flex items-center justify-center">
                         <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
@@ -3807,7 +3807,8 @@
 
                       /* Cap effective width so PC wraps earlier (compact like mobile) */
                       const containerH = boardRef.current ? Math.floor(boardRef.current.getBoundingClientRect().height) - 16 : 300;
-                      const targetW = Math.floor(containerH * 1.25);
+                      const aspect = boardSize === 'S' ? 1.10 : boardSize === 'M' ? 1.20 : 1.30;
+                      const targetW = Math.floor(containerH * aspect);
                       const effW = Math.max(220, Math.min(maxTileW, targetW));
 
                       /* --- Grid layout: real tile as turn piece (no synthetics) --- */
@@ -3949,8 +3950,24 @@
 
                 {/* Score dials removed from here — now overlaid on board corners */}
 
+                {/* Toggle hand button */}
+                <div className="flex justify-center" style={{ marginTop: 6 }}>
+                  <button
+                    onClick={() => setHandVisible(v => !v)}
+                    style={{
+                      fontSize: 11, fontWeight: 800,
+                      padding: '4px 10px', borderRadius: 10,
+                      background: 'rgba(255,255,255,0.08)',
+                      color: 'rgba(255,255,255,0.75)',
+                      border: '1px solid rgba(255,255,255,0.12)'
+                    }}
+                  >
+                    {handVisible ? 'Esconder mão ▼' : 'Mostrar mão ▲'}
+                  </button>
+                </div>
+
                 {/* My Hand — my team = blue */}
-                <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
+                {handVisible && <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6', marginTop: 6, maxHeight: '26vh', overflowY: 'auto' }}>
                   <div className="flex items-center justify-center gap-1.5" style={{ marginBottom: 2 }}>
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={22} />
@@ -3991,7 +4008,7 @@
                       </span>
                     </div>
                   )}
-                </div>
+                </div>}
               </div>
 
               {/* Dormidas indicator — subtle inline during play */}
