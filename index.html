@@ -734,10 +734,10 @@
 
       // === AI WEIGHTS — tunable scoring parameters ===
       const AI_WEIGHTS = {
-        deadEndPenalty: 35, lockFavorable: 40, lockUnfavorable: 60,
-        chicoteSelf: 25, chicotePartner: 15, chicoteOpponent: 25, chicoteDorme: 12,
-        lockApproachGood: 20, lockApproachBad: 15, monopolyBonus: 20,
-        boardCountGradient: 6, captiveEndBonus: 20, probDeadPenalty: 25,
+        deadEndPenalty: 34.7, lockFavorable: 42.5, lockUnfavorable: 62.8,
+        chicoteSelf: 26.9, chicotePartner: 23.4, chicoteOpponent: 23.7, chicoteDorme: 16.9,
+        lockApproachGood: 13.5, lockApproachBad: 17.5, monopolyBonus: 17.5,
+        boardCountGradient: 6.3, captiveEndBonus: 16, probDeadPenalty: 21.9,
       };
 
       // Standalone scoreWin for smartAI closing bonus
@@ -1992,6 +1992,185 @@
         return results.length > 0 ? results[0] : null;
       };
 
+      // === Neural Network Model (NN value head + PUCT policy) ===
+      const NN_STATE_DIM = 185;
+      const NN_NUM_ACTIONS = 57;
+      let _nnModel = null;
+      let USE_NN_LEAF_VALUE = false;
+      let _nnLeafStats = { calls: 0, totalMs: 0 };
+
+      const loadNeuralModel = async (url) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Failed to load model: ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        const view = new DataView(buf);
+        const headerLen = view.getUint32(0, true);
+        const headerBytes = new Uint8Array(buf, 4, headerLen);
+        const header = JSON.parse(new TextDecoder().decode(headerBytes));
+        const dataOffset = 4 + headerLen;
+        const rawBytes = new Uint8Array(buf, dataOffset, header.total_floats * 4);
+        const alignedBuf = new ArrayBuffer(rawBytes.length);
+        new Uint8Array(alignedBuf).set(rawBytes);
+        const floats = new Float32Array(alignedBuf);
+        const w = {};
+        for (const layer of header.layers) {
+          w[layer.name] = { shape: layer.shape, data: floats.subarray(layer.offset, layer.offset + layer.length) };
+        }
+        _nnModel = { weights: w, arch: header.architecture, generation: header.generation };
+        USE_NN_LEAF_VALUE = true;
+        console.log(`Neural model loaded: gen ${header.generation}, ${header.total_floats.toLocaleString()} params`);
+        return _nnModel;
+      };
+
+      const _nnMatVec = (W, b, x) => {
+        const rows = W.shape[0], cols = W.shape[1];
+        const out = new Float32Array(rows);
+        for (let r = 0; r < rows; r++) {
+          let sum = b.data[r];
+          const rOff = r * cols;
+          for (let c = 0; c < cols; c++) sum += W.data[rOff + c] * x[c];
+          out[r] = sum;
+        }
+        return out;
+      };
+      const _nnBatchNorm = (x, weight, bias, mean, variance) => {
+        const n = x.length, out = new Float32Array(n);
+        for (let i = 0; i < n; i++) out[i] = (x[i] - mean.data[i]) / Math.sqrt(variance.data[i] + 1e-5) * weight.data[i] + bias.data[i];
+        return out;
+      };
+      const _nnRelu = (x) => { const out = new Float32Array(x.length); for (let i = 0; i < x.length; i++) out[i] = x[i] > 0 ? x[i] : 0; return out; };
+      const _nnAdd = (a, b) => { const out = new Float32Array(a.length); for (let i = 0; i < a.length; i++) out[i] = a[i] + b[i]; return out; };
+      const _nnSoftmax = (x, mask) => {
+        const out = new Float32Array(x.length);
+        let maxVal = -Infinity;
+        for (let i = 0; i < x.length; i++) if (mask[i] > 0 && x[i] > maxVal) maxVal = x[i];
+        let sum = 0;
+        for (let i = 0; i < x.length; i++) { if (mask[i] > 0) { out[i] = Math.exp(x[i] - maxVal); sum += out[i]; } else out[i] = 0; }
+        if (sum > 0) for (let i = 0; i < x.length; i++) out[i] /= sum;
+        return out;
+      };
+
+      const _nnForward = (state, mask) => {
+        const w = _nnModel.weights;
+        let h = _nnMatVec(w['input_fc.weight'], w['input_fc.bias'], state);
+        h = _nnBatchNorm(h, w['input_bn.weight'], w['input_bn.bias'], w['input_bn.running_mean'], w['input_bn.running_var']);
+        h = _nnRelu(h);
+        for (let b = 0; b < 4; b++) {
+          const pfx = `res_blocks.${b}`;
+          let out = _nnMatVec(w[`${pfx}.fc1.weight`], w[`${pfx}.fc1.bias`], h);
+          out = _nnBatchNorm(out, w[`${pfx}.bn1.weight`], w[`${pfx}.bn1.bias`], w[`${pfx}.bn1.running_mean`], w[`${pfx}.bn1.running_var`]);
+          out = _nnRelu(out);
+          out = _nnMatVec(w[`${pfx}.fc2.weight`], w[`${pfx}.fc2.bias`], out);
+          out = _nnBatchNorm(out, w[`${pfx}.bn2.weight`], w[`${pfx}.bn2.bias`], w[`${pfx}.bn2.running_mean`], w[`${pfx}.bn2.running_var`]);
+          h = _nnRelu(_nnAdd(out, h));
+        }
+        let p = _nnMatVec(w['policy_fc1.weight'], w['policy_fc1.bias'], h);
+        p = _nnBatchNorm(p, w['policy_bn.weight'], w['policy_bn.bias'], w['policy_bn.running_mean'], w['policy_bn.running_var']);
+        p = _nnRelu(p);
+        p = _nnMatVec(w['policy_fc2.weight'], w['policy_fc2.bias'], p);
+        const policy = _nnSoftmax(p, mask);
+        let v = _nnMatVec(w['value_fc1.weight'], w['value_fc1.bias'], h);
+        v = _nnBatchNorm(v, w['value_bn.weight'], w['value_bn.bias'], w['value_bn.running_mean'], w['value_bn.running_var']);
+        v = _nnRelu(v);
+        v = _nnMatVec(w['value_fc2.weight'], w['value_fc2.bias'], v);
+        return { policy, value: Math.tanh(v[0]) };
+      };
+
+      const _nnForwardValue = (state) => {
+        const w = _nnModel.weights;
+        let h = _nnMatVec(w['input_fc.weight'], w['input_fc.bias'], state);
+        h = _nnBatchNorm(h, w['input_bn.weight'], w['input_bn.bias'], w['input_bn.running_mean'], w['input_bn.running_var']);
+        h = _nnRelu(h);
+        for (let b = 0; b < 4; b++) {
+          const pfx = `res_blocks.${b}`;
+          let out = _nnMatVec(w[`${pfx}.fc1.weight`], w[`${pfx}.fc1.bias`], h);
+          out = _nnBatchNorm(out, w[`${pfx}.bn1.weight`], w[`${pfx}.bn1.bias`], w[`${pfx}.bn1.running_mean`], w[`${pfx}.bn1.running_var`]);
+          out = _nnRelu(out);
+          out = _nnMatVec(w[`${pfx}.fc2.weight`], w[`${pfx}.fc2.bias`], out);
+          out = _nnBatchNorm(out, w[`${pfx}.bn2.weight`], w[`${pfx}.bn2.bias`], w[`${pfx}.bn2.running_mean`], w[`${pfx}.bn2.running_var`]);
+          h = _nnRelu(_nnAdd(out, h));
+        }
+        let v = _nnMatVec(w['value_fc1.weight'], w['value_fc1.bias'], h);
+        v = _nnBatchNorm(v, w['value_bn.weight'], w['value_bn.bias'], w['value_bn.running_mean'], w['value_bn.running_var']);
+        v = _nnRelu(v);
+        v = _nnMatVec(w['value_fc2.weight'], w['value_fc2.bias'], v);
+        return Math.tanh(v[0]);
+      };
+
+      // Encode game state to 185-dim vector (simplified beliefs using cantHave)
+      const _nnEncodeState = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMul) => {
+        const state = new Float32Array(NN_STATE_DIM);
+        const me = player;
+        const partner = (me + 2) % 4, lho = (me + 1) % 4, rho = (me + 3) % 4;
+        // [0:28] My hand
+        for (const t of hand) state[TILE_INDEX[t.id]] = 1.0;
+        // [28:56] Played tiles
+        for (const id of knowledge.played) state[28 + TILE_INDEX[id]] = 1.0;
+        // [56:63] Left end one-hot
+        if (lE >= 0 && lE <= 6) state[56 + lE] = 1.0;
+        // [63:70] Right end one-hot
+        if (rE >= 0 && rE <= 6) state[63 + rE] = 1.0;
+        // [70:91] CantHave: 3 players x 7 numbers
+        const others = [partner, lho, rho];
+        for (let i = 0; i < 3; i++) {
+          for (const n of knowledge.cantHave[others[i]]) {
+            if (n >= 0 && n <= 6) state[70 + i * 7 + n] = 1.0;
+          }
+        }
+        // [91:175] Belief probabilities (cantHave-based approximation)
+        const handIds = new Set(hand.map(h => h.id));
+        for (let t = 0; t < 28; t++) {
+          const tile = ALL_TILES[t];
+          if (handIds.has(tile.id) || knowledge.played.has(tile.id)) {
+            state[91 + t] = state[91 + 28 + t] = state[91 + 56 + t] = 1/3;
+            continue;
+          }
+          // Uniform prior with cantHave elimination
+          let b0 = 1, b1 = 1, b2 = 1;
+          if (knowledge.cantHave[partner].has(tile.left) || knowledge.cantHave[partner].has(tile.right)) b0 = 0;
+          if (knowledge.cantHave[lho].has(tile.left) || knowledge.cantHave[lho].has(tile.right)) b1 = 0;
+          if (knowledge.cantHave[rho].has(tile.left) || knowledge.cantHave[rho].has(tile.right)) b2 = 0;
+          const total = b0 + b1 + b2;
+          if (total > 0) { state[91 + t] = b0/total; state[91+28+t] = b1/total; state[91+56+t] = b2/total; }
+          else { state[91 + t] = state[91 + 28 + t] = state[91 + 56 + t] = 1/3; }
+        }
+        // [175:179] Hand sizes (normalized)
+        const playedBy = knowledge.playsBy;
+        state[175] = hand.length / 6.0;
+        for (let i = 0; i < 3; i++) state[176 + i] = Math.max(0, 6 - playedBy[others[i]].length) / 6.0;
+        // [179:181] Match scores
+        const ms = matchScores || [0, 0];
+        const myTeam = me % 2;
+        state[179] = ms[myTeam] / 6.0;
+        state[180] = ms[1 - myTeam] / 6.0;
+        // [181:182] Multiplier
+        state[181] = Math.min(dobMul || 1, 4) / 4.0;
+        // [182:183] Board length
+        state[182] = bLen / 24.0;
+        // [183:184] Game phase
+        state[183] = knowledge.played.size / 24.0;
+        // [184:185] My team
+        state[184] = myTeam;
+        return state;
+      };
+
+      // Build action mask (57-dim)
+      const _nnActionMask = (hand, lE, rE, bLen) => {
+        const mask = new Float32Array(NN_NUM_ACTIONS);
+        const playable = hand.filter(t => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE);
+        if (playable.length === 0) { mask[56] = 1.0; return mask; }
+        for (const tile of playable) {
+          const idx = TILE_INDEX[tile.id];
+          if (bLen === 0) { mask[idx] = 1.0; }
+          else if (lE === rE) { mask[idx] = 1.0; }
+          else {
+            if (tile.left === lE || tile.right === lE) mask[idx] = 1.0;
+            if (tile.left === rE || tile.right === rE) mask[28 + idx] = 1.0;
+          }
+        }
+        return mask;
+      };
+
       // === ISMCTS (Information Set Monte Carlo Tree Search) ===
       class ISMCTSNode {
         constructor(move = null, parent = null) {
@@ -2001,20 +2180,29 @@
           this.visits = 0;
           this.totalReward = 0;
           this.hBias = 0;
+          this.priorP = 0.0;
+          this.actionIdx = -1;
         }
-        ucb1(C = 1.41) {
+        puctScore(parentVisits, cPuct) {
+          const Q = this.visits > 0 ? this.totalReward / this.visits : 0.0;
+          return Q + cPuct * this.priorP * Math.sqrt(parentVisits) / (1 + this.visits);
+        }
+        ucb1(C = 1.41, useProgBias = true) {
           if (this.visits === 0) return Infinity;
-          return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits) + this.hBias / (this.visits + 1);
+          return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits) + (useProgBias ? this.hBias / (this.visits + 1) : 0);
         }
-        selectChild(legalMoves) {
+        selectChild(legalMoves, cfg) {
           const legal = this.children.filter(c =>
             legalMoves.some(m => m.tile.id === c.move.tile.id && m.side === c.move.side)
           );
           if (legal.length === 0) return null;
-          let best = legal[0], bestUCB = legal[0].ucb1();
+          const pVisits = Math.max(1, this.visits);
+          const doPUCT = cfg && cfg.usePUCT && (!cfg.rootOnlyPUCT || cfg.isRoot);
+          let best = legal[0];
+          let bestScore = doPUCT ? legal[0].puctScore(pVisits, cfg.cPuct) : legal[0].ucb1(cfg ? cfg.C : 1.41, cfg ? cfg.useProgBias : true);
           for (let i = 1; i < legal.length; i++) {
-            const u = legal[i].ucb1();
-            if (u > bestUCB) { best = legal[i]; bestUCB = u; }
+            const s = doPUCT ? legal[i].puctScore(pVisits, cfg.cPuct) : legal[i].ucb1(cfg ? cfg.C : 1.41, cfg ? cfg.useProgBias : true);
+            if (s > bestScore) { best = legal[i]; bestScore = s; }
           }
           return best;
         }
@@ -2130,6 +2318,37 @@
           handSizes[p] = p === player ? hand.length : Math.max(1, 6 - playedPerPlayer[p]);
         }
 
+        // NN-aware config: PUCT at root when model loaded
+        const nnActive = USE_NN_LEAF_VALUE && _nnModel;
+        const cfg = {
+          usePUCT: nnActive,
+          rootOnlyPUCT: true,
+          cPuct: 1.0,
+          C: nnActive ? 0.7 : 1.41,
+          useProgBias: !nnActive,
+          isRoot: true,
+        };
+
+        // Compute root PUCT prior (blended NN policy + uniform)
+        let rootPrior = null;
+        if (cfg.usePUCT) {
+          const mask = _nnActionMask(hand, lE, rE, bLen);
+          const enc = _nnEncodeState(hand, lE, rE, bLen, player, knowledge, ms, dm);
+          const { policy: pNN } = _nnForward(enc, mask);
+          const alpha = 0.2;
+          rootPrior = new Float32Array(57);
+          let legalCount = 0;
+          for (let a = 0; a < 57; a++) if (mask[a] > 0) legalCount++;
+          const u = legalCount > 0 ? 1.0 / legalCount : 0;
+          let sum = 0;
+          for (let a = 0; a < 57; a++) {
+            if (mask[a] === 0) { rootPrior[a] = 0; continue; }
+            rootPrior[a] = (1 - alpha) * u + alpha * Math.max(pNN[a], 1e-12);
+            sum += rootPrior[a];
+          }
+          if (sum > 0) for (let a = 0; a < 57; a++) rootPrior[a] /= sum;
+        }
+
         const root = new ISMCTSNode();
         let nodeCount = 1;
         const startTime = Date.now();
@@ -2179,7 +2398,8 @@
             const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
             if (legalMoves.length === 0) break;
 
-            const child = node.selectChild(legalMoves);
+            const selCfg = { ...cfg, isRoot: node === root };
+            const child = node.selectChild(legalMoves, selCfg);
             if (!child) break;
 
             // Progressive widening
@@ -2192,7 +2412,15 @@
               node = node.expand(expandMove);
               nodeCount++;
               if (_prevNode === root && curPlayer === player) {
-                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+                // Set PUCT prior or heuristic bias
+                if (rootPrior) {
+                  const tIdx = TILE_INDEX[expandMove.tile.id];
+                  node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
+                  node.priorP = rootPrior[node.actionIdx];
+                }
+                if (!cfg.usePUCT) {
+                  node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+                }
               }
               const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
               simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
@@ -2236,7 +2464,14 @@
               node = node.expand(expandMove);
               nodeCount++;
               if (_leafParent === root && curPlayer === player) {
-                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+                if (rootPrior) {
+                  const tIdx = TILE_INDEX[expandMove.tile.id];
+                  node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
+                  node.priorP = rootPrior[node.actionIdx];
+                }
+                if (!cfg.usePUCT) {
+                  node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+                }
               }
               const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
               simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
@@ -2252,12 +2487,17 @@
             }
           }
 
-          // 3. ROLLOUT using fastAI
-          const result = simulateFromPosition(simHands, simLE, simRE, curPlayer, simK, simBLen);
-          const winTeam = result.winnerTeam !== undefined ? result.winnerTeam : result.team;
-          const reward = (winTeam >= 0)
-            ? _rolloutToMEReward(winTeam, result.points, myTeam, ms, dm)
-            : 0;
+          // 3. LEAF EVALUATION: NN value head (if available) or fastAI rollout
+          let reward;
+          if (nnActive) {
+            const nnState = _nnEncodeState(simHands[curPlayer], simLE, simRE, simBLen, curPlayer, simK, ms, dm);
+            const value = _nnForwardValue(nnState);
+            reward = (curPlayer % 2 === myTeam) ? value : -value;
+          } else {
+            const result = simulateFromPosition(simHands, simLE, simRE, curPlayer, simK, simBLen);
+            const winTeam = result.winnerTeam !== undefined ? result.winnerTeam : result.team;
+            reward = (winTeam >= 0) ? _rolloutToMEReward(winTeam, result.points, myTeam, ms, dm) : 0;
+          }
           _ismctsBackprop(node, reward);
         }
 
@@ -3272,6 +3512,12 @@
 
       return null;
     }
+
+    // Auto-load neural model if available
+    loadNeuralModel('domino_model.bin').catch(() => {
+      console.log('Neural model not found — using heuristic AI only');
+      USE_NN_LEAF_VALUE = false;
+    });
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
