@@ -2,7 +2,7 @@
   "name": "Domino Pernambucano",
   "short_name": "Domino",
   "description": "Jogo de domino pernambucano 2v2 - multiplayer online",
-  "start_url": "/index.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0a2a14",

@@ -1,9 +1,10 @@
-const CACHE_NAME = 'domino-pernambuco-v4';
+const CACHE_NAME = 'domino-pernambuco-v5';
 const ASSETS_TO_CACHE = [
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
   'https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap',
   'https://cdn.tailwindcss.com',
   'https://unpkg.com/react@18/umd/react.production.min.js',
