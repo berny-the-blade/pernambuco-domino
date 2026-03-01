@@ -3831,15 +3831,14 @@
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
-                      /* --- Connected snake layout: doubles vertical, everything else horizontal --- */
-                      const WIDTH_PCT = boardSize === 'S' ? 0.78 : boardSize === 'M' ? 0.86 : 0.94;
-                      const effW = Math.max(220, Math.floor(maxTileW * WIDTH_PCT));
-
+                      /* ===== FINAL STABLE LAYOUT =====
+                         - Only doubles vertical, everything else horizontal
+                         - No dynamic width scaling, no feedback loop
+                         - effW = maxTileW (full available width, stable) */
+                      const effW = maxTileW;
                       const items = [];
-                      const GAP_Y = Math.max(6, Math.floor(VW * 0.3));
+                      const GAP_Y = Math.max(6, Math.floor(VW * 0.25));
                       const rowPitch = HW + GAP_Y;
-
-                      /* Deterministic row indexing — predictable tile count per row */
                       const tilesPerRow = Math.max(4, Math.floor(effW / HW));
                       let row = 0, dir = +1;
 
@@ -3852,10 +3851,8 @@
                         const idxInRow = i % tilesPerRow;
                         if (i > 0 && idxInRow === 0) { row++; dir *= -1; }
 
-                        /* Compute px by slot; in reverse rows, mirror within effW */
                         const slotX = idxInRow * HW;
-                        let px = (dir === +1) ? slotX : (effW - HW - slotX);
-                        /* Center doubles inside the HW-wide slot */
+                        let px = dir === +1 ? slotX : (effW - HW - slotX);
                         if (isD) px += Math.floor((HW - VW) / 2);
 
                         const py = row * rowPitch;
@@ -3863,31 +3860,29 @@
                           i, x: px, y: py,
                           orient: isD ? 'vertical' : 'horizontal',
                           flip: (dir === -1 && !isD),
-                          w: tw, h: th, dir
+                          w: tw, h: th
                         });
                       }
 
-                      /* Center the whole chain within effW x containerH, clamped */
-                      const firstIt = items[0];
-                      let shiftX = (effW / 2) - (firstIt.x + firstIt.w / 2);
-                      let shiftY = (containerH / 2) - (firstIt.y + firstIt.h / 2);
-
-                      let minPX = Infinity, maxPX = -Infinity, minPY = Infinity, maxPY = -Infinity;
+                      /* Center entire block once (no dynamic resizing) */
+                      let minX = Infinity, maxX2 = -Infinity, minY = Infinity, maxY2 = -Infinity;
                       for (const it of items) {
-                        minPX = Math.min(minPX, it.x); maxPX = Math.max(maxPX, it.x + it.w);
-                        minPY = Math.min(minPY, it.y); maxPY = Math.max(maxPY, it.y + it.h);
+                        minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w);
+                        minY = Math.min(minY, it.y); maxY2 = Math.max(maxY2, it.y + it.h);
                       }
-                      shiftX = Math.max(-minPX, Math.min(shiftX, effW - maxPX));
-                      shiftY = Math.max(-minPY, Math.min(shiftY, containerH - maxPY));
+                      const spanX = maxX2 - minX, spanY = maxY2 - minY;
+                      let shiftX = (effW - spanX) / 2 - minX;
+                      let shiftY = (containerH - spanY) / 2 - minY;
+                      shiftX = Math.max(-minX, Math.min(shiftX, effW - maxX2));
+                      shiftY = Math.max(-minY, Math.min(shiftY, containerH - maxY2));
                       for (const it of items) { it.x = Math.round(it.x + shiftX); it.y = Math.round(it.y + shiftY); }
 
-                      const drawW = effW + BADGE * 2 + 8;
+                      const drawW = containerW;
                       const first = items[0], last = items[items.length - 1];
                       const lbx = first.x - BADGE - 2;
                       const lby = first.y + (first.h - BADGE) / 2;
-                      let rbx, rby;
-                      if (last.dir === 1) { rbx = last.x + last.w + 2; rby = last.y + (last.h - BADGE) / 2; }
-                      else { rbx = last.x - BADGE - 2; rby = last.y + (last.h - BADGE) / 2; }
+                      const rbx = last.x + last.w + 2;
+                      const rby = last.y + (last.h - BADGE) / 2;
 
                       const EndBadge = ({ num, bx, by }) => (
                         <div style={{ position: 'absolute', left: offX + bx, top: by, width: BADGE, height: BADGE, borderRadius: '50%', background: '#10b981',
