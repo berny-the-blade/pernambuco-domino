@@ -3805,6 +3805,11 @@
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
+                      /* Cap effective width so PC wraps earlier (compact like mobile) */
+                      const containerH = boardRef.current ? Math.floor(boardRef.current.getBoundingClientRect().height) - 16 : 300;
+                      const targetW = Math.floor(containerH * 1.25);
+                      const effW = Math.max(220, Math.min(maxTileW, targetW));
+
                       /* --- Grid layout: real tile as turn piece (no synthetics) --- */
                       const items = [];
                       let row = 0, goRight = true, cursorX = 0;
@@ -3817,21 +3822,21 @@
 
                         let wouldOverflow = false;
                         if (i > 0) {
-                          if (goRight) wouldOverflow = cursorX + tw > maxTileW;
+                          if (goRight) wouldOverflow = cursorX + tw > effW;
                           else wouldOverflow = cursorX - tw < 0;
                         }
 
                         if (wouldOverflow) {
                           /* Place THIS REAL TILE as the vertical corner piece at edge of CURRENT row */
                           const turnW = VW, turnH = HW;
-                          const px = goRight ? (maxTileW - turnW) : 0;
+                          const px = goRight ? (effW - turnW) : 0;
                           const py = row * ROW_H + (ROW_H - turnH) / 2;
                           items.push({ i, row, x: px, y: py, orient: 'vertical', flip: false, turn: false, dir: goRight ? 1 : -1, w: turnW, h: turnH });
                           /* Next row, reverse direction, start under the corner */
                           row++;
                           goRight = !goRight;
                           cursorX = goRight ? (px + VW) : px;
-                          continue; /* move to next tile (do NOT i--) */
+                          continue;
                         }
 
                         /* Normal tile placement */
@@ -3842,14 +3847,16 @@
                         items.push({ i, row, x: px, y: py, orient: baseOrient, flip: (!goRight && baseOrient === 'horizontal'), turn: false, dir: goRight ? 1 : -1, w: tw, h: isD ? HW : VW });
                       }
 
-                      /* --- Anchor first tile centered, clamped to bounds --- */
+                      /* --- Anchor first tile centered within effW, clamped --- */
                       if (items.length > 0) {
                         const first = items[0];
-                        const desiredShift = (maxTileW / 2) - (first.x + first.w / 2);
+                        const desiredShift = (effW / 2) - (first.x + first.w / 2);
                         let minX = Infinity, maxX2 = -Infinity;
                         for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
-                        const shift = Math.max(-minX, Math.min(desiredShift, maxTileW - maxX2));
+                        const shift = Math.max(-minX, Math.min(desiredShift, effW - maxX2));
                         for (const it of items) it.x += shift;
+                        /* Round to integers to prevent subpixel seams */
+                        for (const it of items) { it.x = Math.round(it.x); it.y = Math.round(it.y); }
                       }
 
                       const totalH = (row + 1) * ROW_H;
