@@ -165,20 +165,20 @@
       100% { background-position: 200% center; }
     }
     @keyframes fly-from-bottom {
-      from { transform: translateY(120px); opacity: 0.5; }
-      to { transform: translateY(0); opacity: 1; }
+      from { transform: translateY(80px) scale(1.2); opacity: 0.5; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
     }
     @keyframes fly-from-top {
-      from { transform: translateY(-100px); opacity: 0.5; }
-      to { transform: translateY(0); opacity: 1; }
+      from { transform: translateY(-70px) scale(1.2); opacity: 0.5; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
     }
     @keyframes fly-from-left {
-      from { transform: translateX(-80px); opacity: 0.5; }
-      to { transform: translateX(0); opacity: 1; }
+      from { transform: translateX(-60px) scale(1.2); opacity: 0.5; }
+      to { transform: translateX(0) scale(1); opacity: 1; }
     }
     @keyframes fly-from-right {
-      from { transform: translateX(80px); opacity: 0.5; }
-      to { transform: translateX(0); opacity: 1; }
+      from { transform: translateX(60px) scale(1.2); opacity: 0.5; }
+      to { transform: translateX(0) scale(1); opacity: 1; }
     }
     .animate-slide-down { animation: slide-down 0.3s ease-out; }
     .animate-fade-in { animation: fade-in 0.4s ease-out; }
@@ -2717,9 +2717,21 @@
       };
 
       const executeTilePlay = async (tile, slot, side = null) => {
+        // Determine actual side for fly animation targeting
+        let actualSide = side; // 'left', 'right', or null
+        if (!actualSide && gameState.board && gameState.board.length > 0) {
+          // Auto-placement: figure out which end this tile will go to
+          if (tile.left === gameState.leftEnd || tile.right === gameState.leftEnd) {
+            actualSide = 'left';
+          } else if (tile.left === gameState.rightEnd || tile.right === gameState.rightEnd) {
+            actualSide = 'right';
+          }
+        }
+        // null means first tile (board empty) — will center
+
         // Trigger fly animation before updating state
-        setFlyingTile({ tile, fromSlot: slot });
-        await new Promise(resolve => setTimeout(resolve, 400));
+        setFlyingTile({ tile, fromSlot: slot, side: actualSide });
+        await new Promise(resolve => setTimeout(resolve, 350));
         setFlyingTile(null);
 
         const newHands = gameState.hands.map(h => [...h]);
@@ -3579,9 +3591,9 @@
 
         // Compact SVG scoring dial — semicircular arc with both teams
         const ScoreDial = ({ s0, s1, total }) => {
-          const W = 90, H = 55;
-          const cx = W / 2, cy = H - 6;
-          const r = 34;
+          const W = 70, H = 42;
+          const cx = W / 2, cy = H - 5;
+          const r = 26;
           const steps = total || 6;
           // Semicircle: PI (left) to 0 (right)
           const angleFor = (val) => Math.PI - (val / steps) * Math.PI;
@@ -3590,12 +3602,12 @@
           for (let i = 0; i <= steps; i++) {
             const a = angleFor(i);
             const cos = Math.cos(a), sin = Math.sin(a);
-            const x1 = cx + (r - 5) * cos, y1 = cy - (r - 5) * sin;
+            const x1 = cx + (r - 4) * cos, y1 = cy - (r - 4) * sin;
             const x2 = cx + r * cos, y2 = cy - r * sin;
-            const tx = cx + (r + 8) * cos, ty = cy - (r + 8) * sin;
+            const tx = cx + (r + 6) * cos, ty = cy - (r + 6) * sin;
             ticks.push(
-              <line key={'t' + i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />,
-              <text key={'n' + i} x={tx} y={ty} fill="rgba(255,255,255,0.6)" fontSize={8} fontWeight={700} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>
+              <line key={'t' + i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8} />,
+              <text key={'n' + i} x={tx} y={ty} fill="rgba(255,255,255,0.6)" fontSize={6} fontWeight={700} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>
             );
           }
 
@@ -3610,29 +3622,29 @@
 
           // Team dots
           const a0 = angleFor(s0), a1 = angleFor(s1);
-          const dotR = r - 12;
+          const dotR = r - 9;
           const dx0 = cx + dotR * Math.cos(a0), dy0 = cy - dotR * Math.sin(a0);
           const dx1 = cx + dotR * Math.cos(a1), dy1 = cy - dotR * Math.sin(a1);
 
           return (
-            <div className="flex justify-center" style={{ marginBottom: 2 }}>
+            <div>
               <svg width={W} height={H} viewBox={'0 0 ' + W + ' ' + H}>
                 {/* Background arc */}
-                <path d={arcD(0, steps, r - 2)} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={3} />
+                <path d={arcD(0, steps, r - 2)} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={2.5} />
                 {/* T1 filled arc (blue) */}
-                {s0 > 0 && <path d={arcD(0, s0, r - 2)} fill="none" stroke="#3b82f6" strokeWidth={3} opacity={0.7} />}
+                {s0 > 0 && <path d={arcD(0, s0, r - 2)} fill="none" stroke="#3b82f6" strokeWidth={2.5} opacity={0.7} />}
                 {/* T2 filled arc (red) — slightly offset radius to avoid overlap */}
-                {s1 > 0 && <path d={arcD(0, s1, r + 2)} fill="none" stroke="#ef4444" strokeWidth={2.5} opacity={0.7} />}
+                {s1 > 0 && <path d={arcD(0, s1, r + 2)} fill="none" stroke="#ef4444" strokeWidth={2} opacity={0.7} />}
                 {/* Tick marks and numbers */}
                 {ticks}
                 {/* T1 dot (blue) */}
-                <circle cx={dx0} cy={dy0} r={4.5} fill="#3b82f6" stroke="#fff" strokeWidth={1.5} />
+                <circle cx={dx0} cy={dy0} r={3.5} fill="#3b82f6" stroke="#fff" strokeWidth={1.2} />
                 {/* T2 dot (red) */}
-                <circle cx={dx1} cy={dy1} r={4.5} fill="#ef4444" stroke="#fff" strokeWidth={1.5} />
+                <circle cx={dx1} cy={dy1} r={3.5} fill="#ef4444" stroke="#fff" strokeWidth={1.2} />
                 {/* T1 label */}
-                <text x={6} y={H - 2} fill="#93c5fd" fontSize={8} fontWeight={800}>T1</text>
+                <text x={5} y={H - 2} fill="#93c5fd" fontSize={6} fontWeight={800}>T1</text>
                 {/* T2 label */}
-                <text x={W - 6} y={H - 2} fill="#fca5a5" fontSize={8} fontWeight={800} textAnchor="end">T2</text>
+                <text x={W - 5} y={H - 2} fill="#fca5a5" fontSize={6} fontWeight={800} textAnchor="end">T2</text>
               </svg>
             </div>
           );
@@ -3642,8 +3654,9 @@
           <div className="min-h-screen felt-bg p-2 animate-fade-in">
             <div className="max-w-2xl mx-auto">
 
-              {/* Size toggle bar (scores moved to dial on table) */}
-              <div className="score-bar px-2 py-1 mb-1 flex items-center justify-center">
+              {/* Size toggle bar with compact scores */}
+              <div className="score-bar px-2 py-1 mb-1 flex items-center justify-between">
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#93c5fd', fontFamily: 'monospace', minWidth: 40 }}>T1 {score0}</span>
                 <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
                   {['S','M','L'].map(sz => (
                     <button key={sz} onClick={() => setBoardSize(sz)}
@@ -3653,6 +3666,7 @@
                     </button>
                   ))}
                 </div>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#fca5a5', fontFamily: 'monospace', minWidth: 40, textAlign: 'right' }}>{score1} T2</span>
               </div>
 
               {/* Message toast */}
@@ -3742,9 +3756,6 @@
 
               {/* Game Table */}
               <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
-
-                {/* Scoring dial */}
-                <ScoreDial s0={score0} s1={score1} total={mt} />
 
                 {/* Partner (top) — same team = blue */}
                 <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
@@ -3893,7 +3904,7 @@
                     })()}
                     {/* Dormidas badge — tiny corner indicator */}
                     {gameState.dormidas && gameState.currentPlayer !== -1 && (
-                      <div style={{ position: 'absolute', bottom: 4, right: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.4 }}>
+                      <div style={{ position: 'absolute', bottom: 4, left: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.4 }}>
                         <span style={{ fontSize: 9, color: '#fff', fontWeight: 700 }}>Dorme</span>
                         <div style={{ display: 'flex', gap: 2 }}>
                           {[0,1,2,3].map(i => (
@@ -3908,19 +3919,27 @@
                         : flyingTile.fromSlot === topSlot ? 'fly-from-top'
                         : flyingTile.fromSlot === leftSlot ? 'fly-from-left'
                         : 'fly-from-right';
+                      const posStyle = flyingTile.side === 'left'
+                        ? { top: '50%', left: '15%', transform: 'translate(-50%, -50%)' }
+                        : flyingTile.side === 'right'
+                        ? { top: '50%', right: '15%', transform: 'translate(50%, -50%)' }
+                        : { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
                       return (
                         <div style={{
                           position: 'absolute',
-                          top: '50%', left: '50%',
-                          transform: 'translate(-50%, -50%)',
+                          ...posStyle,
                           zIndex: 50,
-                          animation: animName + ' 350ms ease-out forwards',
+                          animation: animName + ' 300ms ease-in-out forwards',
                           pointerEvents: 'none'
                         }}>
                           <BoardTile tile={flyingTile.tile} orientation="vertical" flipped={false} />
                         </div>
                       );
                     })()}
+                    {/* Score dial — compact, bottom-right corner */}
+                    <div style={{ position: 'absolute', bottom: 4, right: 4, opacity: 0.7, zIndex: 10, pointerEvents: 'none' }}>
+                      <ScoreDial s0={score0} s1={score1} total={mt} />
+                    </div>
                   </div>
 
                   {/* Right opponent — opposing team = red */}
