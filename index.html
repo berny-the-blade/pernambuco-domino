@@ -330,6 +330,44 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
+    // === Sound Effects (Web Audio API — no external files) ===
+    let _audioCtx = null;
+    function playSound(type) {
+      try {
+        if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = _audioCtx;
+        const now = ctx.currentTime;
+
+        if (type === 'join') {
+          // Two-note ascending chime (~200ms)
+          [523.25, 659.25].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.18, now + i * 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.15);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(now + i * 0.1);
+            osc.stop(now + i * 0.1 + 0.15);
+          });
+        } else if (type === 'start') {
+          // Three-note ascending fanfare (~400ms)
+          [523.25, 659.25, 783.99].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.22, now + i * 0.12);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.2);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(now + i * 0.12);
+            osc.stop(now + i * 0.12 + 0.2);
+          });
+        }
+      } catch (e) { /* ignore audio errors */ }
+    }
+
     // === Neural Network Model (globals — must be outside App for loadNeuralModel call) ===
     const NN_STATE_DIM = 185;
     const NN_NUM_ACTIONS = 57;
@@ -504,13 +542,22 @@
           setScreen('lobby');
           
           roomRef.current = db.ref('rooms/' + code);
+          let _prevPlayerCount = Object.values(initialState.players).filter(p => p).length;
+          let _prevGameStarted = false;
           roomRef.current.on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
               setGameState(data);
+              // Detect new player joining
+              const curCount = data.players ? Object.values(data.players).filter(p => p).length : 0;
+              if (curCount > _prevPlayerCount) playSound('join');
+              _prevPlayerCount = curCount;
+              // Detect game start
               if (data.gameStarted && !data.gameEnded) {
+                if (!_prevGameStarted) playSound('start');
                 setScreen('game');
               }
+              _prevGameStarted = !!(data.gameStarted && !data.gameEnded);
               if (data.waitingForStarterChoice) {
                 setShowStarterChoice(true);
               } else {
@@ -574,13 +621,22 @@
           setScreen('lobby');
 
           roomRef.current = db.ref('rooms/' + code);
+          let _prevPlayerCountJ = data.players ? Object.values(data.players).filter(p => p).length : 0;
+          let _prevGameStartedJ = false;
           roomRef.current.on('value', (snapshot) => {
             const data = snapshot.val();
             if (data) {
               setGameState(data);
+              // Detect new player joining
+              const curCount = data.players ? Object.values(data.players).filter(p => p).length : 0;
+              if (curCount > _prevPlayerCountJ) playSound('join');
+              _prevPlayerCountJ = curCount;
+              // Detect game start
               if (data.gameStarted && !data.gameEnded) {
+                if (!_prevGameStartedJ) playSound('start');
                 setScreen('game');
               }
+              _prevGameStartedJ = !!(data.gameStarted && !data.gameEnded);
               if (data.waitingForStarterChoice) {
                 setShowStarterChoice(true);
               } else {
