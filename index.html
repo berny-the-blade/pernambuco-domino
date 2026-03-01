@@ -3896,7 +3896,12 @@
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
 
-                                  const isTurn = (posInRow === 0 && rIdx > 0);
+                                  const isTurn =
+                                    rIdx > 0 &&
+                                    (
+                                      (!isOdd && posInRow === 0) ||
+                                      ( isOdd && posInRow === rowIdxs.length - 1 )
+                                    );
                                   const orient = (isD || isTurn) ? 'vertical' : 'horizontal';
                                   const flip = isOdd && orient === 'horizontal';
 
