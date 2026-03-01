@@ -3804,11 +3804,10 @@
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
-                      /* Cap effective width so PC wraps earlier (compact like mobile) */
+                      /* Stable play width: fixed % of available width (no height dependency) */
                       const containerH = boardRef.current ? Math.floor(boardRef.current.clientHeight) : 300;
-                      const aspect = boardSize === 'S' ? 1.10 : boardSize === 'M' ? 1.20 : 1.30;
-                      const targetW = Math.floor(containerH * aspect);
-                      const effW = Math.max(220, Math.min(maxTileW, targetW));
+                      const WIDTH_PCT = boardSize === 'S' ? 0.78 : boardSize === 'M' ? 0.86 : 0.94;
+                      const effW = Math.max(220, Math.floor(maxTileW * WIDTH_PCT));
 
                       /* --- Deterministic grid layout with occupancy (NO overlaps) ---
                          Rules: doubles vertical, everything else horizontal.
@@ -3817,7 +3816,7 @@
                       const corners = [];
 
                       const CELL_X = VW;
-                      const CELL_Y = VW;
+                      const CELL_Y = VW + 2;
                       const DOUBLE_HC = Math.ceil(HW / CELL_Y);
                       const ROW_STEP = DOUBLE_HC + 1;
 
@@ -3874,7 +3873,11 @@
                         else gx = candGX;
                       }
 
-                      /* Center and clamp within available space */
+                      /* Anchor first tile to center, then clamp so nothing leaves play area */
+                      const firstIt = items[0];
+                      let shiftX = (effW / 2) - (firstIt.x + firstIt.w / 2);
+                      let shiftY = (containerH / 2) - (firstIt.y + firstIt.h / 2);
+
                       let minPX = Infinity, maxPX = -Infinity, minPY = Infinity, maxPY = -Infinity;
                       for (const it of items) {
                         minPX = Math.min(minPX, it.x); maxPX = Math.max(maxPX, it.x + it.w);
@@ -3885,9 +3888,6 @@
                         minPX = Math.min(minPX, cx); maxPX = Math.max(maxPX, cx + VW);
                         minPY = Math.min(minPY, cy); maxPY = Math.max(maxPY, cy + VW);
                       }
-                      const spanX = maxPX - minPX, spanY = maxPY - minPY;
-                      let shiftX = (effW - spanX) / 2 - minPX;
-                      let shiftY = (containerH - spanY) / 2 - minPY;
                       shiftX = Math.max(-minPX, Math.min(shiftX, effW - maxPX));
                       shiftY = Math.max(-minPY, Math.min(shiftY, containerH - maxPY));
                       for (const it of items) { it.x = Math.round(it.x + shiftX); it.y = Math.round(it.y + shiftY); }
