@@ -5160,14 +5160,40 @@
       }
 
       if (reasons.length === 0) {
-        // Fallback: use heuristic reasons from smartAI
+        // Fallback: use heuristic reasons from smartAI, with category-aware filtering
+        // Raw string diff fails because each tile generates unique reason text
+        // (different end numbers, tile lists, pip counts) even for the same category.
+        // We must compare by category so we don't show "Sheds 7 pips" as an advantage
+        // when the played tile sheds 11 pips.
         try {
           const aiOptions = smartAI(hand, lE, rE, bLen, 0, knowledge, true);
           const aiBest = aiOptions.find(o => o.tile.id === bestT.id);
           const aiPlay = aiOptions.find(o => o.tile.id === playT.id);
           if (aiBest && aiBest.reasons.length > 0) {
-            const playReasonSet = new Set(aiPlay ? aiPlay.reasons : []);
-            const diff = aiBest.reasons.filter(r => !playReasonSet.has(r));
+            const playReasons = aiPlay ? aiPlay.reasons : [];
+            const playReasonSet = new Set(playReasons);
+            const diff = [];
+            for (const reason of aiBest.reasons) {
+              if (playReasonSet.has(reason)) continue;
+
+              // Category: connectivity ("X more tiles match new ends")
+              const connM = reason.match(/^(\d+) more tiles match new ends/);
+              if (connM) {
+                const bestCnt = parseInt(connM[1]);
+                const playConn = playReasons.find(r => /^\d+ more tiles match new ends/.test(r));
+                if (playConn && parseInt(playConn.match(/^(\d+)/)[1]) >= bestCnt) continue;
+              }
+
+              // Category: pip shedding ("Sheds X pips" or "Dump heavy tile (X pips)")
+              const pipM = reason.match(/(?:Sheds |Dump heavy tile \()(\d+) pips/);
+              if (pipM) {
+                const bestPips = parseInt(pipM[1]);
+                const playPip = playReasons.find(r => /(?:Sheds |Dump heavy tile \()(\d+) pips/.test(r));
+                if (playPip && parseInt(playPip.match(/(?:Sheds |Dump heavy tile \()(\d+) pips/)[1]) >= bestPips) continue;
+              }
+
+              diff.push(reason);
+            }
             if (diff.length > 0) {
               reasons.push(`<b>Why better:</b> ${diff.slice(0, 2).join('; ')}.`);
             }
