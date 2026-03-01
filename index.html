@@ -2847,6 +2847,7 @@
           scoreMultiplier: 1,
           gameEnded: newScores[winningTeam] >= gameState.matchTarget,
           lastWinningTeam: winningTeam,
+          blockedReveal: null,
           message: gameState.players[winner].name + ' bateu ' + scoreName + '! Time ' + (winningTeam + 1) + ' marcou ' + points + ' ponto(s)' + extraMsg + '!',
           currentPlayer: -1
         };
@@ -2915,12 +2916,26 @@
         const winners = handValues.filter(h => h.points === minValue);
         const handSummary = handValues.map(h => gameState.players[h.player].name + ': ' + h.points).join(' | ');
 
+        // Build blockedReveal data — all players' hands face-up with pip counts
+        const blockedReveal = {
+          players: handValues.map(h => ({
+            slot: h.player,
+            name: gameState.players[h.player].name,
+            pips: h.points,
+            tiles: gameState.hands[h.player]
+          })),
+          team0Pips: handValues.filter(h => h.player % 2 === 0).reduce((s, h) => s + h.points, 0),
+          team1Pips: handValues.filter(h => h.player % 2 === 1).reduce((s, h) => s + h.points, 0)
+        };
+
         if (winners.length > 1 && winners.some(w => w.player % 2 === 0) && winners.some(w => w.player % 2 === 1)) {
           const newMultiplier = (gameState.scoreMultiplier || 1) * 2;
+          blockedReveal.isDobrada = true;
           await db.ref('rooms/' + roomCode).update({
             scoreMultiplier: newMultiplier,
             isDobrada: true,
             currentPlayer: -1,
+            blockedReveal: blockedReveal,
             message: 'Jogo travado! ' + handSummary + '. Empate! Dobrada! Proximo jogo vale ' + newMultiplier + 'x!'
           });
           return;
@@ -2931,6 +2946,9 @@
         const winningTeam = winner % 2;
         const newScores = [...gameState.teamScores];
         newScores[winningTeam] += points;
+
+        blockedReveal.winningTeam = winningTeam;
+        blockedReveal.winnerSlot = winner;
 
         let blockedMsg = 'Jogo travado! ' + handSummary + '. ' + gameState.players[winner].name + ' ganhou! Time ' + (winningTeam + 1) + ' marcou ' + points + '!';
         if (newScores[winningTeam] >= gameState.matchTarget) {
@@ -2947,6 +2965,7 @@
           currentPlayer: -1,
           lastWinningTeam: winningTeam,
           gameEnded: newScores[winningTeam] >= gameState.matchTarget,
+          blockedReveal: blockedReveal,
           message: blockedMsg
         });
       };
@@ -2984,6 +3003,7 @@
             currentPlayer: nextPlayer, passCount: 0,
             isDobrada: false,
             waitingForStarterChoice: false,
+            blockedReveal: null,
             moveHistory: [{p: startPlayer, t: 'play', tile: highestDoubleTile}],
             message: gameState.players[startPlayer].name + ' jogou a carroca ' + highestDouble + '-' + highestDouble + '! Vez de ' + gameState.players[nextPlayer].name + '!'
           });
@@ -3002,6 +3022,7 @@
             isDobrada: false,
             waitingForStarterChoice: true,
             starterChoiceDeadline: Date.now() + 30000,
+            blockedReveal: null,
             moveHistory: [],
             message: 'Time ' + (winTeam + 1) + ' venceu! Veja suas pecas e escolha quem comeca (30s)!'
           });
@@ -3021,18 +3042,20 @@
             currentPlayer: bestSlot, passCount: 0,
             isDobrada: false,
             waitingForStarterChoice: false,
+            blockedReveal: null,
             moveHistory: [],
             message: gameState.players[bestSlot].name + ' comeca!'
           });
         }
       };
 
-      // Auto-start next round after 5 seconds
+      // Auto-start next round — 8s for blocked games (reveal tiles), 5s otherwise
       useEffect(() => {
         const shouldCount = gameState && gameState.gameStarted && !gameState.gameEnded
           && gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && playerSlot === 0;
         if (!shouldCount) { setRoundCountdown(null); return; }
-        setRoundCountdown(5);
+        const delay = gameState.blockedReveal ? 8 : 5;
+        setRoundCountdown(delay);
         const iv = setInterval(() => {
           setRoundCountdown(prev => {
             if (prev <= 1) { clearInterval(iv); newRound(); return null; }
@@ -3984,6 +4007,91 @@
                     {gameState.dormidas.map(tile => (
                       <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Blocked game reveal — show all players' remaining tiles face-up */}
+              {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.blockedReveal && (
+                <div className="rounded-xl mb-1 animate-bounce-in" style={{
+                  background: 'rgba(0,0,0,0.35)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  padding: '8px 10px',
+                  backdropFilter: 'blur(4px)'
+                }}>
+                  {/* Header */}
+                  <div className="text-center mb-2">
+                    <div className="text-sm font-extrabold" style={{ color: '#fbbf24', textShadow: '0 0 10px rgba(251,191,36,0.4)' }}>
+                      Jogo Trancado!
+                    </div>
+                    {gameState.blockedReveal.isDobrada ? (
+                      <div className="text-[10px] text-white/60 font-bold">Empate — dobrada!</div>
+                    ) : (
+                      <div className="text-[10px] text-white/60 font-bold">
+                        {gameState.players[gameState.blockedReveal.winnerSlot]?.name} venceu com menos pontos
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Team summaries */}
+                  <div className="flex gap-2 mb-2">
+                    {[0, 1].map(team => {
+                      const teamPips = team === 0 ? gameState.blockedReveal.team0Pips : gameState.blockedReveal.team1Pips;
+                      const isWinner = !gameState.blockedReveal.isDobrada && gameState.blockedReveal.winningTeam === team;
+                      const isTie = gameState.blockedReveal.isDobrada;
+                      const teamColor = team === 0 ? '#3b82f6' : '#ef4444';
+                      return (
+                        <div key={team} className="flex-1 rounded-lg" style={{
+                          background: isWinner ? 'rgba(34,197,94,0.15)' : isTie ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.04)',
+                          border: '1px solid ' + (isWinner ? 'rgba(34,197,94,0.35)' : isTie ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.08)'),
+                          padding: '4px 6px'
+                        }}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[9px] font-bold" style={{ color: teamColor }}>Time {team + 1}</span>
+                            <span className={'text-[11px] font-extrabold ' + (isWinner ? 'text-green-400' : isTie ? 'text-yellow-400' : 'text-white/50')}>
+                              {teamPips} pts
+                            </span>
+                          </div>
+                          {isWinner && <div className="text-[8px] text-green-400/80 font-bold text-center">VENCEU</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Each player's tiles */}
+                  <div className="flex flex-col gap-1.5">
+                    {gameState.blockedReveal.players && gameState.blockedReveal.players.map(p => {
+                      const teamColor = p.slot % 2 === 0 ? '#3b82f6' : '#ef4444';
+                      const isLowest = !gameState.blockedReveal.isDobrada && p.slot === gameState.blockedReveal.winnerSlot;
+                      return (
+                        <div key={p.slot} className="rounded-lg" style={{
+                          background: isLowest ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.03)',
+                          border: '1px solid ' + (isLowest ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.06)'),
+                          padding: '4px 6px'
+                        }}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Avatar profile={profileFromPlayer(gameState.players?.[p.slot])} size={18} />
+                            <span className="text-[10px] font-bold text-white/80 flex-1">{p.name}</span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{
+                              background: isLowest ? 'rgba(34,197,94,0.25)' : 'rgba(255,255,255,0.1)',
+                              color: isLowest ? '#4ade80' : 'rgba(255,255,255,0.6)',
+                              borderLeft: '2px solid ' + teamColor
+                            }}>
+                              {p.pips} pts
+                            </span>
+                          </div>
+                          <div className="flex gap-0.5 flex-wrap justify-center">
+                            {p.tiles && p.tiles.map(tile => (
+                              <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false}
+                                extraStyle={{ transform: 'scale(0.85)', transformOrigin: 'center' }} />
+                            ))}
+                            {(!p.tiles || p.tiles.length === 0) && (
+                              <span className="text-[9px] text-white/30 italic">Sem pecas</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
