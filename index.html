@@ -3830,7 +3830,7 @@
                           /* Next row, reverse direction, start under the corner */
                           row++;
                           goRight = !goRight;
-                          cursorX = goRight ? px : (px + turnW);
+                          cursorX = goRight ? (px + VW) : px;
                           continue; /* move to next tile (do NOT i--) */
                         }
 
