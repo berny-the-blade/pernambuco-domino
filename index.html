@@ -411,6 +411,8 @@
       const [showStarterChoice, setShowStarterChoice] = useState(false);
       const [handVisible, setHandVisible] = useState(true);
       const [humanCount, setHumanCount] = useState(2);
+      const [aiDifficulty, setAiDifficulty] = useState(localStorage.getItem('domino_ai_difficulty') || 'hard');
+      const setAiDiff = (v) => { setAiDifficulty(v); localStorage.setItem('domino_ai_difficulty', v); };
       const [starterCountdown, setStarterCountdown] = useState(null);
       const [roundCountdown, setRoundCountdown] = useState(null);
       // === Player Profile System ===
@@ -529,7 +531,7 @@
 
         const initialState = {
           roomCode: code,
-          config: { humanCount: humanCount, humanSlots: humanSlots },
+          config: { humanCount: humanCount, humanSlots: humanSlots, aiDifficulty: aiDifficulty },
           players: players,
           gameStarted: false,
           gameEnded: false,
@@ -2662,6 +2664,29 @@
         return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
       };
 
+      // === Easy AI: random valid tile ===
+      const randomAI = (hand, lE, rE, bLen) => {
+        if (bLen === 0) {
+          const t = hand[Math.floor(Math.random() * hand.length)];
+          return t ? { tile: t, side: null } : null;
+        }
+        const playable = [];
+        for (const t of hand) {
+          if (t.left === lE || t.right === lE) playable.push({ tile: t, side: 'left' });
+          if ((t.left === rE || t.right === rE) && lE !== rE) playable.push({ tile: t, side: 'right' });
+          if (lE === rE && (t.left === lE || t.right === lE)) { /* already added for left */ }
+        }
+        return playable.length > 0 ? playable[Math.floor(Math.random() * playable.length)] : null;
+      };
+
+      // === Bot AI router — picks AI based on difficulty setting ===
+      const botAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+        const diff = gameState?.config?.aiDifficulty || aiDifficulty;
+        if (diff === 'easy') return randomAI(hand, lE, rE, bLen);
+        if (diff === 'medium') return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
+        return expertAI(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+      };
+
       const executeTilePlay = async (tile, slot, side = null) => {
         const newHands = gameState.hands.map(h => [...h]);
         newHands[slot] = newHands[slot].filter(t => t.id !== tile.id);
@@ -2992,7 +3017,7 @@
 
           const matchScores = gameState.teamScores || [0, 0];
           const dobMultiplier = gameState.scoreMultiplier || 1;
-          const result = expertAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge, matchScores, dobMultiplier);
+          const result = botAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge, matchScores, dobMultiplier);
 
           if (result) {
             await executeTilePlay(result.tile, currentSlot, result.side);
@@ -3214,6 +3239,31 @@
                   {humanCount === 4 && '4 humanos (sem bots)'}
                 </p>
               </div>
+
+              {humanCount < 4 && (
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-gray-600 mb-2">Forca da IA (bots)</label>
+                <div className="flex gap-2">
+                  {[{k:'easy',label:'Facil',emoji:'😊'},{k:'medium',label:'Medio',emoji:'🤔'},{k:'hard',label:'Dificil',emoji:'🔥'}].map(d => (
+                    <button
+                      key={d.k}
+                      onClick={() => setAiDiff(d.k)}
+                      className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-200"
+                      style={aiDifficulty === d.k
+                        ? { background: d.k === 'easy' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : d.k === 'medium' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #ef4444, #b91c1c)', color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }
+                        : { background: '#f3f4f6', color: '#4b5563' }}
+                    >
+                      {d.emoji} {d.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-2 text-center">
+                  {aiDifficulty === 'easy' && 'Bots jogam pecas aleatorias'}
+                  {aiDifficulty === 'medium' && 'Bots usam estrategia basica'}
+                  {aiDifficulty === 'hard' && 'Bots usam IA completa com busca'}
+                </p>
+              </div>
+              )}
 
               <button onClick={createRoom} className="btn-primary w-full mb-3 text-lg">
                 Criar Sala
