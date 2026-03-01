@@ -3499,7 +3499,7 @@
 
                             return (
                               <div key={rIdx} style={{ display: 'flex', flexDirection: flexDir, justifyContent: justify,
-                                alignItems: 'center', gap: GAP, marginBottom: rIdx < rows.length - 1 ? GAP : 0 }}>
+                                alignItems: 'center', gap: GAP, marginBottom: 0 }}>
                                 {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
                                 {row.map((idx, posInRow) => {
                                   const isTurn = posInRow === 0 && rIdx > 0;
