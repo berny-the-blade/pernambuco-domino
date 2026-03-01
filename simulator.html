@@ -4588,6 +4588,17 @@
       stopCoachMC();
     }
 
+    function goHome() {
+      stopPlayAI();
+      currentGame = null;
+      puzzleMode = false;
+      puzzleDef = null;
+      showingPuzzleBrowser = false;
+      showingOpeningQuiz = false;
+      playShowingDiffPicker = false;
+      render();
+    }
+
     // ========== COACH OVERLAY ENGINE ==========
 
     function getGamePhase() {
@@ -8521,6 +8532,7 @@
               <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export JSONL">${_t('export_btn')}</button>
               <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL">${_t('import_btn')}<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
               ${!puzzleMode ? `<button class="btn text-xs" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">${_t('puzzles')}</button>` : ''}
+              <button class="btn text-xs btn-gray" onclick="goHome()" title="Back to landing page">Home</button>
               <button class="btn text-xs btn-gray" onclick="setAppLang(appLang==='en'?'pt':'en')" style="min-width:40px">${appLang === 'en' ? '🇧🇷' : '🇺🇸'}</button>
             </div>
           </div>
