@@ -4253,14 +4253,8 @@
                       <div className="text-3xl font-extrabold text-white mb-1">{s0} - {s1}</div>
                       <div className="text-xs text-white/40 mb-3">Primeiro a {gameState.matchTarget || 6} pontos</div>
                       <div className="flex flex-col gap-2">
-                        {playerSlot === 0 ? (
-                          <React.Fragment>
-                            <button onClick={startGame} className="btn-primary w-full py-3 text-base font-bold">Nova Partida</button>
-                            <button onClick={() => { db.ref('rooms/' + roomCode).remove(); setGameState(null); setRoomCode(''); setScreen('menu'); }} className="w-full py-2 text-sm font-bold rounded-xl" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>Voltar ao Menu</button>
-                          </React.Fragment>
-                        ) : (
-                          <div className="text-sm text-white/50 font-bold">Esperando anfitriao...</div>
-                        )}
+                        <button onClick={startGame} className="btn-primary w-full py-3 text-base font-bold">Nova Partida</button>
+                        <button onClick={() => { db.ref('rooms/' + roomCode).remove(); setGameState(null); setRoomCode(''); setScreen('menu'); }} className="w-full py-2 text-sm font-bold rounded-xl" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>Voltar ao Menu</button>
                       </div>
                     </div>
                   </div>
