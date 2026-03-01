@@ -209,6 +209,7 @@
       border: 3px solid #1a4a2a;
       border-radius: 16px;
       box-shadow: inset 0 4px 20px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
+      scrollbar-gutter: stable both-edges;
     }
 
     /* === Buttons === */
@@ -3799,12 +3800,11 @@
                       const HW = bDims.hw, VW = bDims.vw;
                       const ROW_H = HW + 2;
                       const BADGE = 24;
-                      const containerW = boardRef.current ? boardRef.current.clientWidth - 16 : 300;
+                      const containerW = boardRef.current ? Math.floor(boardRef.current.getBoundingClientRect().width) - 16 : 300;
                       const maxTileW = containerW - BADGE * 2 - 8;
                       const offX = BADGE + 4;
 
-                      /* --- Grid layout: walk chain, turn at edges, per-row centering --- */
-                      const dimsFor = (orient) => orient === 'vertical' ? { w: VW, h: HW } : { w: HW, h: VW };
+                      /* --- Grid layout with SYNTHETIC turn connectors --- */
                       const items = [];
                       let row = 0, goRight = true, cursorX = 0;
 
@@ -3812,67 +3812,58 @@
                         const t = board[i];
                         const isD = t.left === t.right;
                         const baseOrient = isD ? 'vertical' : 'horizontal';
-                        const base = dimsFor(baseOrient);
-                        const turn = dimsFor('vertical');
+                        const tw = isD ? VW : HW;
+                        const th = isD ? HW : VW;
 
                         let wouldOverflow = false;
                         if (i > 0) {
-                          if (goRight) wouldOverflow = cursorX + base.w > maxTileW;
-                          else wouldOverflow = cursorX - base.w < 0;
+                          if (goRight) wouldOverflow = cursorX + tw > maxTileW;
+                          else wouldOverflow = cursorX - tw < 0;
                         }
 
                         if (wouldOverflow) {
-                          /* Turn tile: bridge between current row and next row.
-                             Assign to next row so it gets centered with that row's tiles. */
-                          let tx = goRight ? cursorX : cursorX - turn.w;
-                          tx = Math.max(0, Math.min(tx, maxTileW - turn.w));
+                          /* 1) Insert SYNTHETIC visual connector on CURRENT row edge */
+                          const cx2 = goRight ? maxTileW - VW : 0;
+                          const cy2 = row * ROW_H + (ROW_H - HW) / 2;
+                          items.push({ id: 'turn-' + row, row, x: cx2, y: cy2, orient: 'vertical', flip: false, turn: true, dir: goRight ? 1 : -1, w: VW, h: HW });
+
+                          /* 2) Move to next row, reverse direction */
                           row++;
                           goRight = !goRight;
-                          /* Y spans from previous row into new row */
-                          const ty = row * ROW_H - turn.h / 2;
-                          items.push({ i, row, x: tx, y: ty, orient: 'vertical', flip: false, turn: true, dir: goRight ? 1 : -1, w: turn.w, h: turn.h });
-                          cursorX = goRight ? tx + turn.w : tx;
-                          continue;
+                          cursorX = goRight ? 0 : maxTileW;
+
+                          /* 3) Fall through: place the REAL tile normally on the new row */
                         }
 
                         /* Normal tile placement */
-                        const { w, h } = base;
                         let px;
-                        if (goRight) { px = cursorX; cursorX += w; }
-                        else { cursorX -= w; px = cursorX; }
-                        const py = row * ROW_H + (ROW_H - h) / 2;
-                        items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w, h });
+                        if (goRight) { px = cursorX; cursorX += tw; }
+                        else { cursorX -= tw; px = cursorX; }
+                        const py = row * ROW_H + (ROW_H - th) / 2;
+                        items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
                       }
 
-                      /* --- Centering: if no turns, center each row; if turns exist, center all rows as one unit --- */
-                      const hasTurns = items.some(it => it.turn);
-                      if (!hasTurns) {
-                        const rowMap = new Map();
-                        for (const it of items) {
-                          if (!rowMap.has(it.row)) rowMap.set(it.row, []);
-                          rowMap.get(it.row).push(it);
-                        }
-                        for (const [, arr] of rowMap) {
-                          let minX = Infinity, maxX2 = -Infinity;
-                          for (const it of arr) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
-                          const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
-                          for (const it of arr) it.x += shift;
-                        }
-                      } else {
-                        /* With turns: center the entire chain as one unit so connections are preserved */
+                      /* --- Per-row centering (each row independently) --- */
+                      const rowMap = new Map();
+                      for (const it of items) {
+                        if (!rowMap.has(it.row)) rowMap.set(it.row, []);
+                        rowMap.get(it.row).push(it);
+                      }
+                      for (const [, arr] of rowMap) {
                         let minX = Infinity, maxX2 = -Infinity;
-                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                        for (const it of arr) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
                         const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
-                        for (const it of items) it.x += shift;
+                        for (const it of arr) it.x += shift;
                       }
 
                       const totalH = (row + 1) * ROW_H;
-                      const first = items[0], last = items[items.length - 1];
+                      /* Badge positions: skip synthetic turns, find first/last real tiles */
+                      const realItems = items.filter(it => !it.turn);
+                      const first = realItems[0], last = realItems[realItems.length - 1];
                       const lbx = first.x - BADGE - 2;
                       const lby = first.y + (first.h - BADGE) / 2;
                       let rbx, rby;
-                      if (last.turn) { rbx = last.x + (last.w - BADGE) / 2; rby = last.y + last.h + 2; }
-                      else if (last.dir === 1) { rbx = last.x + last.w + 2; rby = last.y + (last.h - BADGE) / 2; }
+                      if (last.dir === 1) { rbx = last.x + last.w + 2; rby = last.y + (last.h - BADGE) / 2; }
                       else { rbx = last.x - BADGE - 2; rby = last.y + (last.h - BADGE) / 2; }
 
                       const EndBadge = ({ num, bx, by }) => (
@@ -3888,6 +3879,14 @@
                           <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
                           {items.map(item => {
+                            if (item.turn) {
+                              /* Synthetic connector: blank board-tile (no pips) */
+                              return (
+                                <div key={item.id} style={{ position: 'absolute', left: offX + item.x, top: item.y }}>
+                                  <div className="board-tile" style={{ width: VW, height: HW, flexDirection: 'column' }} />
+                                </div>
+                              );
+                            }
                             const t = board[item.i];
                             return (
                               <div key={t.id || item.i} style={{ position: 'absolute', left: offX + item.x, top: item.y }}>
