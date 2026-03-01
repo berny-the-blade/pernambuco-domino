@@ -3784,7 +3784,7 @@
                     {gameState.currentPlayer === leftSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
                     <div className="flex flex-col gap-0.5 items-center mt-1">
                       {Array.from({ length: (gameState.hands?.[leftSlot] || []).length }).map((_, i) => (
-                        <div key={i} className="tile-back" style={{ width: 8, height: 14 }}></div>
+                        <div key={i} className="tile-back" style={{ width: 14, height: 8 }}></div>
                       ))}
                     </div>
                   </div>
@@ -3843,17 +3843,20 @@
                         items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
                       }
 
-                      /* --- Per-row centering (each row independently) --- */
-                      const rowMap = new Map();
-                      for (const it of items) {
-                        if (!rowMap.has(it.row)) rowMap.set(it.row, []);
-                        rowMap.get(it.row).push(it);
-                      }
-                      for (const [, arr] of rowMap) {
+                      /* --- Centering --- */
+                      const hasTurns = items.some(it => it.turn);
+                      if (hasTurns) {
+                        /* Turns exist: center entire chain as one unit to preserve connections */
                         let minX = Infinity, maxX2 = -Infinity;
-                        for (const it of arr) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
                         const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
-                        for (const it of arr) it.x += shift;
+                        for (const it of items) it.x += shift;
+                      } else {
+                        /* No turns: center the single row */
+                        let minX = Infinity, maxX2 = -Infinity;
+                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                        const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
+                        if (shift > 0) for (const it of items) it.x += shift;
                       }
 
                       const totalH = (row + 1) * ROW_H;
@@ -3948,7 +3951,7 @@
                     {gameState.currentPlayer === rightSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
                     <div className="flex flex-col gap-0.5 items-center mt-1">
                       {Array.from({ length: (gameState.hands?.[rightSlot] || []).length }).map((_, i) => (
-                        <div key={i} className="tile-back" style={{ width: 8, height: 14 }}></div>
+                        <div key={i} className="tile-back" style={{ width: 14, height: 8 }}></div>
                       ))}
                     </div>
                   </div>
