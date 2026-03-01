@@ -3828,16 +3828,16 @@
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
-                      /* ===== TRUE CONNECTED SNAKE LAYOUT =====
+                      /* ===== CONTINUOUS SNAKE LAYOUT =====
                          - Tiles touch each other (cursor advances by actual tile width)
                          - Only doubles vertical, everything else horizontal
+                         - No connectors: new rows start directly under last tile (L-shape)
                          - effW = maxTileW (stable, no feedback loop) */
                       const effW = maxTileW;
                       const items = [];
-                      const connectors = [];
                       const GAP_Y = Math.max(6, Math.floor(VW * 0.25));
                       const rowPitch = HW + GAP_Y;
-                      let row = 0, dir = +1, cursorX = 0;
+                      let row = 0, dir = +1, cursorX = 0, lastRowEndX = 0;
 
                       for (let i = 0; i < board.length; i++) {
                         const t = board[i];
@@ -3847,20 +3847,17 @@
 
                         const wouldOverflow = dir === +1 ? (cursorX + tw > effW) : (cursorX - tw < 0);
                         if (i > 0 && wouldOverflow) {
-                          /* Place blank vertical connector at row edge where chain ends */
-                          const cx = (dir === +1) ? (effW - VW) : 0;
-                          const cy = row * rowPitch;
-                          connectors.push({ x: cx, y: cy, w: VW, h: HW });
                           row++;
                           dir *= -1;
-                          /* Start next row aligned to connector (no gap) */
-                          cursorX = (dir === +1) ? cx : (cx + VW);
+                          /* Start new row directly under the last tile (continuous L) */
+                          cursorX = lastRowEndX;
                         }
 
                         let px;
                         if (dir === +1) { px = cursorX; cursorX += tw; }
                         else { cursorX -= tw; px = cursorX; }
 
+                        lastRowEndX = px;
                         const py = row * rowPitch;
                         items.push({
                           i, x: px, y: py,
@@ -3876,17 +3873,12 @@
                         minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w);
                         minY = Math.min(minY, it.y); maxY2 = Math.max(maxY2, it.y + it.h);
                       }
-                      for (const c of connectors) {
-                        minX = Math.min(minX, c.x); maxX2 = Math.max(maxX2, c.x + c.w);
-                        minY = Math.min(minY, c.y); maxY2 = Math.max(maxY2, c.y + c.h);
-                      }
                       const spanX = maxX2 - minX, spanY = maxY2 - minY;
                       let shiftX = (effW - spanX) / 2 - minX;
                       let shiftY = (containerH - spanY) / 2 - minY;
                       shiftX = Math.max(-minX, Math.min(shiftX, effW - maxX2));
                       shiftY = Math.max(-minY, Math.min(shiftY, containerH - maxY2));
                       for (const it of items) { it.x = Math.round(it.x + shiftX); it.y = Math.round(it.y + shiftY); }
-                      for (const c of connectors) { c.x = Math.round(c.x + shiftX); c.y = Math.round(c.y + shiftY); }
 
                       const drawW = containerW;
                       const first = items[0], last = items[items.length - 1];
@@ -3907,11 +3899,6 @@
                         <div style={{ position: 'relative', width: drawW, height: containerH, margin: '0 auto' }}>
                           <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
-                          {connectors.map((c, idx) => (
-                            <div key={'conn-'+idx} style={{ position: 'absolute', left: offX + c.x, top: c.y, zIndex: 2 }}>
-                              <div className="board-tile" style={{ width: c.w, height: c.h, opacity: 0.35 }} />
-                            </div>
-                          ))}
                           {items.map(item => {
                             const t = board[item.i];
                             return (
