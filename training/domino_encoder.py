@@ -89,8 +89,10 @@ class DominoEncoder:
         # [91:175] Belief probabilities: 3 zones x 28 tiles
         # Update belief based on current knowledge first
         self._sync_belief(obs, me)
+        # Export conditional distribution P(zone | not dorme)
+        belief = self.export_conditional_belief()
         for i in range(3):
-            state[91 + i * 28: 91 + (i + 1) * 28] = self.belief[:, i].astype(np.float32)
+            state[91 + i * 28: 91 + (i + 1) * 28] = belief[:, i]
 
         # [175:179] Hand sizes (normalized)
         for i, p in enumerate([me, partner, lho, rho]):
@@ -145,8 +147,9 @@ class DominoEncoder:
             if total > 0:
                 self.belief[t, :] /= total
             else:
-                # Contradiction — uniform over zones with space
-                self.belief[t, :] = 0.25
+                # All players eliminated — tile must be in dorme
+                self.belief[t, :] = 0.0
+                self.belief[t, 3] = 1.0
 
     def update_on_pass(self, passer_relative, left_end, right_end):
         """Update beliefs when a player passes.
@@ -178,6 +181,23 @@ class DominoEncoder:
         """
         # This tile is now played — zero all beliefs
         self.belief[tile_idx, :] = 0.0
+
+    def export_conditional_belief(self):
+        """Export belief as conditional distribution P(zone | not dorme).
+
+        Returns:
+            np.ndarray of shape (28, 3), dtype float32
+            Each row sums to 1.0 (or 1/3 each if all players eliminated).
+        """
+        out = np.zeros((NUM_TILES, 3), dtype=np.float32)
+        for t in range(NUM_TILES):
+            row = self.belief[t, :3]
+            s = row.sum()
+            if s > 0:
+                out[t] = row / s
+            else:
+                out[t] = np.array([1/3, 1/3, 1/3], dtype=np.float32)
+        return out
 
     @property
     def belief_state(self):

@@ -352,7 +352,7 @@
       if (r.match(/^Known dead:/)) return r.replace('Known dead:', 'Mortos conhecidos:');
       // Play reasons
       let m;
-      if ((m = r.match(/^(\d+) more tiles? match new ends \[(.+)\]$/))) return `${m[1]} pedra${parseInt(m[1])>1?'s combinam':'combina'} com novas pontas [${m[2]}]`;
+      if ((m = r.match(/^(\d+) more tiles? match new ends \[(.+?)\](?:: (.+))?$/))) return `${m[1]} pedra${parseInt(m[1])>1?'s combinam':'combina'} com novas pontas [${m[2]}]${m[3] ? ': ' + m[3] : ''}`;
       if ((m = r.match(/^Blocks (.+) \(next player\)$/))) return `Bloqueia ${m[1]} (próximo jogador)`;
       if ((m = r.match(/^Blocks (.+)$/))) return `Bloqueia ${m[1]}`;
       if ((m = r.match(/^Partner played (.+) — may have more$/))) return `Parceiro jogou ${m[1]} — pode ter mais`;
@@ -401,8 +401,8 @@
       if (r.match(/^<b>Suit control/)) return r.replace('Suit control:', 'Controle de naipe:').replace('leaves', 'deixa').replace('tiles matching the new board ends', 'pedras combinando com novas pontas').replace('vs only', 'vs apenas').replace('for your play', 'na sua jogada').replace('More matching tiles = more options next turn.', 'Mais pedras = mais opções no próximo turno.');
       if (r.match(/^<b>Blocking/)) return r.replace('Blocking:', 'Bloqueio:').replace("keeps board ends on numbers that", "mantém pontas em números que").replace("can't play (void), forcing them to pass. Your play opens a number they can match.", "não pode jogar, forçando-os a passar. Sua jogada abre um número que podem combinar.");
       if (r.match(/^<b>Partner support/)) return r.replace('Partner support:', 'Apoio ao parceiro:').replace("Your play puts both board ends on numbers your partner is void in", "Sua jogada coloca ambas pontas em números que seu parceiro não tem").replace("they'll be forced to pass.", "será forçado a passar.").replace("keeps at least one end playable for partner.", "mantém pelo menos uma ponta jogável para o parceiro.");
-      if (r.match(/^<b>Double management/)) return r.replace('Double management:', 'Gestão de carroça:').replace("Playing", "Jogar").replace("instead keeps the double", "mantém a carroça").replace("for later when the board may suit it better.", "para depois quando o tabuleiro favorecer.").replace("is more versatile and connects to more numbers.", "é mais versátil e conecta a mais números.");
-      if (r.match(/^<b>Clear double early/)) return r.replace('Clear double early:', 'Descarte carroça cedo:').replace("clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.", "descarta carroça inflexível enquanto tem opções.");
+      if (r.match(/^<b>Double management/)) return r.replace('Double management:', 'Gestão de carroça:').replace("connects to both", "conecta a").replace("two suits instead of one", "dois naipes em vez de um").replace("only connects to", "só conecta a").replace("so save it for when a", "guarde para quando um").replace("is on the board and you need to play it.", "estiver no tabuleiro.");
+      if (r.match(/^<b>Clear double early/)) return r.replace('Clear double early:', 'Descarte carroça cedo:').replace("only connects to", "só conecta a").replace("it's inflexible. Play it now while a", "é inflexível. Jogue agora enquanto um").replace("is available. Hold it too long and the board may move away, leaving you stuck.", "está disponível. Segure demais e o tabuleiro pode mudar, te travando.");
       if (r.match(/^<b>Go-out setup/)) return r.replace('Go-out setup:', 'Preparação para bater:').replace("sets up your remaining tile(s) to go out next turn.", "prepara para bater no próximo turno.").replace("Your play strands your last tiles", "Sua jogada tranca suas últimas pedras").replace("they don't match the new board ends.", "não combinam com as novas pontas.");
       if (r.match(/^<b>Dump heavy tile/)) return r.replace('Dump heavy tile:', 'Descarte pesado:').replace('sheds', 'descarta').replace('pips vs', 'pontos vs').replace('for your play.', 'na sua jogada.').replace('In case of a block, lower pip count wins.', 'Em caso de tranca, menos pontos ganha.');
       if (r.match(/^<b>Coverage risk/)) return r.replace('Coverage risk:', 'Risco de cobertura:').replace(/stacks (\d+) tiles?/, 'empilha $1 pedra(s)').replace('on end', 'na ponta').replace('with nothing on', 'sem nada na').replace("if opponents kill", "se adversários matarem").replace("you're stuck.", "você fica travado.").replace('spreads coverage across both ends.', 'distribui cobertura em ambas pontas.');
@@ -3067,8 +3067,9 @@
           // Suit control — use pre-computed index
           const endSet = new Set([newEnd, otherEnd]);
           let myCount = 0;
+          const matchingTiles = new Set();
           for (const n of endSet) {
-            for (const x of tilesByNum[n]) { if (x.id !== tile.id) myCount++; }
+            for (const x of tilesByNum[n]) { if (x.id !== tile.id) { myCount++; matchingTiles.add(x); } }
           }
           // Deduplicate: tiles touching both ends were counted twice
           if (endSet.size === 2) {
@@ -3077,7 +3078,10 @@
             }
           }
           ss += myCount * 15;
-          if (myCount > 0) sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]`);
+          if (myCount > 0) {
+            const tileList = [...matchingTiles].map(t => `[${t.left}|${t.right}]`).join(' ');
+            sr.push(`${myCount} more tiles match new ends [${newEnd}..${otherEnd}]: ${tileList}`);
+          }
 
           // Blocking — opp1 plays next (higher value), opp2 plays after partner (lower)
           if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) { ss += 35; sr.push(`Blocks ${pn(opp1)} (next player)`); }
@@ -4300,7 +4304,6 @@
 
     function addCoachMsg(type, text) {
       coachMessages.push({ type, text, phase: getGamePhase(), turn: liveMoveNum });
-      if (coachMessages.length > 30) coachMessages.shift();
     }
 
     function generateCoachOnAIMove(player, tile, side, allOptions, wasPass) {
@@ -4779,10 +4782,10 @@
 
       // 4. Double management
       if (playT.left === playT.right && bestT.left !== bestT.right) {
-        reasons.push(`<b>Double management:</b> Playing [${bestT.left}|${bestT.right}] instead keeps the double [${playT.left}|${playT.right}] for later when the board may suit it better. [${bestT.left}|${bestT.right}] is more versatile and connects to more numbers.`);
+        reasons.push(`<b>Double management:</b> [${bestT.left}|${bestT.right}] connects to both ${bestT.left}s and ${bestT.right}s — two suits instead of one. The double [${playT.left}|${playT.right}] only connects to ${playT.left}s, so save it for when a ${playT.left} is on the board and you need to play it.`);
       }
       if (bestT.left === bestT.right && playT.left !== playT.right) {
-        reasons.push(`<b>Clear double early:</b> [${bestT.left}|${bestT.right}] clears an inflexible double now while you still have options. Holding doubles too long risks getting stuck.`);
+        reasons.push(`<b>Clear double early:</b> [${bestT.left}|${bestT.right}] only connects to ${bestT.left}s — it's inflexible. Play it now while a ${bestT.left} is available. Hold it too long and the board may move away, leaving you stuck.`);
       }
 
       // 5. Go-out setup
@@ -4888,6 +4891,23 @@
     function toggleCoachCollapse() {
       coachCollapsed = !coachCollapsed;
       try { localStorage.setItem('pernambuco_coach_collapsed', coachCollapsed ? '1' : '0'); } catch(e) {}
+      render();
+    }
+
+    function jumpToCoachTurn(msgIdx) {
+      if (!currentGame || !currentGame.outcome) return; // only after game ends
+      const msg = coachMessages[msgIdx];
+      if (!msg) return;
+      // Find the snapshot closest to this coach message's turn number
+      const targetTurn = msg.turn;
+      let bestSnap = 0;
+      for (let i = 0; i < currentGame.snapshots.length; i++) {
+        if (currentGame.snapshots[i].move <= targetTurn) bestSnap = i;
+      }
+      // Switch to watch mode to show the board at that state
+      gameMode = 'watch';
+      currentStep = bestSnap;
+      rightPanelTab = 'analysis';
       render();
     }
 
@@ -5049,10 +5069,12 @@
           <span class="text-xs text-slate-500">\u25BC</span>
         </div>
         ${!currentGame?.outcome ? renderWinProbBar() : ''}
-        <div style="max-height:240px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5">
-          ${recent.map(m => {
+        <div style="max-height:400px;overflow-y:auto" class="px-3 py-1.5 space-y-1.5" id="coachScrollArea">
+          ${recent.map((m, idx) => {
             const [pLabel, pColor] = phaseBadge[m.phase] || ['','#475569'];
-            return `<div class="flex items-start gap-1.5 text-xs leading-snug">
+            const clickable = currentGame?.outcome ? 'cursor-pointer hover:bg-slate-800/60 rounded px-1 -mx-1' : '';
+            const realIdx = coachMessages.length - 1 - idx;
+            return `<div class="flex items-start gap-1.5 text-xs leading-snug ${clickable}" ${currentGame?.outcome ? `onclick="jumpToCoachTurn(${realIdx})"` : ''}>
               <span style="flex-shrink:0">${icons[m.type] || ''}</span>
               <div>
                 ${pLabel ? `<span class="inline-block px-1 rounded text-[10px] font-mono mr-1" style="background:${pColor};color:#e2e8f0">${pLabel}</span>` : ''}
@@ -6533,8 +6555,7 @@
               const nextP = (player + 1) % 4;
               const t0 = performance.now();
               const nnState = _nnEncodeState(simHands[nextP], o.newLE, o.newRE, o.newBLen, nextP, o.newKnowledge);
-              const nnMask = _nnActionMask(simHands[nextP], o.newLE, o.newRE, o.newBLen);
-              const { value } = _nnForward(nnState, nnMask);
+              const value = _nnForwardValue(nnState);
               _nnLeafStats.calls++;
               _nnLeafStats.totalMs += performance.now() - t0;
               // NN value is from nextP's team perspective; convert to myTeam and scale to ×4 (match existing scale)
@@ -6750,6 +6771,28 @@
       const value = Math.tanh(v[0]);
 
       return { policy, value };
+    }
+
+    // Value-only forward pass: skips policy head (2 matmuls + BN + softmax)
+    function _nnForwardValue(state) {
+      const w = _nnModel.weights;
+      let h = _nnMatVec(w['input_fc.weight'], w['input_fc.bias'], state);
+      h = _nnBatchNorm(h, w['input_bn.weight'], w['input_bn.bias'], w['input_bn.running_mean'], w['input_bn.running_var']);
+      h = _nnRelu(h);
+      for (let b = 0; b < 4; b++) {
+        const prefix = `res_blocks.${b}`;
+        let out = _nnMatVec(w[`${prefix}.fc1.weight`], w[`${prefix}.fc1.bias`], h);
+        out = _nnBatchNorm(out, w[`${prefix}.bn1.weight`], w[`${prefix}.bn1.bias`], w[`${prefix}.bn1.running_mean`], w[`${prefix}.bn1.running_var`]);
+        out = _nnRelu(out);
+        out = _nnMatVec(w[`${prefix}.fc2.weight`], w[`${prefix}.fc2.bias`], out);
+        out = _nnBatchNorm(out, w[`${prefix}.bn2.weight`], w[`${prefix}.bn2.bias`], w[`${prefix}.bn2.running_mean`], w[`${prefix}.bn2.running_var`]);
+        h = _nnRelu(_nnAdd(out, h));
+      }
+      let v = _nnMatVec(w['value_fc1.weight'], w['value_fc1.bias'], h);
+      v = _nnBatchNorm(v, w['value_bn.weight'], w['value_bn.bias'], w['value_bn.running_mean'], w['value_bn.running_var']);
+      v = _nnRelu(v);
+      v = _nnMatVec(w['value_fc2.weight'], w['value_fc2.bias'], v);
+      return Math.tanh(v[0]);
     }
 
     // Export canonical snapshot (v1) for parity testing and training data
@@ -7055,11 +7098,13 @@
     // Configurable ISMCTS knobs (tunable from console)
     let ISMCTS_C = 1.41;         // UCB1 exploration constant
     let ISMCTS_PROG_BIAS = true; // progressive bias from heuristic
+    let ISMCTS_POOL_SIZE = 0;    // determinization pool: 0=fresh each sim (best), >0=reuse K worlds
     window.setISMCTS = function(opts) {
       if (opts.C !== undefined) ISMCTS_C = opts.C;
       if (opts.progBias !== undefined) ISMCTS_PROG_BIAS = !!opts.progBias;
       if (opts.sims !== undefined) MC_SIMS_PLAY_EXPERT = opts.sims;
-      console.log(`ISMCTS config: C=${ISMCTS_C}, progBias=${ISMCTS_PROG_BIAS}, sims=${MC_SIMS_PLAY_EXPERT}`);
+      if (opts.pool !== undefined) ISMCTS_POOL_SIZE = Math.max(0, opts.pool | 0);
+      console.log(`ISMCTS config: C=${ISMCTS_C}, progBias=${ISMCTS_PROG_BIAS}, sims=${MC_SIMS_PLAY_EXPERT}, pool=${ISMCTS_POOL_SIZE}`);
     };
 
     function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
@@ -7084,8 +7129,9 @@
         isRoot: true,
       };
 
-      // Note: NN eval cache removed — 0% hit rate in practice because each
-      // determinization produces a unique belief/knowledge state vector.
+      // Determinization pool: pre-sample K worlds and reuse them across sims.
+      // Reduces variance from world-mixing and makes more sims additive.
+      const poolSize = ISMCTS_POOL_SIZE;
 
       // Compute actual hand sizes from knowledge
       const totalPlayed = knowledge.played.size;
@@ -7103,6 +7149,16 @@
         handSizes[p] = Math.max(1, 6 - playedPerPlayer[p]);
       }
       handSizes[player] = hand.length;
+
+      // Pre-sample determinization pool: K worlds reused across sims
+      // K=0 means fresh deal each sim (old behavior, for A/B testing)
+      const usePool = poolSize > 0;
+      const dealPool = [];
+      if (usePool) {
+        for (let k = 0; k < poolSize; k++) {
+          dealPool.push(generateConsistentDeal(hand, handSizes, knowledge, player));
+        }
+      }
 
       const root = new ISMCTSNode();
       let nodeCount = 1;
@@ -7132,8 +7188,9 @@
         if (Date.now() - startTime > TIME_LIMIT) break;
         if (nodeCount >= MAX_NODES) break;
 
-        // 1. DETERMINIZE: sample a consistent deal for hidden cards
-        const deal = generateConsistentDeal(hand, handSizes, knowledge, player);
+        // 1. DETERMINIZE: pick from pool or sample fresh
+        const deal = usePool ? dealPool[iter % poolSize]
+                             : generateConsistentDeal(hand, handSizes, knowledge, player);
 
         // 2. SELECT + EXPAND + ROLLOUT
         let node = root;
@@ -7254,8 +7311,7 @@
         if (USE_NN_LEAF_VALUE && _nnModel) {
           const t0 = performance.now();
           const nnState = _nnEncodeState(simHands[curPlayer], simLE, simRE, simBLen, curPlayer, simKnowledge);
-          const nnMask = _nnActionMask(simHands[curPlayer], simLE, simRE, simBLen);
-          const value = _nnForward(nnState, nnMask).value;
+          const value = _nnForwardValue(nnState);
           _nnLeafStats.calls++;
           _nnLeafStats.totalMs += performance.now() - t0;
           // NN value is from curPlayer's team perspective (tanh [-1,1])
@@ -12175,7 +12231,7 @@
       const cfgBias = nnOn ? false : ISMCTS_PROG_BIAS;
       console.log(`%c🎲 AI Benchmark: ${totalGames} games (${numGames} per side)`, 'font-size:14px;font-weight:bold');
       console.log(`Heuristic-only vs MC-Expert (${MC_SIMS_BENCH} sims/move)`);
-      console.log(`Config: NN-leaf=${!!nnOn}, PUCT=${!!nnOn}, C=${cfgC}, progBias=${cfgBias}${nnOn ? ', gen=' + _nnModel.generation : ''}`);
+      console.log(`Config: NN-leaf=${!!nnOn}, PUCT=${!!nnOn}, C=${cfgC}, progBias=${cfgBias}, pool=${ISMCTS_POOL_SIZE}${nnOn ? ', gen=' + _nnModel.generation : ''}`);
       console.log('Running...');
       const t0 = performance.now();
 
@@ -12221,6 +12277,40 @@
       console.log(`(Played both sides to eliminate positional advantage)`);
 
       return { mcWins, heuristicWins, ties, mcWR, eloDiff, mcPPG, hPPG, elapsed };
+    };
+
+    // ========== AUTO A/B BENCHMARK: pool vs no-pool ==========
+    // Usage: runPoolAB(200)  — runs 4 tests: 200/800 sims × pool=0/8
+    window.runPoolAB = async function(gamesPerTest = 200) {
+      if (!_nnModel) { console.error('Load model first: await loadNeuralModel("domino_model.bin")'); return; }
+      setNNLeafValue(true);
+      const tests = [
+        { sims: 200, pool: 0, label: '200 sims, pool=0 (baseline)' },
+        { sims: 200, pool: 8, label: '200 sims, pool=8' },
+        { sims: 800, pool: 0, label: '800 sims, pool=0 (baseline)' },
+        { sims: 800, pool: 8, label: '800 sims, pool=8' },
+      ];
+      const results = [];
+      for (const t of tests) {
+        console.log(`\n%c▶ TEST: ${t.label}`, 'font-size:14px;font-weight:bold;color:#38bdf8');
+        setISMCTS({ sims: t.sims, pool: t.pool });
+        _nnLeafStats.calls = 0; _nnLeafStats.totalMs = 0; _nnLeafStats.cacheHits = 0;
+        const r = await runAIBenchmark(gamesPerTest);
+        const stats = getNNLeafStats();
+        results.push({ ...t, ...r, nnStats: stats });
+        console.log(`NN stats: ${stats}`);
+      }
+      console.log(`\n%c═══ POOL A/B SUMMARY ═══`, 'font-size:14px;font-weight:bold;color:#22c55e');
+      console.log(`┌────────────────────────────┬────────┬────────┬────────┐`);
+      console.log(`│ Config                     │  Elo   │ Time   │ NN/ms  │`);
+      console.log(`├────────────────────────────┼────────┼────────┼────────┤`);
+      for (const r of results) {
+        const elo = (r.eloDiff > 0 ? '+' : '') + r.eloDiff;
+        const nnAvg = r.nnStats ? '' : '?';
+        console.log(`│ ${r.label.padEnd(26)} │ ${elo.padStart(6)} │ ${r.elapsed.padStart(5)}s │        │`);
+      }
+      console.log(`└────────────────────────────┴────────┴────────┴────────┘`);
+      return results;
     };
 
     // ========== F1 DIAGNOSTIC: ROLLOUT BIAS ISOLATION ==========

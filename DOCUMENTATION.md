@@ -4,7 +4,7 @@
 
 A comprehensive single-file web application for learning and mastering **Domino Pernambucano** (Brazilian partnership domino). Built as a training tool that combines AI game simulation, Monte Carlo evaluation, interactive quizzes, and deep strategic analysis to help players improve from beginner to expert level.
 
-**Live file**: `simulator.html` (~7200 LOC) — open directly in any modern browser, no build step or server required.
+**Live file**: `simulator.html` (~12,000 LOC) — open directly in any modern browser, no build step or server required.
 
 ---
 
@@ -207,24 +207,40 @@ Every legal move is scored by combining these weighted factors:
 | **Stranding** | −30 | Last tile can't play on resulting ends |
 | **2-tile coverage** | +25 / −15 | Both or neither remaining tile matches new ends |
 
+### Perfect Endgame Solver
+
+When total tiles remaining across all hands ≤ **16**, the engine switches from heuristic/MCTS to **exact minimax with alpha-beta pruning** using a bitmask representation.
+
+**Bitmask Solver (`_endgameMinimaxBit`):**
+- Hands represented as 28-bit integers (one bit per tile) — O(1) move generation via bitwise AND
+- **Zobrist hashing** with transposition table (EXACT/LOWER/UPPER bounds)
+- **Move ordering** via `_egMoveScore()`: instant wins first, then TT best move, doubles, high-pip tiles, both-ends coverage. Provides 3-10x speedup from alpha-beta cutoffs.
+- Aggregates over weighted consistent deals: `expectedME[move] = Σ weight_i × minimax_result_i`
+- Budget: 500ms hard cap
+
+**Verification:** `endgameVerify(5000)` compares bitmask solver against brute-force reference on random positions — ALL PASS.
+
 ### Monte Carlo Simulation
 
 When enabled, MC simulation plays out hundreds/thousands of random complete games from the current position:
 
 1. Fix the known hand; randomly deal remaining tiles to other players (respecting known voids)
-2. Play game to completion using `smartAI` for all players
+2. Play game to completion using `fastAI` for all players (lightweight rollout policy)
 3. Record outcome (win/loss, points, type)
 4. Repeat N times, compute statistics
+5. **Adaptive early stopping**: after 40 minimum sims, stops when 90% CI separates best from second-best
 
 **Simulation counts by mode:**
 
 | Mode | Sims per tile | Purpose |
 |------|--------------|---------|
+| Expert AI (Play) | 800 | Maximum strength decisions |
+| Coach overlay | 500 | Real-time analysis |
+| Deep Study | 1000 | Maximum accuracy for learning |
 | Watch (MC:ON) | 120 | Real-time analysis |
 | Quiz | 100 | Grading player moves |
 | Puzzles | 500 | High confidence for curated positions |
 | Analysis tab | 60 | Many moves, moderate quality |
-| Deep Study | 1000 | Maximum accuracy for learning |
 | Game generation | 30 | Endgame MC override (≤3 tiles) |
 
 **MC output per option:**
@@ -233,6 +249,48 @@ When enabled, MC simulation plays out hundreds/thousands of random complete game
 - Block Rate: fraction ending in blocked/tied games
 - Outcome distribution: normal / carroca / la-e-lo / cruzada / blocked / tie counts
 - Variance, StdDev, CI95, CVaR5% (tail risk)
+
+### ISMCTS (Information Set Monte Carlo Tree Search)
+
+For mid-game positions outside endgame threshold, the engine uses ISMCTS with:
+
+- **Progressive Bias**: Heuristic scores from upgraded `_ismctsHeuristic` injected as `H(move) / (visits + 1)`
+- **Budget**: 600 iterations / 300ms (Expert difficulty)
+- **UCB1**: C=1.41, progressive widening `children < ceil(sqrt(visits+1))`
+- **Max nodes**: 5000
+- **Determinization**: Hidden hands randomized from beliefs each simulation
+- **Evaluation**: `_rolloutToMEReward` for match-equity-optimal play
+
+**ISMCTS Heuristic (`_ismctsHeuristic`) — 10 features:**
+
+| Feature | Weight | Description |
+|---------|--------|-------------|
+| Suit control | +0.04 per tile | Hand tiles matching new board end |
+| Double bonus | +0.03 | Tile is a double |
+| Block opp1 (both ends) | +0.06 | Both ends in opp1's void set |
+| Block opp1 (one end) | +0.04 | New end in opp1's void set |
+| Block opp2 (both ends) | +0.05 | Both ends in opp2's void set |
+| Block opp2 (one end) | +0.03 | New end in opp2's void set |
+| Partner void penalty | −0.03 | Partner void on both ends |
+| Dead number detection | −0.06 | Creates single dead board end |
+| 2-tile closing check | +0.12/−0.04 | Last tile playable/stranded |
+| 3-tile closing check | +0.04/−0.03 | Both/neither remaining playable |
+| Phase-dependent pips | ×0.001–0.005 | Pip weight scales with game phase |
+
+### Neural Net Inference Engine (Browser)
+
+The browser engine includes a complete neural network forward pass for the 4-block ResNet architecture, enabling model-guided play without any server:
+
+- **`loadNeuralModel(url)`**: Fetches binary `.bin` weight file, parses JSON header + float32 arrays
+- **`_nnForward(state, mask)`**: Full forward pass — input projection → 4 ResBlocks (with BatchNorm) → policy head (softmax) → value head (tanh)
+- **`_nnEncodeState()`**: 185-dim state encoder matching Python `DominoEncoder` exactly
+- **`neuralEval()`**: Returns policy-ranked moves with value estimate
+- **Expert AI integration**: 20% NN policy blend with ISMCTS/MC search scores when model loaded
+
+**Model Export** (`training/export_model.py`):
+- Binary format: 4-byte header length + JSON metadata + concatenated float32 arrays (~700KB)
+- Also supports ONNX and JSON export formats
+- Usage: `python export_model.py checkpoint.pt -o model.bin`
 
 ### Difficulty System
 
@@ -312,11 +370,21 @@ All data is stored in browser `localStorage` (survives page refresh, cleared wit
 ### File Structure
 ```
 pernambuco-domino-repo/
-├── simulator.html          # Main application (~7200 LOC)
-├── opening_study.js        # Standalone Node.js 1M-game empirical study
-├── SOLVER_ARCHITECTURE.md  # Design doc for future solver (not implemented)
-├── SOLVER_SPEC_V2.md       # Solver specification v2
-├── DOCUMENTATION.md        # This file
+├── simulator.html              # Main application (~12,000 LOC)
+├── cma-es-tuner.html           # Standalone CMA-ES weight optimizer (iframe-based)
+├── opening_study.js            # Standalone Node.js 1M-game empirical study
+├── SOLVER_ARCHITECTURE.md      # AI architecture reference
+├── SOLVER_SPEC_V2.md           # Solver specification v2
+├── DOCUMENTATION.md            # This file
+├── training/
+│   ├── domino_env.py           # Python game engine
+│   ├── domino_net.py           # Two-headed ResNet (185→policy+value)
+│   ├── domino_encoder.py       # 185-dim state encoder
+│   ├── domino_trainer.py       # Composite loss trainer
+│   ├── domino_mcts.py          # IS-MCTS with PUCT
+│   ├── orchestrator.py         # Self-play + training + arena
+│   ├── export_model.py         # Export .pt → .bin/.onnx/.json for browser
+│   └── requirements.txt        # torch>=2.0.0, numpy>=1.24.0
 └── .git/
 ```
 
@@ -399,6 +467,15 @@ Standalone Node.js script that extracts the core game engine and runs 1,000,000 
 | LeakAggregator | Persistent weakness tracking across sessions |
 | Coach overlay | Real-time strategic narration during play |
 | Internationalization | Full EN/PT bilingual support (~221 keys) |
+| Bitmask endgame solver | Perfect minimax with alpha-beta, Zobrist hashing, 16-tile threshold |
+| Move ordering | `_egMoveScore` heuristic for alpha-beta cutoff optimization |
+| fastAI rollout upgrade | Dead number detection, phase-dependent pips, 3-tile closing |
+| MC budget increase | Expert: 500→800 sims, ISMCTS: 400→600 iters, 200→300ms |
+| ISMCTS heuristic upgrade | 10-feature heuristic replacing basic 3-feature version |
+| Neural net inference engine | Browser forward pass for 4-block ResNet (185→policy+value) |
+| Model export script | `training/export_model.py` — .pt → .bin/.onnx/.json |
+| In-page CMA-ES optimizer | `optimizeWeights()` — adversarial weight tuning from console |
+| **+43 Elo** | MC-Expert vs heuristic-only benchmark (400 games) |
 
 ---
 
@@ -464,7 +541,7 @@ Opening (bLen=0): `sc[left]*10 + sc[right]*10 + (double?15:0) + pips*2`
 
 ### `fastAI` — Lightweight Rollout Policy
 
-Used by MC/ISMCTS rollouts. No chicote/lock/match awareness.
+Used by MC/ISMCTS rollouts (~20 calls per rollout × 800 rollouts). Optimized for speed with key strategic features ported from `smartAI`.
 
 | Factor | Points | Condition |
 |--------|--------|-----------|
@@ -472,16 +549,22 @@ Used by MC/ISMCTS rollouts. No chicote/lock/match awareness.
 | Block opp1 | `+25` | Both ends voided |
 | Block opp2 | `+18` | Both ends voided |
 | Partner void | `−15` | Partner void both ends |
-| Pip weight | `+(left+right) × 2` | Always |
+| Pip weight | `+round((left+right) × 2 × deadMul)` | Phase-dependent: early 0.4, mid 1.0, late 1.4 |
 | Double clearing | `+10` | Is double |
+| Dead number (one end) | `−30` | Creates single dead board end (other alive) |
+| Dead number (both, low pips) | `+20` | Both ends dead, my pips ≤ 6 |
+| Dead number (both, high pips) | `−25` | Both ends dead, my pips > 6 |
 | Near-close plays | `+60` | 2 tiles, last can play |
-| Near-close stranded | `−20` | 2 tiles, last can't |
+| Near-close stranded | `−30` | 2 tiles, last can't play (strengthened) |
+| 3-tile closing (both play) | `+20` | 3 tiles, remaining 2 both playable |
+| 3-tile closing (neither) | `−15` | 3 tiles, neither remaining tile playable |
 
 ### `monteCarloEval` Parameters
 
 | Parameter | Value |
 |-----------|-------|
 | Default sims | 80 |
+| Expert sims | 800 |
 | Batch size | 20 |
 | Min before early stop | 40 |
 | Early stopping | 90% CI: `diffMean > 1.65 × StdErr && > 0.05` |
@@ -491,8 +574,8 @@ Used by MC/ISMCTS rollouts. No chicote/lock/match awareness.
 
 | Parameter | Value |
 |-----------|-------|
-| Iterations | 300 |
-| Time limit | 150ms |
+| Iterations | 600 |
+| Time limit | 300ms |
 | Max nodes | 5000 |
 | UCB1 C | 1.41 |
 | Widening | `children < ceil(sqrt(visits+1))` |
@@ -501,7 +584,7 @@ Used by MC/ISMCTS rollouts. No chicote/lock/match awareness.
 
 | Context | Sims |
 |---------|------|
-| Expert AI (Play) | 500 |
+| Expert AI (Play) | 800 |
 | Coach overlay | 500 |
 | Deep Study | 1000 |
 | Pro Analytics | 50 |
@@ -626,11 +709,18 @@ Returns ME delta: `newME − currentME`. Positive = good for us.
 ## Self-Play Benchmark
 
 ### `window.runAIBenchmark(numGames)`
-Console function. Plays numGames×2 games: heuristic vs MC-expert (500 sims/move).
+Console function. Plays numGames×2 games: heuristic-only vs MC-Expert (800 sims/move + ISMCTS + endgame solver).
 Reports: win rates, Pts/Game, Elo diff = `400 × log10(mcWR / heuristicWR)`.
+
+**Latest result (400 games):** MC-Expert 221 wins (56.1%) vs Heuristic 173 (43.9%) = **+43 Elo**.
 
 ### `selfPlayBatch(numGames)`
 Pure heuristic self-play. Returns: games, wins, avgPts, blockedPct.
+
+### `window.optimizeWeights(generations, popSize, gamesPerEval)`
+In-page CMA-ES weight optimizer for the 13 `AI_WEIGHTS` parameters. Uses diagonal CMA-ES with adversarial evaluation (candidate weights vs champion weights, head-to-head from both sides). Prints per-generation progress and paste-ready optimized weights.
+
+Example: `optimizeWeights(30, 16, 150)` — 16 candidates × 300 games × 30 gens ≈ 2.5 minutes.
 
 ---
 

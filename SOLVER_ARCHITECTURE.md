@@ -4,7 +4,7 @@
 
 The Pernambuco Domino AI operates on two levels:
 
-1. **Browser Engine** (`simulator.html`, ~11,300 LOC) — Real-time heuristic + search AI with endgame solver, ISMCTS, Bayesian beliefs, partner modeling, and signaling inference. Runs in vanilla JS, zero dependencies.
+1. **Browser Engine** (`simulator.html`, ~12,000 LOC) — Real-time heuristic + search AI with bitmask endgame solver (≤16 tiles), ISMCTS, neural net inference, Bayesian beliefs, partner modeling, and signaling inference. Runs in vanilla JS, zero dependencies. **+43 Elo** over heuristic-only baseline (400-game benchmark).
 
 2. **Neural Training Pipeline** (`training/`, ~1,500 LOC Python) — AlphaZero-style self-play with IS-MCTS, two-headed ResNet, and arena gatekeeper. Trains on GPU, generates data on parallel CPU workers. Produces neural weights that can be exported back to the browser engine.
 
@@ -16,9 +16,10 @@ The Pernambuco Domino AI operates on two levels:
 
 | Component | Status | Commit |
 |-----------|--------|--------|
-| Perfect Endgame Solver (minimax + alpha-beta) | Done | `683840a` |
+| Bitmask Endgame Solver (minimax + alpha-beta, ≤16 tiles) | Done | `afb779f` |
+| Move ordering (`_egMoveScore`) | Done | `afb779f` |
 | Zobrist hashing + transposition tables | Done | `16794d5` |
-| Enhanced ISMCTS (progressive bias, increased budget) | Done | `683840a` |
+| Enhanced ISMCTS (600 iters/300ms, 10-feature heuristic) | Done | `592994e` |
 | Always-on Match Equity (removed useME gate) | Done | `683840a` |
 | Continuous Bayesian belief updates | Done | `683840a` |
 | Partner modeling (P2 style tracking) | Done | `683840a` |
@@ -27,7 +28,12 @@ The Pernambuco Domino AI operates on two levels:
 | Gibbs sampling for deal generation | Done | `16794d5` |
 | Parameterized AI weights (AI_WEIGHTS object) | Done | `16794d5` |
 | CMA-ES weight tuner (cma-es-tuner.html) | Done | `16794d5` |
+| In-page CMA-ES optimizer (optimizeWeights) | Done | `d520704` |
 | Headless self-play API (window.headlessGame) | Done | `16794d5` |
+| Upgraded fastAI rollout (dead numbers, phase pips, 3-tile) | Done | `d520704` |
+| MC budget increase (800 sims, 600 ISMCTS iters) | Done | `d520704` |
+| Neural net browser inference engine | Done | `592994e` |
+| Model export script (export_model.py) | Done | `592994e` |
 
 ### Neural Training Pipeline (training/) — IMPLEMENTED
 
@@ -48,10 +54,8 @@ The Pernambuco Domino AI operates on two levels:
 
 | Component | Priority | Notes |
 |-----------|----------|-------|
-| Neural weight export to browser (ONNX/JSON) | High | Convert .pt checkpoint → JS inference |
-| Full ME table with dobrada dimension ME[a][b][d] | Medium | Currently simplified |
+| Strong neural model for browser | High | Gen 84 too weak (97/100 arena rejections); need longer training or MCTS self-play |
 | WebWorker for heavy computation | Low | Current async chunking sufficient |
-| Adaptive MC (early stopping via CI) | Low | Would reduce sim waste |
 
 ---
 
@@ -103,19 +107,35 @@ s = {
 
 ### Section 3: Perfect Endgame Solver
 
-When total tiles remaining across all hands ≤ 8, the engine switches from heuristic/MCTS to **exact minimax with alpha-beta pruning**.
+When total tiles remaining across all hands ≤ **16**, the engine switches from heuristic/MCTS to **exact minimax with alpha-beta pruning** using a bitmask representation.
+
+**Bitmask Architecture (`_endgameMinimaxBit`):**
+- Each player's hand is a 28-bit integer (one bit per tile)
+- Legal move generation: `handBits & numberMask[end]` — O(1) bitwise AND
+- Move iteration: extract bits via `x & (-x)` (lowest set bit)
+- No array allocation during search — pure integer arithmetic
 
 **Algorithm:**
-
 1. `enumerateValidDeals()` — Pool unknown tiles, distribute among 3 hidden players + dorme respecting `cantHave` constraints. Weight by belief marginals.
-2. `_endgameMinimax()` — Partnership alpha-beta: Team 0 maximizes, Team 1 minimizes. Terminal evaluation via `_rolloutToMEReward` (match equity).
+2. `_endgameMinimaxBit()` — Partnership alpha-beta: Team 0 maximizes, Team 1 minimizes. Terminal evaluation via `_rolloutToMEReward` (match equity).
 3. `endgameSolve()` — Aggregate: `expectedME[move] = Σ weight_i × minimax_result_i`. Returns exact ME for each legal move.
 
+**Move Ordering (`_egMoveScore`):**
+Priority scoring for alpha-beta cutoff optimization:
+1. **Instant win** (+10000): last tile in hand
+2. **TT best move** (+5000): best move from transposition table lookup
+3. **Double** (+100): doubles played early
+4. **High pip count** (+pips): prefer heavy tiles
+5. **Both-ends coverage** (+50): tile covers both board ends
+
+Provides 3-10x speedup from earlier cutoffs in alpha-beta search.
+
 **Performance:**
-- 8 tiles → ~18,900 raw distributions, ~1,000-5,000 after constraint filtering
+- 16 tiles threshold — handles ~90% of endgame transitions
 - Zobrist hashing with transposition table (EXACT/LOWER/UPPER bounds)
 - Per-deal TT shared across all root moves
 - Budget: 500ms hard cap
+- Verified: `endgameVerify(5000)` — ALL PASS against brute-force reference
 
 **Zobrist Hashing:**
 ```
@@ -125,6 +145,7 @@ hash = XOR of:
   _ZOBRIST.re[rightEnd]         board right end
   _ZOBRIST.np[nextPlayer]       whose turn
   _ZOBRIST.pc[passCount]        consecutive passes
+  _ZOBRIST.bl[boardLength]      board length (distinguishes positions)
 ```
 
 **Transposition Table Bounds:**
@@ -136,10 +157,13 @@ hash = XOR of:
 
 For positions outside endgame threshold, the engine uses ISMCTS with:
 
-- **Progressive Bias**: Heuristic scores from `smartAI` injected as `H(move) / (visits + 1)`
-- **Budget**: 500 iterations / 250ms (Expert difficulty)
+- **Progressive Bias**: Heuristic scores from `_ismctsHeuristic` (10-feature function) injected as `H(move) / (visits + 1)`
+- **Budget**: 600 iterations / 300ms (Expert difficulty)
+- **UCB1**: C=1.41, progressive widening `children < ceil(sqrt(visits+1))`
+- **Max nodes**: 5000
 - **Determinization**: Hidden hands randomized from beliefs each simulation
 - **Evaluation**: `_rolloutToMEReward` for match-equity-optimal play
+- **Rollout policy**: `fastAI` with dead number detection, phase-dependent pips, 3-tile closing checks
 
 ### Section 5: Bayesian Belief Model
 
@@ -454,9 +478,10 @@ python orchestrator.py --workers 4 --generations 100 --games-per-worker 250
 
 ```
 pernambuco-domino-repo/
-├── simulator.html              # Browser engine (~11,300 LOC)
-├── cma-es-tuner.html           # Browser-based weight optimizer
+├── simulator.html              # Browser engine (~12,000 LOC)
+├── cma-es-tuner.html           # Standalone CMA-ES weight optimizer (iframe-based)
 ├── SOLVER_ARCHITECTURE.md      # This document
+├── DOCUMENTATION.md            # User-facing documentation
 ├── training/
 │   ├── __init__.py
 │   ├── requirements.txt        # torch>=2.0.0, numpy>=1.24.0
@@ -465,7 +490,8 @@ pernambuco-domino-repo/
 │   ├── domino_encoder.py       # 185-dim state encoder
 │   ├── domino_trainer.py       # Composite loss trainer
 │   ├── domino_mcts.py          # IS-MCTS with PUCT
-│   └── orchestrator.py         # Self-play + training + arena
+│   ├── orchestrator.py         # Self-play + training + arena
+│   └── export_model.py         # Export .pt → .bin/.onnx/.json for browser
 └── checkpoints/                # Generated during training
     └── domino_gen_NNNN.pt      # Champion checkpoints
 ```
@@ -532,6 +558,73 @@ where:
 
 ---
 
+### Section 24: Neural Net Browser Inference
+
+The browser engine includes a complete neural network forward pass, enabling model-guided play without any server dependency:
+
+**Weight Loading (`loadNeuralModel`):**
+- Binary format: 4-byte header length (little-endian) + JSON header + concatenated float32 arrays
+- Header contains: architecture config, per-layer metadata (name, shape, offset, length)
+- Loaded into typed Float32Arrays for efficient computation
+
+**Forward Pass (`_nnForward`):**
+```
+Input: 185-dim state + 57-dim action mask
+  ├─ Linear(185, 256) + BatchNorm + ReLU        (input projection)
+  ├─ ResBlock × 4:
+  │     Linear(256,256) + BN + ReLU + Linear(256,256) + BN + skip + ReLU
+  ├─ Policy Head: Linear(256,128) + BN + ReLU + Linear(128,57) + mask + softmax
+  └─ Value Head: Linear(256,64) + BN + ReLU + Linear(64,1) + tanh
+```
+
+**State Encoder (`_nnEncodeState`):** Matches Python `DominoEncoder` exactly — 185 dimensions with hand, played tiles, board ends (one-hot), cantHave (21 binary), belief proxies (84 floats), hand sizes, match scores, multiplier, board length, phase, team.
+
+**Integration with Expert AI:**
+- When model loaded: 20% NN policy blend with ISMCTS/MC search scores
+- `neuralEval()` returns policy-ranked moves with value estimate
+- Model export via `training/export_model.py`: `python export_model.py checkpoint.pt -o model.bin`
+
+### Section 25: In-Page CMA-ES Weight Optimizer
+
+Console-callable optimizer for the 13 `AI_WEIGHTS` parameters:
+
+```javascript
+optimizeWeights(generations=30, popSize=16, gamesPerEval=150)
+```
+
+**Architecture:**
+- Diagonal CMA-ES engine with step-size adaptation and covariance learning
+- Adversarial evaluation: candidate weights vs champion weights, played from both sides
+- Each candidate evaluated over `gamesPerEval × 2` games (side-swap for fairness)
+- Fitness = net point advantage over champion
+- Convergence: stops on σ < 0.5 or 5 stale generations
+- Outputs paste-ready `AI_WEIGHTS` object
+
+**Parameter space (13 dimensions):**
+```
+deadEndPenalty, lockFavorable, lockUnfavorable, chicoteSelf,
+chicotePartner, chicoteOpponent, chicoteDorme, lockApproachGood,
+lockApproachBad, monopolyBonus, boardCountGradient,
+captiveEndBonus, probDeadPenalty
+```
+
+**Note:** CMA-ES optimizes for heuristic-vs-heuristic play. Weights optimized this way may not improve MC-Expert performance since they strengthen both the AI and its rollout evaluations symmetrically.
+
+### Section 26: Benchmark Results
+
+**MC-Expert vs Heuristic-Only (400 games, Feb 2026):**
+- MC-Expert: 221 wins (56.1%), +43 Elo
+- Key contributors: fastAI rollout improvements, ISMCTS heuristic upgrade, raised sim budgets
+
+**AI Decision Stack (in priority order):**
+1. Endgame solver (exact, ≤16 tiles) — bitmask minimax with alpha-beta
+2. ISMCTS (600 iters/300ms) — tree search with progressive bias
+3. Monte Carlo (800 sims) — rollout evaluation with adaptive early stopping
+4. Heuristic (`smartAI`) — 35+ weighted features, always available as fallback
+
+---
+
 *Document for `berny-the-blade/pernambuco-domino`*
 *Browser engine: single-file vanilla JS, ≤500ms per evaluation, zero dependencies*
 *Training pipeline: Python + PyTorch, GPU training, parallel CPU self-play*
+*+43 Elo over heuristic baseline (Feb 2026)*
