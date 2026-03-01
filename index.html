@@ -3248,8 +3248,8 @@
         );
       };
 
-      const HAND_DIMS = { S: { w: 36, h: 64, dot: 5, cont: 22 }, M: { w: 42, h: 74, dot: 6, cont: 26 }, L: { w: 48, h: 84, dot: 7, cont: 28 } };
-      const hDims = HAND_DIMS[boardSize] || HAND_DIMS.M;
+      /* Hand tiles same size as board tiles (vertical orientation: vw × hw) */
+      const hDims = { w: bDims.vw, h: bDims.hw, dot: bDims.vw <= 22 ? 3 : bDims.vw <= 26 ? 4 : 5, cont: bDims.vw <= 22 ? 15 : bDims.vw <= 26 ? 18 : 22 };
       const DominoTile = ({ tile, playable, onClick }) => (
         <div
           onClick={onClick}
@@ -3986,24 +3986,8 @@
 
                 {/* Score dials removed from here — now overlaid on board corners */}
 
-                {/* Toggle hand button */}
-                <div className="flex justify-center" style={{ marginTop: 6 }}>
-                  <button
-                    onClick={() => setHandVisible(v => !v)}
-                    style={{
-                      fontSize: 11, fontWeight: 800,
-                      padding: '4px 10px', borderRadius: 10,
-                      background: 'rgba(255,255,255,0.08)',
-                      color: 'rgba(255,255,255,0.75)',
-                      border: '1px solid rgba(255,255,255,0.12)'
-                    }}
-                  >
-                    {handVisible ? 'Esconder mão ▼' : 'Mostrar mão ▲'}
-                  </button>
-                </div>
-
                 {/* My Hand — my team = blue */}
-                {handVisible && <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6', marginTop: 6, maxHeight: '26vh', overflowY: 'auto' }}>
+                <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6', marginTop: 4 }}>
                   <div className="flex items-center justify-center gap-1.5" style={{ marginBottom: 2 }}>
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={22} />
@@ -4044,7 +4028,7 @@
                       </span>
                     </div>
                   )}
-                </div>}
+                </div>
               </div>
 
               {/* Dormidas indicator — subtle inline during play */}
