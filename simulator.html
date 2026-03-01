@@ -9312,7 +9312,7 @@
       }
 
       // Multi-row snake layout (matches index.html proven logic)
-      // Row 0: left-to-right, right-aligned (chain starts, pushed to right edge)
+      // Row 0: centered when short (<8 tiles), right-aligned when wrapping starts
       // Odd rows: row-reverse, right-aligned (chain turns back, connects at right edge)
       // Even rows >0: left-to-right, left-aligned (chain turns forward, connects at left edge)
       // First tile of each row after row 0 is rendered VERTICAL (turn connector)
@@ -9322,7 +9322,7 @@
         const isOdd = rIdx % 2 === 1;
         let flexDir = 'row';
         let justify = 'center';
-        if (rIdx === 0) { justify = 'flex-end'; }
+        if (rIdx === 0) { justify = (board.length < 8) ? 'center' : 'flex-end'; }
         else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
         else { justify = 'flex-start'; }
 
