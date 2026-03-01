@@ -3891,7 +3891,7 @@
                       for (const it of items) { it.x = Math.round(it.x + shiftX); it.y = Math.round(it.y + shiftY); }
                       for (const c of corners) { c.x = Math.round(c.gx * CELL_X + shiftX); c.y = Math.round(c.gy * CELL_Y + shiftY); }
 
-                      const totalH = Math.max(spanY + 8, VW + 4);
+                      const drawW = effW + BADGE * 2 + 8;
                       const first = items[0], last = items[items.length - 1];
                       const lbx = first.x - BADGE - 2;
                       const lby = first.y + (first.h - BADGE) / 2;
@@ -3908,7 +3908,7 @@
                       );
 
                       return (
-                        <div style={{ position: 'relative', width: containerW, height: Math.max(totalH, VW + 4), margin: '0 auto' }}>
+                        <div style={{ position: 'relative', width: drawW, height: containerH, margin: '0 auto' }}>
                           <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
                           {corners.map((c, idx) => (
