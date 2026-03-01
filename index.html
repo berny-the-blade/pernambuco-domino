@@ -3844,10 +3844,15 @@
                         items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
                       }
 
-                      /* --- Center by anchoring first tile to middle --- */
+                      /* --- Center entire chain, clamped to bounds --- */
                       if (items.length > 0) {
-                        const firstReal = items.find(it => !it.turn) || items[0];
-                        const shift = (maxTileW / 2) - (firstReal.x + firstReal.w / 2);
+                        let minX = Infinity, maxX2 = -Infinity;
+                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                        const span = maxX2 - minX;
+                        let shift = (maxTileW - span) / 2 - minX;
+                        /* Clamp: don't push left of 0 or right of maxTileW */
+                        if (minX + shift < 0) shift = -minX;
+                        if (maxX2 + shift > maxTileW) shift = maxTileW - maxX2;
                         for (const it of items) it.x += shift;
                       }
 
