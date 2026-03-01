@@ -330,6 +330,36 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
+    // === Neural Network Model (globals — must be outside App for loadNeuralModel call) ===
+    const NN_STATE_DIM = 185;
+    const NN_NUM_ACTIONS = 57;
+    let _nnModel = null;
+    let USE_NN_LEAF_VALUE = false;
+    let _nnLeafStats = { calls: 0, totalMs: 0 };
+
+    const loadNeuralModel = async (url) => {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to load model: ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const view = new DataView(buf);
+      const headerLen = view.getUint32(0, true);
+      const headerBytes = new Uint8Array(buf, 4, headerLen);
+      const header = JSON.parse(new TextDecoder().decode(headerBytes));
+      const dataOffset = 4 + headerLen;
+      const rawBytes = new Uint8Array(buf, dataOffset, header.total_floats * 4);
+      const alignedBuf = new ArrayBuffer(rawBytes.length);
+      new Uint8Array(alignedBuf).set(rawBytes);
+      const floats = new Float32Array(alignedBuf);
+      const w = {};
+      for (const layer of header.layers) {
+        w[layer.name] = { shape: layer.shape, data: floats.subarray(layer.offset, layer.offset + layer.length) };
+      }
+      _nnModel = { weights: w, arch: header.architecture, generation: header.generation };
+      USE_NN_LEAF_VALUE = true;
+      console.log(`Neural model loaded: gen ${header.generation}, ${header.total_floats.toLocaleString()} params`);
+      return _nnModel;
+    };
+
     function App() {
       const [screen, setScreen] = useState('menu');
       const [roomCode, setRoomCode] = useState('');
@@ -2038,36 +2068,7 @@
         return results.length > 0 ? results[0] : null;
       };
 
-      // === Neural Network Model (NN value head + PUCT policy) ===
-      const NN_STATE_DIM = 185;
-      const NN_NUM_ACTIONS = 57;
-      let _nnModel = null;
-      let USE_NN_LEAF_VALUE = false;
-      let _nnLeafStats = { calls: 0, totalMs: 0 };
-
-      const loadNeuralModel = async (url) => {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`Failed to load model: ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        const view = new DataView(buf);
-        const headerLen = view.getUint32(0, true);
-        const headerBytes = new Uint8Array(buf, 4, headerLen);
-        const header = JSON.parse(new TextDecoder().decode(headerBytes));
-        const dataOffset = 4 + headerLen;
-        const rawBytes = new Uint8Array(buf, dataOffset, header.total_floats * 4);
-        const alignedBuf = new ArrayBuffer(rawBytes.length);
-        new Uint8Array(alignedBuf).set(rawBytes);
-        const floats = new Float32Array(alignedBuf);
-        const w = {};
-        for (const layer of header.layers) {
-          w[layer.name] = { shape: layer.shape, data: floats.subarray(layer.offset, layer.offset + layer.length) };
-        }
-        _nnModel = { weights: w, arch: header.architecture, generation: header.generation };
-        USE_NN_LEAF_VALUE = true;
-        console.log(`Neural model loaded: gen ${header.generation}, ${header.total_floats.toLocaleString()} params`);
-        return _nnModel;
-      };
-
+      // NN helper functions (globals NN_STATE_DIM, NN_NUM_ACTIONS, _nnModel, USE_NN_LEAF_VALUE, _nnLeafStats, loadNeuralModel are above App)
       const _nnMatVec = (W, b, x) => {
         const rows = W.shape[0], cols = W.shape[1];
         const out = new Float32Array(rows);
