@@ -2793,6 +2793,9 @@
         this.openingSuits = [null, null, null, null]; // first suit each player leads with
         this.sacrificeFlags = [new Set(), new Set(), new Set(), new Set()]; // suits where player dumped high-pip tiles
         this._moveCount = 0; // total moves for phase-weighted avoidance
+        // NN belief matrix: 28 tiles × 5 zones (absolute players 0-3 + dorme=4)
+        // Matches Python DominoEncoder persistent Bayesian belief
+        this.nnBelief = new Float64Array(28 * 5).fill(0.2);
       }
       clone() {
         const k = Object.create(Knowledge.prototype);
@@ -2806,6 +2809,7 @@
         k.openingSuits = [...this.openingSuits];
         k.sacrificeFlags = this.sacrificeFlags.map(s => new Set(s));
         k._moveCount = this._moveCount;
+        k.nnBelief = new Float64Array(this.nnBelief);
         return k;
       }
       recordPlay(p, t) {
@@ -2813,6 +2817,9 @@
           this.played.add(t.id);
           this._remainingCount[t.left]--;
           if (t.left !== t.right) this._remainingCount[t.right]--;
+          // NN belief: tile is now played — zero all zones
+          const _bi = TILE_INDEX[t.id];
+          if (_bi !== undefined) for (let z = 0; z < 5; z++) this.nnBelief[_bi * 5 + z] = 0.0;
         }
         if (p >= 0 && p <= 3) {
           this.playsBy[p].push(t);
@@ -2840,6 +2847,21 @@
         this.cantHave[p].add(lE);
         this.cantHave[p].add(rE);
         this.passedOn[p].push({ lE, rE, move: this._moveCount }); // track when pass happened
+        // NN belief: passer can't hold any tile matching board ends
+        for (let ti = 0; ti < 28; ti++) {
+          const tile = ALL_TILES[ti];
+          if (tile.left === lE || tile.right === lE || tile.left === rE || tile.right === rE) {
+            this.nnBelief[ti * 5 + p] = 0.0;
+          }
+        }
+        // Re-normalize all tiles (matching Python update_on_pass)
+        for (let ti = 0; ti < 28; ti++) {
+          let total = 0;
+          for (let z = 0; z < 5; z++) total += this.nnBelief[ti * 5 + z];
+          if (total > 0) {
+            for (let z = 0; z < 5; z++) this.nnBelief[ti * 5 + z] /= total;
+          }
+        }
       }
       // Phase-weighted avoidance: recent passes are stronger signals
       avoidanceStrength(p, n) {
@@ -4053,22 +4075,8 @@
         if (liveBoard.length >= 6 && hand.length >= 2) {
           try { searchRes = ismctsEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, belief); } catch(e) {}
         }
-        // Neural net policy blend: boost search results with NN policy if model is loaded
-        if (_nnModel && searchRes && searchRes.length > 1) {
-          try {
-            const nnRes = neuralEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge);
-            if (nnRes && nnRes.length > 0) {
-              const nnMap = new Map();
-              for (const r of nnRes) nnMap.set(r.tile.id + ':' + r.side, r.score);
-              // Blend: add 20% of NN policy score to search score
-              for (const r of searchRes) {
-                const nnScore = nnMap.get(r.tile.id + ':' + r.side) || 0;
-                r.score = r.score + Math.round(nnScore * 0.2);
-              }
-              searchRes.sort((a, b) => b.score - a.score);
-            }
-          } catch(e) {}
-        }
+        // NN blend REMOVED — NN must only affect play via leaf value eval (future)
+        // See ROADMAP_FREEZE v1 Commit 4
         if (!searchRes || searchRes.length === 0) {
           const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
           searchRes = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
@@ -5572,6 +5580,17 @@
       }, 10);
     }
 
+    // Rollout variant toggle (mutable so F1 diagnostic can swap at runtime)
+    // "A" = fastAI-only (default, production), "B" = smartAI first N plies + fastAI
+    let ROLLOUT_VARIANT = 'A';
+    let ROLLOUT_SMARTAI_PLIES = 4;
+
+    // F1 diagnostic: freeze MC early-stop so A/B get identical sample counts
+    let _f1FreezeEarlyStop = false;
+
+    // Diagnostic counters (reset per F1 run)
+    let _rolloutStats = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+
     // Fast rollout AI for MC simulations — ~5x faster than full smartAI
     // Uses simplified heuristic: suit control + pips + doubles + instant win
     function fastAI(hand, lE, rE, bLen, player, knowledge) {
@@ -5696,8 +5715,17 @@
       const simKnowledge = knowledge.clone();
       let prevLE, prevRE; // track ends before last move for scoring
 
+      _rolloutStats.totalRollouts++;
       for (let move = 0; move < 100; move++) {
-        const decision = fastAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge);
+        let decision;
+        if (ROLLOUT_VARIANT === 'B' && move < ROLLOUT_SMARTAI_PLIES) {
+          decision = smartAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge);
+          _rolloutStats.smartAICalls++;
+        } else {
+          decision = fastAI(simHands[cur], simLE, simRE, bLen, cur, simKnowledge);
+          _rolloutStats.fastAICalls++;
+        }
+        _rolloutStats.totalPlies++;
 
         if (decision) {
           passCount = 0;
@@ -6499,21 +6527,38 @@
         for (const o of simOptions) {
           for (let b = 0; b < batchSize; b++) {
             const simHands = generateConsistentDeal(o.myNewHand, o.newHandSizes, o.newKnowledge, player);
-            const result = simulateFromPosition(simHands, null, o.newLE, o.newRE, (player + 1) % 4, o.newKnowledge, o.newBLen);
-            const rawPts = result.winnerTeam === myTeam ? result.points :
-                           result.winnerTeam >= 0 ? -result.points : 0;
-            const signedPts = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) * 4 : rawPts;
-            if (result.winnerTeam === myTeam) o.wins++;
+            let signedPts;
+            if (USE_NN_LEAF_VALUE && _nnModel) {
+              // NN leaf value: encode from next player's perspective
+              const nextP = (player + 1) % 4;
+              const t0 = performance.now();
+              const nnState = _nnEncodeState(simHands[nextP], o.newLE, o.newRE, o.newBLen, nextP, o.newKnowledge);
+              const nnMask = _nnActionMask(simHands[nextP], o.newLE, o.newRE, o.newBLen);
+              const { value } = _nnForward(nnState, nnMask);
+              _nnLeafStats.calls++;
+              _nnLeafStats.totalMs += performance.now() - t0;
+              // NN value is from nextP's team perspective; convert to myTeam and scale to ×4 (match existing scale)
+              const meReward = (nextP % 2 === myTeam) ? value : -value;
+              signedPts = meReward * 4;
+              if (meReward > 0) o.wins++;
+            } else {
+              const result = simulateFromPosition(simHands, null, o.newLE, o.newRE, (player + 1) % 4, o.newKnowledge, o.newBLen);
+              const rawPts = result.winnerTeam === myTeam ? result.points :
+                             result.winnerTeam >= 0 ? -result.points : 0;
+              signedPts = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) * 4 : rawPts;
+              if (result.winnerTeam === myTeam) o.wins++;
+              if (result.type === 'blocked' || result.type === 'tie') o.blocks++;
+              if (o.outcomes[result.type] !== undefined) o.outcomes[result.type]++;
+            }
             o.totalPts += signedPts;
             o.sumPtsSq += signedPts * signedPts;
             o.ptsArray.push(signedPts);
-            if (result.type === 'blocked' || result.type === 'tie') o.blocks++;
-            if (o.outcomes[result.type] !== undefined) o.outcomes[result.type]++;
             o.sims++;
           }
         }
         // Early stop check: if best option's lower CI bound > second option's upper CI bound
-        if (done + batchSize >= MIN_SIMS && simOptions.length >= 2) {
+        // (disabled during F1 diagnostic to ensure equal sample counts across variants)
+        if (!_f1FreezeEarlyStop && done + batchSize >= MIN_SIMS && simOptions.length >= 2) {
           const sorted = simOptions.map(o => ({
             ep: o.totalPts / o.sims,
             variance: o.sims > 1 ? (o.sumPtsSq / o.sims) - (o.totalPts / o.sims) ** 2 : 1,
@@ -6570,6 +6615,23 @@
     const NN_STATE_DIM = 185;
     const NN_NUM_ACTIONS = 57;
 
+    // NN leaf value toggle: when true + model loaded, ISMCTS uses NN value head
+    // instead of fastAI rollouts for leaf evaluation. Toggle via console:
+    //   setNNLeafValue(true)   — use NN value head
+    //   setNNLeafValue(false)  — use fastAI rollouts (default)
+    let USE_NN_LEAF_VALUE = false;
+    let _nnLeafStats = { calls: 0, totalMs: 0 }; // perf tracking
+    window.setNNLeafValue = function(on) {
+      USE_NN_LEAF_VALUE = !!on;
+      _nnLeafStats = { calls: 0, totalMs: 0 };
+      console.log(`NN leaf value: ${USE_NN_LEAF_VALUE ? 'ON' : 'OFF'}${!_nnModel ? ' (WARNING: no model loaded)' : ''}`);
+    };
+    window.getNNLeafStats = function() {
+      const avg = _nnLeafStats.calls > 0 ? _nnLeafStats.totalMs / _nnLeafStats.calls : 0;
+      console.log(`NN leaf: ${_nnLeafStats.calls} evals, avg ${avg.toFixed(3)}ms/eval, total ${(_nnLeafStats.totalMs/1000).toFixed(1)}s`);
+      return _nnLeafStats;
+    };
+
     // Load binary model file. Call: await loadNeuralModel('domino_model.bin')
     async function loadNeuralModel(url) {
       const resp = await fetch(url);
@@ -6582,9 +6644,12 @@
       const headerBytes = new Uint8Array(buf, 4, headerLen);
       const header = JSON.parse(new TextDecoder().decode(headerBytes));
 
-      // Read float32 data
+      // Read float32 data (copy to ensure 4-byte alignment)
       const dataOffset = 4 + headerLen;
-      const floats = new Float32Array(buf, dataOffset, header.total_floats);
+      const rawBytes = new Uint8Array(buf, dataOffset, header.total_floats * 4);
+      const alignedBuf = new ArrayBuffer(rawBytes.length);
+      new Uint8Array(alignedBuf).set(rawBytes);
+      const floats = new Float32Array(alignedBuf);
 
       // Build weight map: name → Float32Array
       const w = {};
@@ -6687,6 +6752,27 @@
       return { policy, value };
     }
 
+    // Export canonical snapshot (v1) for parity testing and training data
+    function exportSnapshot(hand, lE, rE, bLen, player, knowledge) {
+      return {
+        version: 1,
+        player: player,
+        hand: hand.map(t => TILE_INDEX[t.id]),
+        played: Array.from(knowledge.played).map(id => TILE_INDEX[id]),
+        left_end: lE,
+        right_end: rE,
+        board_length: bLen,
+        cant_have: Object.fromEntries(
+          knowledge.cantHave.map((s, i) => [String(i), Array.from(s)])
+        ),
+        plays_by: Object.fromEntries(
+          knowledge.playsBy.map((arr, i) => [String(i), arr.map(t => TILE_INDEX[t.id])])
+        ),
+        match_score: matchScore.slice(),
+        score_multiplier: scoreMultiplier
+      };
+    }
+
     // Encode game state to 185-dim vector (mirrors Python DominoEncoder.encode)
     function _nnEncodeState(hand, lE, rE, bLen, player, knowledge) {
       const state = new Float32Array(NN_STATE_DIM);
@@ -6715,21 +6801,33 @@
         }
       }
 
-      // [91:175] Belief probabilities (simplified: use uniform over possible locations)
+      // [91:175] Belief probabilities (persistent Bayesian, matches Python DominoEncoder)
+      // Export conditional distribution P(zone | not dorme, not me)
+      const handIds = new Set(hand.map(h => h.id));
       for (let t = 0; t < 28; t++) {
         const tile = ALL_TILES[t];
-        if (hand.some(h => h.id === tile.id) || knowledge.played.has(tile.id)) continue;
-        // Count how many of the 3 other players could hold this tile
-        let canHold = [];
-        for (let i = 0; i < 3; i++) {
-          const p = others[i];
-          if (!knowledge.cantHave[p].has(tile.left) && !knowledge.cantHave[p].has(tile.right)) {
-            canHold.push(i);
-          }
+        if (handIds.has(tile.id) || knowledge.played.has(tile.id)) {
+          // Tile in my hand or played — uniform fallback (NN sees hand/played vectors)
+          state[91 + t] = state[91 + 28 + t] = state[91 + 56 + t] = 1/3;
+          continue;
         }
-        if (canHold.length > 0) {
-          const prob = 1.0 / canHold.length;
-          for (const i of canHold) state[91 + i * 28 + t] = prob;
+        // Extract beliefs for 3 other players (absolute → relative)
+        let b0 = knowledge.nnBelief[t * 5 + partner];
+        let b1 = knowledge.nnBelief[t * 5 + lho];
+        let b2 = knowledge.nnBelief[t * 5 + rho];
+        // Defensive cantHave clamp (should already be reflected in nnBelief)
+        if (knowledge.cantHave[partner].has(tile.left) || knowledge.cantHave[partner].has(tile.right)) b0 = 0;
+        if (knowledge.cantHave[lho].has(tile.left) || knowledge.cantHave[lho].has(tile.right)) b1 = 0;
+        if (knowledge.cantHave[rho].has(tile.left) || knowledge.cantHave[rho].has(tile.right)) b2 = 0;
+        // Normalize to conditional distribution over {partner, LHO, RHO}
+        const total = b0 + b1 + b2;
+        if (total > 0) {
+          state[91 + t] = b0 / total;
+          state[91 + 28 + t] = b1 / total;
+          state[91 + 56 + t] = b2 / total;
+        } else {
+          // All 3 eliminated — tile must be in dorme
+          state[91 + t] = state[91 + 28 + t] = state[91 + 56 + t] = 1/3;
         }
       }
 
@@ -6772,6 +6870,9 @@
         const idx = TILE_INDEX[tile.id];
         if (bLen === 0) {
           mask[idx] = 1.0; // left side for opening
+        } else if (lE === rE) {
+          // Both ends identical — only use left slot to avoid duplicate actions
+          mask[idx] = 1.0;
         } else {
           if (tile.left === lE || tile.right === lE) mask[idx] = 1.0;        // left
           if (tile.left === rE || tile.right === rE) mask[28 + idx] = 1.0;  // right
@@ -6827,22 +6928,39 @@
         this.visits = 0;
         this.totalReward = 0;
         this.hBias = 0;         // progressive bias from heuristic evaluation
+        this.priorP = 0.0;      // P(a) PUCT prior from NN policy
+        this.actionIdx = -1;    // 0..56 action index for prior lookup
       }
-      ucb1(C = 1.41) {
+      avgReward() {
+        return this.visits > 0 ? this.totalReward / this.visits : 0.0;
+      }
+      puctScore(parentVisits, cPuct) {
+        const Q = this.avgReward();
+        const U = cPuct * this.priorP * Math.sqrt(parentVisits) / (1 + this.visits);
+        return Q + U;
+      }
+      ucb1(C = ISMCTS_C, useProgBias = ISMCTS_PROG_BIAS) {
         if (this.visits === 0) return Infinity;
-        return this.totalReward / this.visits + C * Math.sqrt(Math.log(this.parent.visits) / this.visits)
-             + this.hBias / (this.visits + 1);
+        const exploit = this.totalReward / this.visits;
+        const explore = C * Math.sqrt(Math.log(this.parent.visits) / this.visits);
+        const bias = useProgBias ? this.hBias / (this.visits + 1) : 0;
+        return exploit + explore + bias;
       }
-      selectChild(legalMoves) {
+      selectChild(legalMoves, cfg) {
         // Filter children to those whose move is legal in this determinization
         const legal = this.children.filter(c =>
           legalMoves.some(m => m.tile.id === c.move.tile.id && m.side === c.move.side)
         );
         if (legal.length === 0) return null;
-        let best = legal[0], bestUCB = legal[0].ucb1();
+        const pVisits = Math.max(1, this.visits);
+        const doPUCT = cfg.usePUCT && (!cfg.rootOnlyPUCT || cfg.isRoot);
+        let best = legal[0];
+        let bestScore = doPUCT ? legal[0].puctScore(pVisits, cfg.cPuct)
+                               : legal[0].ucb1(cfg.C, cfg.useProgBias);
         for (let i = 1; i < legal.length; i++) {
-          const u = legal[i].ucb1();
-          if (u > bestUCB) { best = legal[i]; bestUCB = u; }
+          const s = doPUCT ? legal[i].puctScore(pVisits, cfg.cPuct)
+                           : legal[i].ucb1(cfg.C, cfg.useProgBias);
+          if (s > bestScore) { best = legal[i]; bestScore = s; }
         }
         return best;
       }
@@ -6934,6 +7052,16 @@
       return h;
     }
 
+    // Configurable ISMCTS knobs (tunable from console)
+    let ISMCTS_C = 1.41;         // UCB1 exploration constant
+    let ISMCTS_PROG_BIAS = true; // progressive bias from heuristic
+    window.setISMCTS = function(opts) {
+      if (opts.C !== undefined) ISMCTS_C = opts.C;
+      if (opts.progBias !== undefined) ISMCTS_PROG_BIAS = !!opts.progBias;
+      if (opts.sims !== undefined) MC_SIMS_PLAY_EXPERT = opts.sims;
+      console.log(`ISMCTS config: C=${ISMCTS_C}, progBias=${ISMCTS_PROG_BIAS}, sims=${MC_SIMS_PLAY_EXPERT}`);
+    };
+
     function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
       const MAX_ITERATIONS = 600;
       const TIME_LIMIT = 300; // ms
@@ -6941,6 +7069,23 @@
       const myTeam = player % 2;
       const useME = true; // Always use match equity for optimal play
       const handSizes = [6, 6, 6, 6]; // approximate — will be overridden per determinization
+
+      // Tree policy config: auto-tune when NN is active
+      const nnActive = USE_NN_LEAF_VALUE && _nnModel;
+      const usePUCT = nnActive; // PUCT when NN model available
+
+      // Search config object — no globals mutated
+      const cfg = {
+        usePUCT,
+        rootOnlyPUCT: true,     // only apply PUCT at root level
+        cPuct: 1.0,             // PUCT exploration constant
+        C: nnActive ? 0.7 : ISMCTS_C,
+        useProgBias: nnActive ? false : ISMCTS_PROG_BIAS,
+        isRoot: true,
+      };
+
+      // Note: NN eval cache removed — 0% hit rate in practice because each
+      // determinization produces a unique belief/knowledge state vector.
 
       // Compute actual hand sizes from knowledge
       const totalPlayed = knowledge.played.size;
@@ -6963,6 +7108,26 @@
       let nodeCount = 1;
       const startTime = Date.now();
 
+      // Compute root PUCT prior: blended NN policy + uniform (once)
+      let rootPrior = null;
+      if (usePUCT) {
+        const mask = _nnActionMask(hand, lE, rE, bLen);
+        const enc = _nnEncodeState(hand, lE, rE, bLen, player, knowledge);
+        const { policy: pNN } = _nnForward(enc, mask);
+        const alpha = 0.2; // blend weight: (1-alpha)*uniform + alpha*NN
+        rootPrior = new Float32Array(57);
+        let legalCount = 0;
+        for (let a = 0; a < 57; a++) if (mask[a] > 0) legalCount++;
+        const u = legalCount > 0 ? 1.0 / legalCount : 0;
+        let sum = 0;
+        for (let a = 0; a < 57; a++) {
+          if (mask[a] === 0) { rootPrior[a] = 0; continue; }
+          rootPrior[a] = (1 - alpha) * u + alpha * Math.max(pNN[a], 1e-12);
+          sum += rootPrior[a];
+        }
+        if (sum > 0) for (let a = 0; a < 57; a++) rootPrior[a] /= sum;
+      }
+
       for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
         if (Date.now() - startTime > TIME_LIMIT) break;
         if (nodeCount >= MAX_NODES) break;
@@ -6977,13 +7142,14 @@
         let simLE = lE, simRE = rE, simBLen = bLen;
         let simKnowledge = knowledge.clone();
         let curPlayer = player;
+        cfg.isRoot = true;
 
         // Selection phase — walk down tree while node has children
         while (node.children.length > 0) {
           const legalMoves = ismctsGetLegalMoves(simHands[curPlayer], simLE, simRE, simBLen);
           if (legalMoves.length === 0) break; // pass — skip selection
 
-          const child = node.selectChild(legalMoves);
+          const child = node.selectChild(legalMoves, cfg);
           if (!child) break;
 
           // Check progressive widening: should we expand instead?
@@ -6991,14 +7157,30 @@
             !node.children.some(c => c.move.tile.id === m.tile.id && c.move.side === m.side)
           );
           if (untriedMoves.length > 0 && node.children.length < Math.ceil(Math.sqrt(node.visits + 1))) {
-            // Expand: pick a random untried move
-            const expandMove = untriedMoves[getRng().randomInt(untriedMoves.length)];
+            // Expand: pick best untried by prior (PUCT at root), else random
+            let expandMove;
+            if (node === root && rootPrior && untriedMoves.length > 1) {
+              let bestP = -1;
+              for (const m of untriedMoves) {
+                const tIdx = TILE_INDEX[m.tile.id];
+                const aIdx = m.side === 'right' ? tIdx + 28 : tIdx;
+                if (rootPrior[aIdx] > bestP) { bestP = rootPrior[aIdx]; expandMove = m; }
+              }
+            } else {
+              expandMove = untriedMoves[getRng().randomInt(untriedMoves.length)];
+            }
             const _prevNode = node;
             node = node.expand(expandMove);
             nodeCount++;
-            // Progressive bias for root-level children
-            if (_prevNode === root && curPlayer === player) {
-              node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+            // Root children: always compute actionIdx, assign PUCT prior if active
+            if (_prevNode === root) {
+              const tIdx = TILE_INDEX[expandMove.tile.id];
+              node.actionIdx = expandMove.side === 'right' ? tIdx + 28 : tIdx;
+              if (rootPrior) node.priorP = rootPrior[node.actionIdx];
+              // Progressive bias fallback when no PUCT
+              if (!usePUCT && curPlayer === player) {
+                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+              }
             }
             // Apply move
             const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
@@ -7031,6 +7213,7 @@
           }
           curPlayer = (curPlayer + 1) % 4;
           node = child;
+          cfg.isRoot = false; // past root level now
         }
 
         if (node === null) continue; // already backpropagated
@@ -7043,9 +7226,14 @@
             const _leafParent = node;
             node = node.expand(expandMove);
             nodeCount++;
-            // Progressive bias for root-level children
-            if (_leafParent === root && curPlayer === player) {
-              node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+            // Root children: always compute actionIdx, assign PUCT prior if active
+            if (_leafParent === root) {
+              const tIdx = TILE_INDEX[expandMove.tile.id];
+              node.actionIdx = expandMove.side === 'right' ? tIdx + 28 : tIdx;
+              if (rootPrior) node.priorP = rootPrior[node.actionIdx];
+              if (!usePUCT && curPlayer === player) {
+                node.hBias = _ismctsHeuristic(expandMove, hand, lE, rE, bLen, knowledge, player);
+              }
             }
             const applied = ismctsApplyMove(expandMove.tile, expandMove.side, simLE, simRE, simBLen);
             simHands[curPlayer] = simHands[curPlayer].filter(t => t.id !== expandMove.tile.id);
@@ -7061,11 +7249,25 @@
           }
         }
 
-        // 3. ROLLOUT from current position using fastAI
-        const result = simulateFromPosition(simHands, null, simLE, simRE, curPlayer, simKnowledge, simBLen);
-        const rawReward = result.winnerTeam === myTeam ? result.points / 4 :
-                          result.winnerTeam >= 0 ? -result.points / 4 : 0;
-        const reward = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) : rawReward;
+        // 3. LEAF EVALUATION: NN value head (if available) or fastAI rollout
+        let reward;
+        if (USE_NN_LEAF_VALUE && _nnModel) {
+          const t0 = performance.now();
+          const nnState = _nnEncodeState(simHands[curPlayer], simLE, simRE, simBLen, curPlayer, simKnowledge);
+          const nnMask = _nnActionMask(simHands[curPlayer], simLE, simRE, simBLen);
+          const value = _nnForward(nnState, nnMask).value;
+          _nnLeafStats.calls++;
+          _nnLeafStats.totalMs += performance.now() - t0;
+          // NN value is from curPlayer's team perspective (tanh [-1,1])
+          // Convert to myTeam's perspective
+          reward = (curPlayer % 2 === myTeam) ? value : -value;
+        } else {
+          // Fallback: fastAI rollout to terminal
+          const result = simulateFromPosition(simHands, null, simLE, simRE, curPlayer, simKnowledge, simBLen);
+          const rawReward = result.winnerTeam === myTeam ? result.points / 4 :
+                            result.winnerTeam >= 0 ? -result.points / 4 : 0;
+          reward = useME ? _rolloutToMEReward(result.winnerTeam, result.points, myTeam) : rawReward;
+        }
 
         // 4. BACKPROPAGATE
         _ismctsBackprop(node, reward);
@@ -7091,12 +7293,19 @@
           variance: 0, stdDev: 0, ci95: 0, cvar5: 0,
           ismcts: true
         };
-        if (!tileResults.has(tileKey) || r.expectedPoints > tileResults.get(tileKey).expectedPoints) {
-          tileResults.set(tileKey, r);
-        }
+        const existing = tileResults.get(tileKey);
+        const dominated = usePUCT
+          ? (!existing || r.visits > existing.visits || (r.visits === existing.visits && r.expectedPoints > existing.expectedPoints))
+          : (!existing || r.expectedPoints > existing.expectedPoints);
+        if (dominated) tileResults.set(tileKey, r);
       }
       const finalResults = [...tileResults.values()];
-      finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+      // PUCT: sort by most-visited (stable at high sims), fallback to avgReward
+      if (usePUCT) {
+        finalResults.sort((a, b) => b.visits - a.visits || b.expectedPoints - a.expectedPoints);
+      } else {
+        finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+      }
       return finalResults;
     }
 
@@ -7105,6 +7314,28 @@
         node.update(reward);
         node = node.parent;
       }
+    }
+
+    // Extract visit-count policy from ISMCTS root (57-dim, for training export)
+    function rootVisitPolicy(root, legalMask, tau = 1.0) {
+      const pi = new Float32Array(57);
+      let sum = 0.0;
+      for (const child of root.children) {
+        const a = child.actionIdx;
+        if (a < 0 || child.visits <= 0) continue;
+        if (legalMask && legalMask[a] === 0) continue;
+        const w = tau === 1.0 ? child.visits : Math.pow(child.visits, 1.0 / tau);
+        pi[a] = w;
+        sum += w;
+      }
+      if (sum > 0) {
+        for (let a = 0; a < 57; a++) pi[a] /= sum;
+      } else if (legalMask) {
+        let k = 0;
+        for (let a = 0; a < 57; a++) if (legalMask[a] > 0) k++;
+        if (k > 0) for (let a = 0; a < 57; a++) if (legalMask[a] > 0) pi[a] = 1.0 / k;
+      }
+      return pi;
     }
 
     // ========== STATE ==========
@@ -7151,7 +7382,7 @@
     let coachMCTimer = null;      // setTimeout handle for async MC batches
     let coachMCRunning = false;   // true while MC eval is in progress
     const COACH_MC_SIMS = 500;    // rollouts per tile option
-    const MC_SIMS_PLAY_EXPERT = 800; // MC rollouts for Expert AI decisions
+    let MC_SIMS_PLAY_EXPERT = 800; // MC rollouts for Expert AI decisions
 
     // ========== DEEP STUDY STATE ==========
     let studyCache = {};
@@ -11939,8 +12170,12 @@
         return { winnerTeam: -1, points: 0, type: 'tie' };
       }
 
+      const nnOn = USE_NN_LEAF_VALUE && _nnModel;
+      const cfgC = nnOn ? 0.7 : ISMCTS_C;
+      const cfgBias = nnOn ? false : ISMCTS_PROG_BIAS;
       console.log(`%c🎲 AI Benchmark: ${totalGames} games (${numGames} per side)`, 'font-size:14px;font-weight:bold');
       console.log(`Heuristic-only vs MC-Expert (${MC_SIMS_BENCH} sims/move)`);
+      console.log(`Config: NN-leaf=${!!nnOn}, PUCT=${!!nnOn}, C=${cfgC}, progBias=${cfgBias}${nnOn ? ', gen=' + _nnModel.generation : ''}`);
       console.log('Running...');
       const t0 = performance.now();
 
@@ -11986,6 +12221,315 @@
       console.log(`(Played both sides to eliminate positional advantage)`);
 
       return { mcWins, heuristicWins, ties, mcWR, eloDiff, mcPPG, hPPG, elapsed };
+    };
+
+    // ========== F1 DIAGNOSTIC: ROLLOUT BIAS ISOLATION ==========
+    // Usage: runF1Diagnostic(200)
+    // Compares Variant A (fastAI rollouts) vs Variant B (smartAI first 4 plies + fastAI).
+    // Same determinization, same sim budget, early-stop frozen for equal sample counts.
+    // Metrics: Elo shift, top-1 agreement, ranking flips, rollout call counters.
+    window.runF1Diagnostic = async function(numSeeds = 200) {
+      const MC_SIMS_F1 = MC_SIMS_PLAY_EXPERT;
+      const savedVariant = ROLLOUT_VARIANT;
+      let aWins = 0, bWins = 0, ties = 0;
+      let aPts = 0, bPts = 0;
+      let top1Agree = 0, top1Disagree = 0;
+      let totalPositions = 0;
+
+      // Freeze early-stop for fair comparison (both variants get identical sample counts)
+      _f1FreezeEarlyStop = true;
+
+      // Track per-variant rollout stats
+      const statsA = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+      const statsB = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+
+      function f1Game(seed, variant) {
+        const rng = new SplitMix64(seed);
+        const deck = [...ALL_TILES];
+        rng.shuffle(deck);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) return null;
+
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+
+        let cur = (hp + 1) % 4, passCount = 0;
+        for (let move = 0; move < 200; move++) {
+          const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+          let decision = allOpts.length > 0 ? allOpts[0] : null;
+
+          if (decision && allOpts.length > 1) {
+            try {
+              const handSizes = hands.map(h => h.length);
+              computeBeliefs(knowledge, handSizes, hands[cur], cur, 100);
+              const snap = { hands, leftEnd: lE, rightEnd: rE, board: new Array(bLen), knowledge };
+
+              ROLLOUT_VARIANT = variant;
+              _rolloutStats = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+              const mcRes = monteCarloEval(snap, cur, MC_SIMS_F1);
+              // Accumulate stats
+              const accum = variant === 'B' ? statsB : statsA;
+              accum.smartAICalls += _rolloutStats.smartAICalls;
+              accum.fastAICalls += _rolloutStats.fastAICalls;
+              accum.totalPlies += _rolloutStats.totalPlies;
+              accum.totalRollouts += _rolloutStats.totalRollouts;
+              ROLLOUT_VARIANT = 'A'; // restore
+
+              if (mcRes.length > 0) {
+                const best = mcRes[0];
+                const matched = allOpts.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                             || allOpts.find(o => o.tile.id === best.tile.id);
+                if (matched) decision = matched;
+              }
+            } catch (e) { ROLLOUT_VARIANT = 'A'; }
+          }
+
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+
+            const pL = lE, pR = rE;
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+
+            if (hands[cur].length === 0) {
+              const w = scoreWin(tile, pL, pR, bLen);
+              return { winnerTeam: cur % 2, points: w.pts };
+            }
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            knowledge.recordPass(cur, lE, rE);
+            if (passCount >= 4) {
+              const b = resolveBlock(hands);
+              return { winnerTeam: b.type === 'tie' ? -1 : b.team, points: b.points };
+            }
+            cur = (cur + 1) % 4;
+          }
+        }
+        return { winnerTeam: -1, points: 0 };
+      }
+
+      // Top-1 agreement: advance to a MID-GAME multi-option position, then compare A vs B.
+      // Tests positions with 2-4 tiles in hand (where lock/block decisions matter).
+      // BUG FIX: clears mcCache between A/B evals (cache key doesn't include rollout variant).
+      function f1TopOne(seed) {
+        const rng = new SplitMix64(seed);
+        const deck = [...ALL_TILES];
+        rng.shuffle(deck);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) return null;
+
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+
+        let cur = (hp + 1) % 4;
+        let movesPlayed = 0;
+        for (let move = 0; move < 60; move++) {
+          const playable = hands[cur].filter(t => canPlay(t, lE, rE, bLen));
+
+          // Only test mid-game positions: >=5 moves played AND 2-4 tiles in hand
+          if (playable.length > 1 && movesPlayed >= 5 && hands[cur].length <= 4) {
+            try {
+              const handSizes = hands.map(h => h.length);
+              computeBeliefs(knowledge, handSizes, hands[cur], cur, 100);
+              const snap = { hands, leftEnd: lE, rightEnd: rE, board: new Array(bLen), knowledge };
+
+              // Evaluate with Variant A — clear cache first
+              mcCache.clear();
+              ROLLOUT_VARIANT = 'A';
+              _rolloutStats = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+              const mcA = monteCarloEval(snap, cur, MC_SIMS_F1);
+              const statsCheckA = { smart: _rolloutStats.smartAICalls, fast: _rolloutStats.fastAICalls };
+
+              // Evaluate with Variant B — clear cache again
+              mcCache.clear();
+              ROLLOUT_VARIANT = 'B';
+              _rolloutStats = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+              const mcB = monteCarloEval(snap, cur, MC_SIMS_F1);
+              const statsCheckB = { smart: _rolloutStats.smartAICalls, fast: _rolloutStats.fastAICalls };
+              ROLLOUT_VARIANT = 'A';
+
+              if (mcA.length > 0 && mcB.length > 0) {
+                const evGapA = mcA.length > 1 ? mcA[0].expectedPoints - mcA[1].expectedPoints : 999;
+                const evGapB = mcB.length > 1 ? mcB[0].expectedPoints - mcB[1].expectedPoints : 999;
+                return {
+                  topA: mcA[0].tile.id, topB: mcB[0].tile.id,
+                  agree: mcA[0].tile.id === mcB[0].tile.id,
+                  evA: mcA[0].expectedPoints.toFixed(2),
+                  evB: mcB[0].expectedPoints.toFixed(2),
+                  gapA: evGapA.toFixed(2), gapB: evGapB.toFixed(2),
+                  top2A: mcA.length > 1 ? mcA[1].tile.id : null,
+                  top2B: mcB.length > 1 ? mcB[1].tile.id : null,
+                  handSize: hands[cur].length,
+                  bLen,
+                  // Counter verification: B should have smartAI calls, A should have 0
+                  aSmartCalls: statsCheckA.smart, bSmartCalls: statsCheckB.smart,
+                  aFastCalls: statsCheckA.fast, bFastCalls: statsCheckB.fast,
+                };
+              }
+            } catch (e) { ROLLOUT_VARIANT = 'A'; }
+            return null;
+          }
+
+          // Advance game state using smartAI (deterministic, no MC)
+          const decision = playable.length > 0 ? smartAI(hands[cur], lE, rE, bLen, cur, knowledge) : null;
+          if (decision) {
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+            movesPlayed++;
+            if (hands[cur].length === 0) return null;
+          } else {
+            knowledge.recordPass(cur, lE, rE);
+          }
+          cur = (cur + 1) % 4;
+        }
+        return null;
+      }
+
+      console.log(`%c F1 Diagnostic: Rollout Bias Isolation`, 'font-size:14px;font-weight:bold');
+      console.log(`${numSeeds} seeds x 2 sides x 2 variants + top-1 agreement check`);
+      console.log(`Variant A: fastAI rollouts (current)`);
+      console.log(`Variant B: smartAI first ${ROLLOUT_SMARTAI_PLIES} plies + fastAI`);
+      console.log(`Same determinization, same ${MC_SIMS_F1} sims, early-stop FROZEN. Running...`);
+      const t0 = performance.now();
+
+      for (let phase = 0; phase < 2; phase++) {
+        for (let s = 0; s < numSeeds; s++) {
+          const seed = s * 7919 + phase * 100003;
+          mcCache.clear(); // BUG FIX: cache key doesn't include ROLLOUT_VARIANT — must clear between A/B
+          const resA = f1Game(seed, 'A');
+          mcCache.clear(); // Clear A's cached results before B runs, so B actually runs its own rollouts
+          const resB = f1Game(seed, 'B');
+
+          if (resA && resB) {
+            const aScore = resA.winnerTeam >= 0 ? resA.points : 0;
+            const bScore = resB.winnerTeam >= 0 ? resB.points : 0;
+            aPts += aScore;
+            bPts += bScore;
+            if (bScore > aScore) bWins++;
+            else if (aScore > bScore) aWins++;
+            else ties++;
+          }
+
+          if ((s + 1) % 50 === 0) {
+            const done = phase * numSeeds + s + 1;
+            console.log(`  ... ${done}/${numSeeds * 2} games`);
+          }
+          if (s % 10 === 9) await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      // Phase 2: Top-1 agreement (mid-game positions, mcCache cleared between variants)
+      const topNSeeds = Math.min(numSeeds * 2, 400); // more seeds for statistical power
+      console.log(`Computing top-1 agreement on up to ${topNSeeds} mid-game positions (hand<=4, move>=5)...`);
+      const evGaps = { a: [], b: [] };
+      let counterVerified = 0, counterFailed = 0;
+      for (let s = 0; s < topNSeeds; s++) {
+        const result = f1TopOne(s * 13337);
+        if (result) {
+          totalPositions++;
+          if (result.agree) top1Agree++;
+          else top1Disagree++;
+          evGaps.a.push(parseFloat(result.gapA));
+          evGaps.b.push(parseFloat(result.gapB));
+          // Verify counters: A should have 0 smartAI calls, B should have > 0
+          if (result.aSmartCalls === 0 && result.bSmartCalls > 0) counterVerified++;
+          else counterFailed++;
+        }
+        if (s % 20 === 19) await new Promise(r => setTimeout(r, 0));
+      }
+
+      // Restore state
+      _f1FreezeEarlyStop = false;
+      ROLLOUT_VARIANT = savedVariant;
+      _rolloutStats = { smartAICalls: 0, fastAICalls: 0, totalPlies: 0, totalRollouts: 0 };
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const totalGames = aWins + bWins + ties;
+      const bWR = totalGames > 0 ? bWins / (aWins + bWins || 1) : 0.5;
+      const aWR = 1 - bWR;
+      const eloDiff = bWR > 0 && bWR < 1 ? Math.round(400 * Math.log10(bWR / aWR)) : (bWR >= 1 ? 999 : -999);
+      const agreeRate = totalPositions > 0 ? top1Agree / totalPositions : 0;
+
+      console.log(`\n%c F1 DIAGNOSTIC RESULTS (${totalGames} games, ${elapsed}s)`, 'font-size:13px;font-weight:bold;color:#22c55e');
+      console.log(`┌────────────────────────┬────────┬────────┬─────────┐`);
+      console.log(`│ Variant                │  Wins  │ Win%   │ Tot Pts │`);
+      console.log(`├────────────────────────┼────────┼────────┼─────────┤`);
+      console.log(`│ A: fastAI rollouts     │ ${String(aWins).padStart(5)}  │ ${(aWR*100).toFixed(1).padStart(5)}% │ ${String(aPts).padStart(6)}  │`);
+      console.log(`│ B: smartAI ${ROLLOUT_SMARTAI_PLIES}-ply + fAI │ ${String(bWins).padStart(5)}  │ ${(bWR*100).toFixed(1).padStart(5)}% │ ${String(bPts).padStart(6)}  │`);
+      console.log(`│ Ties                   │ ${String(ties).padStart(5)}  │        │         │`);
+      console.log(`└────────────────────────┴────────┴────────┴─────────┘`);
+      console.log(`%cElo shift: Variant B is ~${eloDiff > 0 ? '+' : ''}${eloDiff} Elo vs Variant A`, 'font-weight:bold;color:#eab308');
+
+      // Rollout call counters (sanity check)
+      console.log(`\n%c Rollout Call Counters`, 'font-size:12px;font-weight:bold');
+      const avgPliesA = statsA.totalRollouts > 0 ? (statsA.totalPlies / statsA.totalRollouts).toFixed(1) : '0';
+      const avgPliesB = statsB.totalRollouts > 0 ? (statsB.totalPlies / statsB.totalRollouts).toFixed(1) : '0';
+      console.log(`  A: ${statsA.smartAICalls} smartAI + ${statsA.fastAICalls} fastAI calls, ${statsA.totalRollouts} rollouts, avg ${avgPliesA} plies/rollout`);
+      console.log(`  B: ${statsB.smartAICalls} smartAI + ${statsB.fastAICalls} fastAI calls, ${statsB.totalRollouts} rollouts, avg ${avgPliesB} plies/rollout`);
+      if (statsA.smartAICalls > 0) console.warn(`  WARNING: Variant A had ${statsA.smartAICalls} smartAI calls (expected 0)`);
+
+      console.log(`\n%c Top-1 Agreement (${totalPositions} mid-game positions, hand<=4)`, 'font-size:12px;font-weight:bold');
+      console.log(`  Agree: ${top1Agree}/${totalPositions} (${(agreeRate*100).toFixed(1)}%)`);
+      console.log(`  Disagree (ranking flip): ${top1Disagree}/${totalPositions} (${((1-agreeRate)*100).toFixed(1)}%)`);
+      // EV gap stats
+      if (evGaps.a.length > 0) {
+        const meanGapA = evGaps.a.reduce((a, b) => a + b, 0) / evGaps.a.length;
+        const meanGapB = evGaps.b.reduce((a, b) => a + b, 0) / evGaps.b.length;
+        console.log(`  Avg EV gap (top1-top2): A=${meanGapA.toFixed(3)}, B=${meanGapB.toFixed(3)}`);
+      }
+      // Counter verification
+      console.log(`  Branch verification: ${counterVerified} OK, ${counterFailed} FAILED`);
+      if (counterFailed > 0) console.warn(`  WARNING: ${counterFailed} positions had wrong call counts (possible cache/toggle issue)`);
+
+      console.log(`\n%c INTERPRETATION:`, 'font-weight:bold;color:#8b5cf6');
+      if (eloDiff > 15) {
+        console.log(`  Variant B significantly better -> ROLLOUT BIAS IS DOMINANT`);
+        console.log(`  -> Invest in value network (replaces rollouts entirely)`);
+      } else if (eloDiff < -15) {
+        console.log(`  Variant A better (unexpected) -> smartAI rollouts may hurt via different dynamics`);
+        console.log(`  -> Investigate further before committing to value net`);
+      } else {
+        console.log(`  Minimal Elo shift -> DETERMINIZATION/BELIEF IS DOMINANT`);
+        console.log(`  -> Invest in RIS-MCTS and better determinization first`);
+      }
+      if (agreeRate < 0.80) {
+        console.log(`  Low top-1 agreement (${(agreeRate*100).toFixed(0)}%) -> rollout quality changes move rankings`);
+      } else {
+        console.log(`  High top-1 agreement (${(agreeRate*100).toFixed(0)}%) -> rollout quality rarely changes top-1 choice`);
+      }
+
+      return { aWins, bWins, ties, eloDiff, bWR, top1Agree, top1Disagree, agreeRate,
+               statsA, statsB, counterVerified, counterFailed, evGaps, elapsed };
     };
 
     // Headless game for CMA-ES tuner: plays a full game using smartAI with current AI_WEIGHTS
@@ -12040,82 +12584,201 @@
     };
     window.AI_WEIGHTS = AI_WEIGHTS;
 
-    // ========== CMA-ES Weight Optimizer ==========
+    // ========== CMA-ES Weight Optimizer (Full Covariance) ==========
     // Usage: optimizeWeights(30, 16, 150) — 30 generations, pop 16, 150 games/eval
     // Uses adversarial evaluation: candidate weights vs champion weights head-to-head
+    // Full covariance matrix adaptation with Jacobi eigendecomposition (Hansen 2016)
 
-    // Box-Muller normal random
-    let _cmaSpare = null;
-    function _cmaRandn() {
-      if (_cmaSpare !== null) { const v = _cmaSpare; _cmaSpare = null; return v; }
-      let u, v, s;
-      do { u = Math.random() * 2 - 1; v = Math.random() * 2 - 1; s = u * u + v * v; } while (s >= 1 || s === 0);
-      s = Math.sqrt(-2 * Math.log(s) / s);
-      _cmaSpare = v * s;
-      return u * s;
-    }
+    // Component 1: Full-covariance CMA-ES engine
+    class CMAES {
+      constructor(initialMean, sigma, popSize) {
+        this.dim = initialMean.length;
+        this.mean = initialMean.slice();
+        this.sigma = sigma;
+        this.popSize = popSize || 4 + Math.floor(3 * Math.log(this.dim));
+        this.mu = Math.floor(this.popSize / 2);
 
-    // Minimal diagonal CMA-ES (Hansen 2016)
-    function _cmaesCreate(dim, x0, sigma0, popSize) {
-      const mu = Math.floor(popSize / 2);
-      const rawW = [];
-      for (let i = 0; i < mu; i++) rawW.push(Math.log(mu + 0.5) - Math.log(i + 1));
-      const wSum = rawW.reduce((s, w) => s + w, 0);
-      const weights = rawW.map(w => w / wSum);
-      const mueff = 1 / weights.reduce((s, w) => s + w * w, 0);
-      const cs = (mueff + 2) / (dim + mueff + 5);
-      const ds = 1 + 2 * Math.max(0, Math.sqrt((mueff - 1) / (dim + 1)) - 1) + cs;
-      const chiN = Math.sqrt(dim) * (1 - 1 / (4 * dim) + 1 / (21 * dim * dim));
-      const cc = (4 + mueff / dim) / (dim + 4 + 2 * mueff / dim);
-      const c1 = 2 / ((dim + 1.3) ** 2 + mueff);
-      const cmu = Math.min(1 - c1, 2 * (mueff - 2 + 1 / mueff) / ((dim + 2) ** 2 + mueff));
-      const mean = [...x0];
-      let sigma = sigma0;
-      const pc = new Float64Array(dim), ps = new Float64Array(dim);
-      const C = new Float64Array(dim).fill(1.0);
-
-      return {
-        dim, popSize, mu, weights, mean, sigma, pc, ps, C,
-        cs, ds, chiN, cc, c1, cmu, mueff,
-        ask() {
-          const cands = [];
-          for (let i = 0; i < this.popSize; i++) {
-            const x = new Float64Array(this.dim);
-            for (let j = 0; j < this.dim; j++)
-              x[j] = this.mean[j] + this.sigma * Math.sqrt(this.C[j]) * _cmaRandn();
-            cands.push(x);
-          }
-          return cands;
-        },
-        tell(candidates, fitnesses) {
-          const idx = fitnesses.map((_, i) => i).sort((a, b) => fitnesses[b] - fitnesses[a]);
-          const oldMean = [...this.mean];
-          for (let j = 0; j < this.dim; j++) {
-            this.mean[j] = 0;
-            for (let i = 0; i < this.mu; i++) this.mean[j] += this.weights[i] * candidates[idx[i]][j];
-          }
-          const md = this.mean.map((m, j) => (m - oldMean[j]) / this.sigma);
-          const sqC = this.C.map(c => 1 / Math.sqrt(c + 1e-20));
-          for (let j = 0; j < this.dim; j++) {
-            this.ps[j] = (1 - this.cs) * this.ps[j] + Math.sqrt(this.cs * (2 - this.cs) * this.mueff) * sqC[j] * md[j];
-            this.pc[j] = (1 - this.cc) * this.pc[j] + Math.sqrt(this.cc * (2 - this.cc) * this.mueff) * md[j];
-          }
-          for (let j = 0; j < this.dim; j++) {
-            let r1 = this.c1 * this.pc[j] * this.pc[j], rmu = 0;
-            for (let i = 0; i < this.mu; i++) {
-              const d = (candidates[idx[i]][j] - oldMean[j]) / this.sigma;
-              rmu += this.weights[i] * d * d;
-            }
-            this.C[j] = (1 - this.c1 - this.cmu) * this.C[j] + r1 + this.cmu * rmu;
-            this.C[j] = Math.max(this.C[j], 1e-10);
-          }
-          const psN = Math.sqrt(this.ps.reduce((s, v) => s + v * v, 0));
-          this.sigma *= Math.exp((this.cs / this.ds) * (psN / this.chiN - 1));
-          this.sigma = Math.max(this.sigma, 0.01);
+        // Weights for recombination
+        this.weights = [];
+        for (let i = 0; i < this.mu; i++) {
+          this.weights.push(Math.log(this.mu + 0.5) - Math.log(i + 1));
         }
-      };
+        const wSum = this.weights.reduce((a, b) => a + b, 0);
+        this.weights = this.weights.map(w => w / wSum);
+
+        const mueff = 1.0 / this.weights.reduce((a, w) => a + w * w, 0);
+        this.mueff = mueff;
+
+        // Adaptation rates
+        this.cc = (4 + mueff / this.dim) / (this.dim + 4 + 2 * mueff / this.dim);
+        this.cs = (mueff + 2) / (this.dim + mueff + 5);
+        this.c1 = 2 / ((this.dim + 1.3) ** 2 + mueff);
+        this.cmu = Math.min(1 - this.c1, 2 * (mueff - 2 + 1 / mueff) / ((this.dim + 2) ** 2 + mueff));
+        this.damps = 1 + 2 * Math.max(0, Math.sqrt((mueff - 1) / (this.dim + 1)) - 1) + this.cs;
+
+        // State
+        this.pc = new Array(this.dim).fill(0);
+        this.ps = new Array(this.dim).fill(0);
+        this.C = [];
+        for (let i = 0; i < this.dim; i++) {
+          this.C.push(new Array(this.dim).fill(0));
+          this.C[i][i] = 1;
+        }
+        this.eigenUpdate = 0;
+        this.gen = 0;
+        this.chiN = Math.sqrt(this.dim) * (1 - 1 / (4 * this.dim) + 1 / (21 * this.dim * this.dim));
+      }
+
+      samplePopulation() {
+        // Eigendecompose C
+        const eigVals = new Array(this.dim).fill(0);
+        const eigVecs = this.C.map(row => row.slice());
+        // Jacobi eigendecomposition for small matrices
+        this._jacobiEigen(eigVecs, eigVals);
+        this._eigVecs = eigVecs;
+        this._eigVals = eigVals;
+
+        const pop = [];
+        for (let k = 0; k < this.popSize; k++) {
+          const z = new Array(this.dim);
+          for (let i = 0; i < this.dim; i++) z[i] = this._randn();
+          const y = new Array(this.dim).fill(0);
+          for (let i = 0; i < this.dim; i++) {
+            for (let j = 0; j < this.dim; j++) {
+              y[i] += eigVecs[i][j] * Math.sqrt(Math.max(eigVals[j], 1e-20)) * z[j];
+            }
+          }
+          const x = this.mean.map((m, i) => m + this.sigma * y[i]);
+          pop.push(x);
+        }
+        return pop;
+      }
+
+      update(pop, fitnesses) {
+        // Sort by fitness (DESCENDING — higher is better)
+        const indexed = fitnesses.map((f, i) => ({ f, i }));
+        indexed.sort((a, b) => b.f - a.f);
+
+        // New mean
+        const oldMean = this.mean.slice();
+        this.mean = new Array(this.dim).fill(0);
+        for (let k = 0; k < this.mu; k++) {
+          const idx = indexed[k].i;
+          for (let i = 0; i < this.dim; i++) {
+            this.mean[i] += this.weights[k] * pop[idx][i];
+          }
+        }
+
+        // Evolution paths
+        const ymean = this.mean.map((m, i) => (m - oldMean[i]) / this.sigma);
+        const invsqrtC = this._invertSqrtC();
+        const zmean = new Array(this.dim).fill(0);
+        for (let i = 0; i < this.dim; i++) {
+          for (let j = 0; j < this.dim; j++) zmean[i] += invsqrtC[i][j] * ymean[j];
+        }
+
+        const csn = Math.sqrt(this.cs * (2 - this.cs) * this.mueff);
+        const ccn = Math.sqrt(this.cc * (2 - this.cc) * this.mueff);
+
+        for (let i = 0; i < this.dim; i++) {
+          this.ps[i] = (1 - this.cs) * this.ps[i] + csn * zmean[i];
+          this.pc[i] = (1 - this.cc) * this.pc[i] + ccn * ymean[i];
+        }
+
+        // Covariance update
+        for (let i = 0; i < this.dim; i++) {
+          for (let j = 0; j <= i; j++) {
+            let cmu_sum = 0;
+            for (let k = 0; k < this.mu; k++) {
+              const idx = indexed[k].i;
+              const yi = (pop[idx][i] - oldMean[i]) / this.sigma;
+              const yj = (pop[idx][j] - oldMean[j]) / this.sigma;
+              cmu_sum += this.weights[k] * yi * yj;
+            }
+            this.C[i][j] = (1 - this.c1 - this.cmu) * this.C[i][j]
+              + this.c1 * this.pc[i] * this.pc[j]
+              + this.cmu * cmu_sum;
+            this.C[j][i] = this.C[i][j];
+          }
+        }
+
+        // Sigma update
+        const psNorm = Math.sqrt(this.ps.reduce((a, v) => a + v * v, 0));
+        this.sigma *= Math.exp((this.cs / this.damps) * (psNorm / this.chiN - 1));
+        this.gen++;
+      }
+
+      _randn() {
+        const u1 = Math.random(), u2 = Math.random();
+        return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      }
+
+      _jacobiEigen(A, eigenvalues) {
+        const n = A.length;
+        const V = A.map(row => row.slice());
+        // Initialize V as identity
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) V[i][j] = i === j ? 1 : 0;
+        }
+        const S = this.C.map(row => row.slice());
+
+        for (let iter = 0; iter < 100; iter++) {
+          let offDiag = 0;
+          for (let i = 0; i < n; i++)
+            for (let j = i + 1; j < n; j++) offDiag += S[i][j] ** 2;
+          if (offDiag < 1e-20) break;
+
+          for (let p = 0; p < n - 1; p++) {
+            for (let q = p + 1; q < n; q++) {
+              if (Math.abs(S[p][q]) < 1e-20) continue;
+              const tau = (S[q][q] - S[p][p]) / (2 * S[p][q]);
+              const t = Math.sign(tau) / (Math.abs(tau) + Math.sqrt(1 + tau * tau));
+              const c = 1 / Math.sqrt(1 + t * t);
+              const s = t * c;
+
+              const Spp = S[p][p], Sqq = S[q][q], Spq = S[p][q];
+              S[p][p] = c * c * Spp - 2 * s * c * Spq + s * s * Sqq;
+              S[q][q] = s * s * Spp + 2 * s * c * Spq + c * c * Sqq;
+              S[p][q] = S[q][p] = 0;
+
+              for (let i = 0; i < n; i++) {
+                if (i !== p && i !== q) {
+                  const Sip = S[i][p], Siq = S[i][q];
+                  S[i][p] = S[p][i] = c * Sip - s * Siq;
+                  S[i][q] = S[q][i] = s * Sip + c * Siq;
+                }
+              }
+              for (let i = 0; i < n; i++) {
+                const Vip = V[i][p], Viq = V[i][q];
+                V[i][p] = c * Vip - s * Viq;
+                V[i][q] = s * Vip + c * Viq;
+              }
+            }
+          }
+        }
+        for (let i = 0; i < n; i++) eigenvalues[i] = S[i][i];
+        for (let i = 0; i < n; i++)
+          for (let j = 0; j < n; j++) A[i][j] = V[i][j];
+      }
+
+      _invertSqrtC() {
+        const n = this.dim;
+        const result = Array.from({ length: n }, () => new Array(n).fill(0));
+        if (!this._eigVecs || !this._eigVals) return result.map((r, i) => { r[i] = 1; return r; });
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) {
+            let sum = 0;
+            for (let k = 0; k < n; k++) {
+              sum += this._eigVecs[i][k] * (1 / Math.sqrt(Math.max(this._eigVals[k], 1e-20))) * this._eigVecs[j][k];
+            }
+            result[i][j] = sum;
+          }
+        }
+        return result;
+      }
     }
 
+    // Component 2: Parameter keys and bounds
     const _CMA_PARAM_KEYS = [
       'deadEndPenalty', 'lockFavorable', 'lockUnfavorable',
       'chicoteSelf', 'chicotePartner', 'chicoteOpponent', 'chicoteDorme',
@@ -12130,7 +12793,7 @@
       probDeadPenalty: [10, 50]
     };
 
-    // Adversarial headless game: team 0 uses weightsA, team 1 uses weightsB
+    // Component 2b: Adversarial headless game — team 0 uses weightsA, team 1 uses weightsB
     function _headlessAdversarial(seed, weightsA, weightsB) {
       const rng = new SplitMix64(seed);
       const deck = [...ALL_TILES];
@@ -12188,33 +12851,35 @@
       return { winnerTeam: -1, points: 0 };
     }
 
+    // Component 3: optimizeWeights — console-callable CMA-ES weight optimizer
     window.optimizeWeights = async function(generations = 30, popSize = 16, gamesPerEval = 150) {
       const dim = _CMA_PARAM_KEYS.length;
       const champion = _CMA_PARAM_KEYS.map(k => AI_WEIGHTS[k]);
       const savedWeights = [...champion];
 
-      console.log('%cCMA-ES Weight Optimizer', 'font-weight:bold; font-size:14px');
+      console.log('%cCMA-ES Weight Optimizer (Full Covariance)', 'font-weight:bold; font-size:14px');
       console.log(`Population: ${popSize} | Games/eval: ${gamesPerEval} | Generations: ${generations}`);
-      console.log(`Optimizing ${dim} parameters`);
+      console.log(`Optimizing ${dim} parameters: ${_CMA_PARAM_KEYS.join(', ')}`);
+      console.log(`Each candidate plays ${gamesPerEval} games vs champion (${gamesPerEval / 2} seeds x both sides)`);
 
-      const optimizer = _cmaesCreate(dim, champion, 5.0, popSize);
+      const cma = new CMAES(champion, 5, popSize);
       let globalBest = [...champion], globalBestFit = -Infinity;
       let staleCount = 0;
       const t0 = performance.now();
 
       for (let gen = 0; gen < generations; gen++) {
-        const candidates = optimizer.ask();
+        const population = cma.samplePopulation();
         const fitnesses = [];
 
-        for (let ci = 0; ci < candidates.length; ci++) {
+        for (let ci = 0; ci < population.length; ci++) {
           // Clamp to bounds
           for (let j = 0; j < dim; j++) {
             const [lo, hi] = _CMA_BOUNDS[_CMA_PARAM_KEYS[j]];
-            candidates[ci][j] = Math.max(lo, Math.min(hi, candidates[ci][j]));
+            population[ci][j] = Math.max(lo, Math.min(hi, population[ci][j]));
           }
 
-          // Adversarial evaluation: candidate as team0, then as team1
-          const vec = Array.from(candidates[ci]);
+          // Adversarial evaluation: play each seed from BOTH sides for fairness
+          const vec = population[ci].slice ? population[ci].slice() : Array.from(population[ci]);
           let netScore = 0;
           const half = Math.floor(gamesPerEval / 2);
           for (let g = 0; g < half; g++) {
@@ -12223,7 +12888,7 @@
             const r1 = _headlessAdversarial(seed, vec, champion);
             if (r1.winnerTeam === 0) netScore += r1.points;
             else if (r1.winnerTeam === 1) netScore -= r1.points;
-            // Candidate = team 1 (swap)
+            // Candidate = team 1 (swap sides, different seed offset)
             const r2 = _headlessAdversarial(seed + 0x80000000, champion, vec);
             if (r2.winnerTeam === 1) netScore += r2.points;
             else if (r2.winnerTeam === 0) netScore -= r2.points;
@@ -12234,7 +12899,7 @@
           if (ci % 4 === 3) await new Promise(r => setTimeout(r, 0));
         }
 
-        optimizer.tell(candidates, fitnesses);
+        cma.update(population, fitnesses);
 
         const bestIdx = fitnesses.indexOf(Math.max(...fitnesses));
         const genBest = fitnesses[bestIdx];
@@ -12243,17 +12908,17 @@
 
         if (genBest > globalBestFit) {
           globalBestFit = genBest;
-          globalBest = Array.from(candidates[bestIdx]);
+          globalBest = population[bestIdx].slice ? population[bestIdx].slice() : Array.from(population[bestIdx]);
           staleCount = 0;
         } else {
           staleCount++;
         }
 
-        console.log(`Gen ${String(gen + 1).padStart(3)} | Best: ${genBest.toFixed(3)} | Avg: ${avg} | σ: ${optimizer.sigma.toFixed(2)} | Global: ${globalBestFit.toFixed(3)} | ${elapsed}s`);
+        console.log(`Gen ${String(gen + 1).padStart(3)} | Best: ${genBest.toFixed(3)} | Avg: ${avg} | \u03c3: ${cma.sigma.toFixed(2)} | Global: ${globalBestFit.toFixed(3)} | ${elapsed}s`);
 
         // Convergence: step size collapsed or stale for 5 gens
-        if (optimizer.sigma < 0.5 || staleCount >= 5) {
-          console.log(`Converged (${optimizer.sigma < 0.5 ? 'σ collapsed' : 'stale 5 gens'})`);
+        if (cma.sigma < 0.5 || staleCount >= 5) {
+          console.log(`Converged (${cma.sigma < 0.5 ? '\u03c3 collapsed' : 'stale 5 gens'})`);
           break;
         }
       }
@@ -12261,23 +12926,719 @@
       // Restore original weights
       for (let i = 0; i < dim; i++) AI_WEIGHTS[_CMA_PARAM_KEYS[i]] = savedWeights[i];
 
-      // Print results
-      console.log('\n%cResults:', 'font-weight:bold; font-size:13px');
+      // Print results table
+      console.log('\n%cOptimization Results:', 'font-weight:bold; font-size:13px; color:#22c55e');
       console.table(_CMA_PARAM_KEYS.reduce((obj, k, i) => {
-        obj[k] = { Default: savedWeights[i], Optimized: Math.round(globalBest[i] * 10) / 10,
-          Change: ((globalBest[i] - savedWeights[i]) / Math.max(Math.abs(savedWeights[i]), 1) * 100).toFixed(0) + '%' };
+        obj[k] = {
+          Default: savedWeights[i],
+          Optimized: Math.round(globalBest[i] * 10) / 10,
+          Change: ((globalBest[i] - savedWeights[i]) / Math.max(Math.abs(savedWeights[i]), 1) * 100).toFixed(0) + '%'
+        };
         return obj;
       }, {}));
 
+      // Print paste-ready format
       console.log('\n%c// Paste into AI_WEIGHTS:', 'color: #22c55e');
-      const lines = _CMA_PARAM_KEYS.map((k, i) =>
-        `  ${k}: ${Math.round(globalBest[i] * 10) / 10}`
-      ).join(',\n');
+      const lines = _CMA_PARAM_KEYS.map((k, i) => {
+        const val = Math.round(globalBest[i] * 10) / 10;
+        const pad = ' '.repeat(Math.max(0, 22 - k.length));
+        return `  ${k}:${pad}${val},`;
+      }).join('\n');
       console.log(`const AI_WEIGHTS = {\n${lines}\n};`);
 
       const totalTime = ((performance.now() - t0) / 1000).toFixed(1);
-      console.log(`\nTotal: ${totalTime}s | Global best fitness: ${globalBestFit.toFixed(4)}`);
+      console.log(`\nTotal: ${totalTime}s | Global best fitness: ${globalBestFit.toFixed(4)} (net pts/game vs champion)`);
       return { best: globalBest, fitness: globalBestFit, keys: _CMA_PARAM_KEYS };
+    };
+
+    // ========== ENCODER PARITY TEST ==========
+    // Console: _testEncoderParity()       — run all built-in scenarios
+    // Console: _testEncoderParity(json)   — compare against Python parity_expected.json
+    // Console: _encodeSnapshot(snap)      — encode a single v1 snapshot
+
+    // Encode a canonical v1 snapshot → {state, mask}
+    window._encodeSnapshot = function(snap) {
+      if (snap.version !== 1) throw new Error('Unknown snapshot version: ' + snap.version);
+
+      const k = new Knowledge();
+      const me = snap.player;
+
+      // Replay plays: rebuild knowledge from plays_by
+      for (const [pStr, tiles] of Object.entries(snap.plays_by)) {
+        const p = parseInt(pStr);
+        for (const tIdx of tiles) {
+          k.recordPlay(p, ALL_TILES[tIdx]);
+        }
+      }
+
+      // Replay passes: derive from cant_have
+      // cantHave entries tell us which numbers a player can't have.
+      // Apply them to knowledge
+      for (const [pStr, nums] of Object.entries(snap.cant_have)) {
+        const p = parseInt(pStr);
+        for (const n of nums) {
+          k.cantHave[p].add(n);
+        }
+      }
+
+      // Also update nnBelief for cantHave constraints not covered by recordPass
+      // (since we don't have exact pass events, apply constraints directly)
+      for (const [pStr, nums] of Object.entries(snap.cant_have)) {
+        const p = parseInt(pStr);
+        for (const n of nums) {
+          for (let ti = 0; ti < 28; ti++) {
+            const tile = ALL_TILES[ti];
+            if (tile.left === n || tile.right === n) {
+              k.nnBelief[ti * 5 + p] = 0.0;
+            }
+          }
+        }
+      }
+      // Re-normalize nnBelief after applying constraints
+      for (let ti = 0; ti < 28; ti++) {
+        let total = 0;
+        for (let z = 0; z < 5; z++) total += k.nnBelief[ti * 5 + z];
+        if (total > 0) {
+          for (let z = 0; z < 5; z++) k.nnBelief[ti * 5 + z] /= total;
+        }
+      }
+
+      const hand = snap.hand.map(i => ALL_TILES[i]);
+
+      // Save/restore globals
+      const savedScore = [...matchScore];
+      const savedMul = scoreMultiplier;
+      matchScore[0] = snap.match_score[0];
+      matchScore[1] = snap.match_score[1];
+      scoreMultiplier = snap.score_multiplier;
+
+      const state = _nnEncodeState(hand, snap.left_end, snap.right_end, snap.board_length, me, k);
+      const mask = _nnActionMask(hand, snap.left_end, snap.right_end, snap.board_length);
+
+      matchScore[0] = savedScore[0]; matchScore[1] = savedScore[1];
+      scoreMultiplier = savedMul;
+
+      return { state: Array.from(state), mask: Array.from(mask) };
+    };
+
+    // Built-in test scenarios (must match training/test_encoder_parity.py)
+    const _PARITY_SCENARIOS = [
+      {
+        name: "Scenario 1: Early game, P0 observes",
+        snap: { version:1, player:0, hand:[1,2,3,4,5], played:[0,6,12],
+          left_end:1, right_end:0, board_length:3,
+          cant_have:{"0":[],"1":[],"2":[],"3":[0,1]},
+          plays_by:{"0":[0],"1":[6],"2":[12],"3":[]},
+          match_score:[0,0], score_multiplier:1 }
+      },
+      {
+        name: "Scenario 2: Mid game, P2 observes, symmetric ends",
+        snap: { version:1, player:2, hand:[13,14,15,16], played:[0,7,1,8,6,12],
+          left_end:3, right_end:3, board_length:6,
+          cant_have:{"0":[5],"1":[3,5],"2":[],"3":[3]},
+          plays_by:{"0":[0,1],"1":[7,8],"2":[6,12],"3":[]},
+          match_score:[2,4], score_multiplier:2 }
+      },
+      {
+        name: "Scenario 3: Late game, P1 observes, match point",
+        snap: { version:1, player:1, hand:[20,21,22], played:[0,7,13,18,1,8,14,19,2,9,15,27],
+          left_end:6, right_end:5, board_length:12,
+          cant_have:{"0":[2,4],"1":[],"2":[3,6],"3":[2,5,6]},
+          plays_by:{"0":[0,1,2],"1":[7,8,9],"2":[13,14,15],"3":[18,19,27]},
+          match_score:[5,5], score_multiplier:4 }
+      }
+    ];
+
+    window._testEncoderParity = function(expectedJson) {
+      console.log('%c=== ENCODER PARITY TEST (JS) ===', 'font-weight:bold; font-size:14px');
+      const results = [];
+
+      for (const { name, snap } of _PARITY_SCENARIOS) {
+        console.log(`\n%c${name}`, 'font-weight:bold; font-size:12px');
+
+        const { state, mask } = _encodeSnapshot(snap);
+
+        // Print belief section
+        console.log('Belief [91:175]:');
+        for (let t = 0; t < 28; t++) {
+          const tile = ALL_TILES[t];
+          const b = [state[91 + t], state[91 + 28 + t], state[91 + 56 + t]];
+          const s = b[0]+b[1]+b[2];
+          let tag = '';
+          if (snap.hand.includes(t)) tag = ' [HAND]';
+          else if (snap.played.includes(t)) tag = ' [PLAYED]';
+          console.log(`  tile ${String(t).padStart(2)} (${tile.left}-${tile.right}): ` +
+            `P=${b[0].toFixed(4)} L=${b[1].toFixed(4)} R=${b[2].toFixed(4)} Σ=${s.toFixed(4)}${tag}`);
+        }
+
+        // Print active mask
+        console.log('Mask:');
+        for (let i = 0; i < 57; i++) {
+          if (mask[i] > 0) {
+            if (i < 28) console.log(`  [${String(i).padStart(2)}] (${ALL_TILES[i].left}-${ALL_TILES[i].right}) LEFT`);
+            else if (i < 56) console.log(`  [${String(i).padStart(2)}] (${ALL_TILES[i-28].left}-${ALL_TILES[i-28].right}) RIGHT`);
+            else console.log('  [56] PASS');
+          }
+        }
+
+        results.push({ name, state, mask });
+      }
+
+      // Compare with Python expected values if provided
+      if (expectedJson) {
+        const expected = typeof expectedJson === 'string' ? JSON.parse(expectedJson) : expectedJson;
+        console.log('\n%cComparing against Python expected values...', 'font-weight:bold');
+        let totalMismatches = 0;
+
+        for (let s = 0; s < Math.min(results.length, expected.length); s++) {
+          const js = results[s];
+          const py = expected[s];
+          let mismatches = 0;
+          const eps = 1e-6;
+
+          for (let i = 0; i < 185; i++) {
+            if (Math.abs(js.state[i] - py.state[i]) > eps) {
+              console.warn(`  ${js.name} STATE[${i}]: JS=${js.state[i].toFixed(8)} PY=${py.state[i]}`);
+              mismatches++;
+            }
+          }
+          for (let i = 0; i < 57; i++) {
+            if (Math.abs(js.mask[i] - py.mask[i]) > eps) {
+              console.warn(`  ${js.name} MASK[${i}]: JS=${js.mask[i].toFixed(8)} PY=${py.mask[i]}`);
+              mismatches++;
+            }
+          }
+
+          if (mismatches === 0) {
+            console.log(`%c  ✓ ${js.name} — PASS`, 'color:#22c55e');
+          } else {
+            console.log(`%c  ✗ ${js.name} — ${mismatches} mismatches`, 'color:#ef4444');
+          }
+          totalMismatches += mismatches;
+        }
+
+        if (totalMismatches === 0) {
+          console.log('%c\n✓ ALL PARITY TESTS PASSED', 'color:#22c55e; font-weight:bold; font-size:14px');
+        } else {
+          console.log(`%c\n✗ ${totalMismatches} TOTAL MISMATCHES`, 'color:#ef4444; font-weight:bold; font-size:14px');
+        }
+      } else {
+        console.log('\nTo compare against Python: run `python training/test_encoder_parity.py` then pass the JSON here.');
+      }
+
+      return results;
+    };
+
+    // ========== SNAPSHOT JSONL EXPORTER ==========
+    // Console: exportSnapshots(100)     — play 100 headless games, capture all decision points
+    // Console: exportSnapshots(100, 42) — with starting seed 42
+    // Returns JSONL string (one JSON object per line). Also copies to clipboard if available.
+
+    window.exportSnapshots = function(numGames = 100, startSeed = 1) {
+      const lines = [];
+      let totalSnaps = 0;
+
+      for (let g = 0; g < numGames; g++) {
+        const seed = startSeed + g * 7919;
+        const rng = new SplitMix64(seed);
+        const deck = [...ALL_TILES];
+        rng.shuffle(deck);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+
+        // Find highest double for opener
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) continue;
+
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+        const played = new Set([TILE_INDEX[ht.id]]);
+
+        // Track plays_by as tile indices per player
+        const playsBy = { 0: [], 1: [], 2: [], 3: [] };
+        playsBy[hp].push(TILE_INDEX[ht.id]);
+
+        let cur = (hp + 1) % 4, passCount = 0;
+
+        for (let move = 0; move < 200; move++) {
+          // Capture snapshot BEFORE the decision
+          const snap = {
+            version: 1,
+            game_seed: seed,
+            move_num: move,
+            player: cur,
+            hand: hands[cur].map(t => TILE_INDEX[t.id]).sort((a, b) => a - b),
+            played: [...played].sort((a, b) => a - b),
+            left_end: lE,
+            right_end: rE,
+            board_length: bLen,
+            cant_have: {},
+            plays_by: {},
+            match_score: [0, 0],
+            score_multiplier: 1
+          };
+
+          // Populate cant_have from knowledge
+          for (let p = 0; p < 4; p++) {
+            snap.cant_have[p] = [...knowledge.cantHave[p]].sort((a, b) => a - b);
+          }
+          // Populate plays_by
+          for (let p = 0; p < 4; p++) {
+            snap.plays_by[p] = [...playsBy[p]];
+          }
+
+          lines.push(JSON.stringify(snap));
+          totalSnaps++;
+
+          // Make the decision
+          const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+          const decision = allOpts.length > 0 ? allOpts[0] : null;
+
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+            const tIdx = TILE_INDEX[tile.id];
+            played.add(tIdx);
+            playsBy[cur].push(tIdx);
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+            if (hands[cur].length === 0) break;
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            knowledge.recordPass(cur, lE, rE);
+            if (passCount >= 4) break;
+            cur = (cur + 1) % 4;
+          }
+        }
+
+        if ((g + 1) % 10 === 0) {
+          console.log(`  exported ${g + 1}/${numGames} games (${totalSnaps} snapshots)`);
+        }
+      }
+
+      const jsonl = lines.join('\n');
+      console.log(`Done: ${totalSnaps} snapshots from ${numGames} games`);
+
+      // Copy to clipboard if available
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(jsonl).then(
+          () => console.log('Copied to clipboard. Paste into a .jsonl file.'),
+          () => console.log('Clipboard copy failed. Use return value instead.')
+        );
+      }
+
+      // Also offer download
+      try {
+        const blob = new Blob([jsonl], { type: 'application/jsonl' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `snapshots_${numGames}g_${totalSnaps}s.jsonl`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('Download triggered.');
+      } catch(e) {}
+
+      return jsonl;
+    };
+
+    // ========== MASS PARITY CHECK ==========
+    // Console: massParityCheck(100)  — play 100 games, encode every snapshot in JS,
+    //   export JSONL for Python comparison
+    // This captures snapshots AND their JS-encoded state+mask for cross-validation.
+
+    window.massParityCheck = function(numGames = 100, startSeed = 1) {
+      const results = [];
+      let totalSnaps = 0;
+
+      for (let g = 0; g < numGames; g++) {
+        const seed = startSeed + g * 7919;
+        const rng = new SplitMix64(seed);
+        const deck = [...ALL_TILES];
+        rng.shuffle(deck);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) continue;
+
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+        const played = new Set([TILE_INDEX[ht.id]]);
+        const playsBy = { 0: [], 1: [], 2: [], 3: [] };
+        playsBy[hp].push(TILE_INDEX[ht.id]);
+        let cur = (hp + 1) % 4, passCount = 0;
+
+        for (let move = 0; move < 200; move++) {
+          const snap = {
+            version: 1, player: cur,
+            hand: hands[cur].map(t => TILE_INDEX[t.id]).sort((a, b) => a - b),
+            played: [...played].sort((a, b) => a - b),
+            left_end: lE, right_end: rE, board_length: bLen,
+            cant_have: {}, plays_by: {},
+            match_score: [0, 0], score_multiplier: 1
+          };
+          for (let p = 0; p < 4; p++) {
+            snap.cant_have[p] = [...knowledge.cantHave[p]].sort((a, b) => a - b);
+            snap.plays_by[p] = [...playsBy[p]];
+          }
+
+          // Encode in JS
+          const { state, mask } = _encodeSnapshot(snap);
+          results.push({ snap, state, mask });
+          totalSnaps++;
+
+          const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+          const decision = allOpts.length > 0 ? allOpts[0] : null;
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+            const tIdx = TILE_INDEX[tile.id];
+            played.add(tIdx);
+            playsBy[cur].push(tIdx);
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+            if (hands[cur].length === 0) break;
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            knowledge.recordPass(cur, lE, rE);
+            if (passCount >= 4) break;
+            cur = (cur + 1) % 4;
+          }
+        }
+      }
+
+      // Export for Python comparison
+      const exportData = results.map(r => ({
+        snapshot: r.snap,
+        js_state: r.state.map(v => Math.round(v * 1e8) / 1e8),
+        js_mask: r.mask.map(v => Math.round(v * 1e8) / 1e8)
+      }));
+
+      const jsonStr = JSON.stringify(exportData);
+      console.log(`Mass parity: ${totalSnaps} snapshots from ${numGames} games`);
+
+      try {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `parity_check_${totalSnaps}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('Download triggered.');
+      } catch(e) {}
+
+      return exportData;
+    };
+
+    // ========== STANDALONE ΔME FUNCTION ==========
+    // Pure function — does NOT read globals. Matches Python delta_me() exactly.
+    // winnerTeam: 0 or 1, points: base points (1-4 before multiplier),
+    // myTeam: perspective, myScore/oppScore: BEFORE game, multiplier: dobrada level
+    function deltaMe(winnerTeam, points, myTeam, myScore, oppScore, multiplier) {
+      if (winnerTeam < 0) return 0; // tie
+      const dob = DOB_VALUES.includes(multiplier) ? multiplier : 1;
+      const currentME = getMatchEquity3D(myScore, oppScore, dob);
+      const pts = points * dob;
+      let newME;
+      if (winnerTeam === myTeam) {
+        newME = getMatchEquity3D(Math.min(myScore + pts, MATCH_TARGET + 4), oppScore, 1);
+      } else {
+        newME = getMatchEquity3D(myScore, Math.min(oppScore + pts, MATCH_TARGET + 4), 1);
+      }
+      return newME - currentME;
+    }
+    window.deltaMe = deltaMe;
+
+    // ========== ME3D PARITY CHECK ==========
+    // Exports ME3D[s1][s2][d] for all entries so Python can cross-validate.
+    // Console: me3dParityExport()
+    window.me3dParityExport = function() {
+      const S = MATCH_TARGET + 5;
+      const entries = [];
+      for (let s1 = 0; s1 < S; s1++) {
+        for (let s2 = 0; s2 < S; s2++) {
+          for (let d = 0; d < DOB_VALUES.length; d++) {
+            entries.push({
+              s1, s2, dob_idx: d, dob: DOB_VALUES[d],
+              me: Math.round(ME3D[s1][s2][d] * 1e12) / 1e12
+            });
+          }
+        }
+      }
+      const json = JSON.stringify(entries);
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'me3d_js.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch(e) {}
+      console.log(`Exported ${entries.length} ME3D entries (${S}x${S}x${DOB_VALUES.length})`);
+      return entries;
+    };
+
+    // ========== TRAINING DATA EXPORTER WITH ΔME ==========
+    // Plays full matches (first to 6), captures (snapshot, policy_57, v_target=ΔME)
+    // at every decision point. Policy is derived from smartAI scores via softmax.
+    //
+    // Console: exportTrainingData(50)        — 50 matches
+    // Console: exportTrainingData(50, 1, 2)  — 50 matches, startSeed=1, temperature=2
+    //
+    // Output JSONL format per line:
+    //   { snapshot: {...}, policy_57: [...], v_target: float, game_result: {...} }
+
+    window.exportTrainingData = function(numMatches = 50, startSeed = 1, temperature = 2.0) {
+      const allData = [];  // [{snapshot, policy_57, v_target, game_result}]
+      let totalSnaps = 0, totalGames = 0;
+
+      for (let m = 0; m < numMatches; m++) {
+        const matchSeed = startSeed + m * 100003;
+        let mScores = [0, 0];  // match scores [team0, team1]
+        let mMultiplier = 1;   // dobrada level
+        let gameIdx = 0;
+
+        while (mScores[0] < MATCH_TARGET && mScores[1] < MATCH_TARGET && gameIdx < 20) {
+          const gameSeed = matchSeed + gameIdx * 7919;
+          const rng = new SplitMix64(gameSeed);
+          const deck = [...ALL_TILES];
+          rng.shuffle(deck);
+          const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+
+          // Find highest double for opener
+          let hp = -1, ht = null, hd = -1;
+          for (let p = 0; p < 4; p++)
+            for (const t of hands[p])
+              if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+          if (!ht) { gameIdx++; continue; }
+
+          // Capture match state BEFORE this game (for ΔME)
+          const scoresBefore = [...mScores];
+          const multiplierBefore = mMultiplier;
+
+          // Auto-play opener's highest double
+          hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+          let lE = ht.left, rE = ht.right, bLen = 1;
+          const knowledge = new Knowledge();
+          knowledge.recordPlay(hp, ht);
+          const played = new Set([TILE_INDEX[ht.id]]);
+          const playsBy = { 0: [], 1: [], 2: [], 3: [] };
+          playsBy[hp].push(TILE_INDEX[ht.id]);
+
+          let cur = (hp + 1) % 4, passCount = 0;
+          const gameHistory = []; // steps in this game
+
+          for (let move = 0; move < 200; move++) {
+            // Build canonical snapshot
+            const snap = {
+              version: 1, game_seed: gameSeed, move_num: move,
+              player: cur,
+              hand: hands[cur].map(t => TILE_INDEX[t.id]).sort((a, b) => a - b),
+              played: [...played].sort((a, b) => a - b),
+              left_end: lE, right_end: rE, board_length: bLen,
+              cant_have: {}, plays_by: {},
+              match_score: [...scoresBefore],
+              score_multiplier: multiplierBefore
+            };
+            for (let p = 0; p < 4; p++) {
+              snap.cant_have[p] = [...knowledge.cantHave[p]].sort((a, b) => a - b);
+              snap.plays_by[p] = [...playsBy[p]];
+            }
+
+            // Get smartAI decision + full scored list for policy
+            const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+
+            // Build 57-dim policy from smartAI scores via softmax
+            const policy57 = new Float32Array(57);
+            if (allOpts.length === 0) {
+              // Pass
+              policy57[56] = 1.0;
+            } else {
+              // Map each option to action index
+              const actionScores = [];
+              for (const opt of allOpts) {
+                const tIdx = TILE_INDEX[opt.tile.id];
+                if (bLen === 0) {
+                  actionScores.push({ idx: tIdx, score: opt.score });
+                } else {
+                  const side = opt.side;
+                  if (side === 'left') {
+                    actionScores.push({ idx: tIdx, score: opt.score });
+                  } else if (side === 'right') {
+                    actionScores.push({ idx: 28 + tIdx, score: opt.score });
+                  } else {
+                    // No side specified — check which ends match
+                    if (opt.tile.left === lE || opt.tile.right === lE)
+                      actionScores.push({ idx: tIdx, score: opt.score });
+                    if (opt.tile.left === rE || opt.tile.right === rE)
+                      actionScores.push({ idx: 28 + tIdx, score: opt.score });
+                  }
+                }
+              }
+              // Symmetry: when lE === rE, only use left slot
+              if (bLen > 0 && lE === rE) {
+                for (let i = actionScores.length - 1; i >= 0; i--) {
+                  if (actionScores[i].idx >= 28 && actionScores[i].idx < 56) {
+                    actionScores.splice(i, 1);
+                  }
+                }
+              }
+              // Softmax with temperature
+              if (actionScores.length > 0) {
+                const maxS = Math.max(...actionScores.map(a => a.score));
+                let sumExp = 0;
+                for (const a of actionScores) {
+                  a.exp = Math.exp((a.score - maxS) / temperature);
+                  sumExp += a.exp;
+                }
+                for (const a of actionScores) {
+                  policy57[a.idx] = a.exp / sumExp;
+                }
+              }
+            }
+
+            // Record step (v_target backfilled after game ends)
+            gameHistory.push({ snap, policy57: Array.from(policy57), team: cur % 2 });
+            totalSnaps++;
+
+            // Execute the decision
+            const decision = allOpts.length > 0 ? allOpts[0] : null;
+            if (decision) {
+              passCount = 0;
+              const { tile, side: prefSide } = decision;
+              let side = prefSide;
+              if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+              const prevLE = lE, prevRE = rE;
+              hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+              knowledge.recordPlay(cur, tile);
+              const tIdx = TILE_INDEX[tile.id];
+              played.add(tIdx);
+              playsBy[cur].push(tIdx);
+              if (bLen === 0) { lE = tile.left; rE = tile.right; }
+              else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+              else { rE = tile.right === rE ? tile.left : tile.right; }
+              bLen++;
+
+              if (hands[cur].length === 0) {
+                // Player went out — score the win
+                const w = scoreWin(tile, prevLE, prevRE, bLen - 1);
+                const winnerTeam = cur % 2;
+                const basePts = w.pts;
+
+                // Backfill ΔME for all steps in this game
+                for (const step of gameHistory) {
+                  const v = deltaMe(winnerTeam, basePts, step.team,
+                    scoresBefore[step.team], scoresBefore[1 - step.team], multiplierBefore);
+                  allData.push({
+                    snapshot: step.snap,
+                    policy_57: step.policy57,
+                    v_target: Math.round(v * 1e8) / 1e8,
+                    game_result: { winner_team: winnerTeam, base_points: basePts, type: w.type }
+                  });
+                }
+
+                // Update match state
+                const actualPts = basePts * mMultiplier;
+                mScores[winnerTeam] += actualPts;
+                mMultiplier = 1;
+                break;
+              }
+              cur = (cur + 1) % 4;
+            } else {
+              passCount++;
+              knowledge.recordPass(cur, lE, rE);
+              if (passCount >= 4) {
+                // Blocked — resolve
+                const block = resolveBlock(hands);
+                const winnerTeam = block.team ?? -1;
+                const basePts = block.points || 0;
+
+                for (const step of gameHistory) {
+                  const v = deltaMe(winnerTeam, basePts, step.team,
+                    scoresBefore[step.team], scoresBefore[1 - step.team], multiplierBefore);
+                  allData.push({
+                    snapshot: step.snap,
+                    policy_57: step.policy57,
+                    v_target: Math.round(v * 1e8) / 1e8,
+                    game_result: { winner_team: winnerTeam, base_points: basePts, type: block.type }
+                  });
+                }
+
+                // Update match state
+                if (winnerTeam >= 0) {
+                  mScores[winnerTeam] += basePts * mMultiplier;
+                  mMultiplier = 1;
+                } else {
+                  mMultiplier = Math.min(mMultiplier * 2, 8); // dobrada
+                }
+                break;
+              }
+              cur = (cur + 1) % 4;
+            }
+          }
+
+          totalGames++;
+          gameIdx++;
+        }
+
+        if ((m + 1) % 5 === 0) {
+          console.log(`  match ${m + 1}/${numMatches}: ${totalGames} games, ${totalSnaps} snapshots`);
+        }
+      }
+
+      // Export as JSONL
+      const lines = allData.map(d => JSON.stringify(d));
+      const jsonl = lines.join('\n');
+      console.log(`Done: ${totalSnaps} snapshots from ${totalGames} games across ${numMatches} matches`);
+
+      // Quick ΔME stats
+      const vTargets = allData.map(d => d.v_target);
+      const mean = vTargets.reduce((s, v) => s + v, 0) / vTargets.length;
+      const min = Math.min(...vTargets);
+      const max = Math.max(...vTargets);
+      const absVals = vTargets.map(Math.abs);
+      absVals.sort((a, b) => a - b);
+      const median = absVals[Math.floor(absVals.length / 2)];
+      console.log(`ΔME stats: mean=${mean.toFixed(4)}, min=${min.toFixed(4)}, max=${max.toFixed(4)}, median|ΔME|=${median.toFixed(4)}`);
+
+      // Download
+      try {
+        const blob = new Blob([jsonl], { type: 'application/jsonl' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `training_${numMatches}m_${totalSnaps}s.jsonl`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('Download triggered.');
+      } catch(e) {}
+
+      return allData;
     };
   </script>
 </body>
