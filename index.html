@@ -487,7 +487,7 @@
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
-      const BOARD_DIMS = { S: { hw: 44, vw: 22 }, M: { hw: 52, vw: 26 }, L: { hw: 58, vw: 29 } };
+      const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 48, vw: 24 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
       const roomRef = useRef(null);
@@ -3884,13 +3884,22 @@
                         }}>{num}</div>
                       );
 
-                      // Compute row joints for connector lines
+                      // Compute row joints for connector lines (direction-aware)
                       const joints = [];
                       for (let r = 0; r < rows.length - 1; r++) {
                         const rowA = rows[r];
                         const rowB = rows[r + 1];
                         if (!rowA.length || !rowB.length) continue;
-                        joints.push({ endA: rowA[rowA.length - 1], startB: rowB[0], r });
+
+                        const oddA = (r % 2) === 1;
+                        const oddB = ((r + 1) % 2) === 1;
+
+                        // Visual end of rowA depends on flex direction
+                        const endA = oddA ? rowA[0] : rowA[rowA.length - 1];
+                        // Visual start of rowB depends on flex direction
+                        const startB = oddB ? rowB[rowB.length - 1] : rowB[0];
+
+                        joints.push({ endA, startB });
                       }
 
                       return (
@@ -3977,8 +3986,8 @@
                                 <path
                                   key={idx}
                                   d={`M ${x1} ${y1} L ${x1} ${(y1+y2)/2} L ${x2} ${(y1+y2)/2} L ${x2} ${y2}`}
-                                  stroke="rgba(245,240,225,0.35)"
-                                  strokeWidth="4"
+                                  stroke="rgba(245,240,225,0.18)"
+                                  strokeWidth="3"
                                   fill="none"
                                   strokeLinecap="round"
                                 />
