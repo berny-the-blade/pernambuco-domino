@@ -3613,46 +3613,31 @@
         );
 
         // Compact SVG scoring dial — semicircular arc with both teams
-        // Single-team score dial
-        const TeamDial = ({ score, total, color, lightColor, label }) => {
-          const W = 62, H = 38;
-          const cx = W / 2, cy = H - 4;
-          const r = 22;
-          const steps = total || 6;
-          const angleFor = (val) => Math.PI - (val / steps) * Math.PI;
-
-          const ticks = [];
+        // Quarter-circle corner dial with needle (like real domino table)
+        const CornerDial = ({ score, total, corner, color, lightColor }) => {
+          const S = 74, R = 50, steps = total || 6;
+          const isTL = corner === 'tl';
+          const ox = isTL ? 2 : S - 2, oy = isTL ? 2 : S - 2;
+          const a0 = isTL ? 0 : Math.PI, a1 = isTL ? Math.PI / 2 : Math.PI * 1.5;
+          const af = (v) => a0 + (v / steps) * (a1 - a0);
+          const els = [];
           for (let i = 0; i <= steps; i++) {
-            const a = angleFor(i);
-            const cos = Math.cos(a), sin = Math.sin(a);
-            const x1 = cx + (r - 3) * cos, y1 = cy - (r - 3) * sin;
-            const x2 = cx + r * cos, y2 = cy - r * sin;
-            const tx = cx + (r + 6) * cos, ty = cy - (r + 6) * sin;
-            ticks.push(
-              <line key={'t' + i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.3)" strokeWidth={0.8} />,
-              <text key={'n' + i} x={tx} y={ty} fill={i <= score ? lightColor : 'rgba(255,255,255,0.4)'} fontSize={6} fontWeight={i <= score ? 800 : 600} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>
-            );
+            const a = af(i), co = Math.cos(a), si = Math.sin(a);
+            els.push(<line key={'t'+i} x1={ox+(R-4)*co} y1={oy+(R-4)*si} x2={ox+R*co} y2={oy+R*si} stroke="rgba(255,255,255,0.4)" strokeWidth={1.2} />);
+            els.push(<text key={'n'+i} x={ox+(R+9)*co} y={oy+(R+9)*si} fill={i<=score?lightColor:'rgba(255,255,255,0.25)'} fontSize={9} fontWeight={700} fontFamily="monospace" textAnchor="middle" dominantBaseline="central">{i}</text>);
           }
-
-          const arcD = (startVal, endVal, radius) => {
-            if (startVal === endVal) return '';
-            const a1 = angleFor(startVal), a2 = angleFor(endVal);
-            const sx = cx + radius * Math.cos(a1), sy = cy - radius * Math.sin(a1);
-            const ex = cx + radius * Math.cos(a2), ey = cy - radius * Math.sin(a2);
-            const large = Math.abs(a1 - a2) > Math.PI ? 1 : 0;
-            return 'M' + sx + ',' + sy + ' A' + radius + ',' + radius + ' 0 ' + large + ' 0 ' + ex + ',' + ey;
-          };
-
-          const dotA = angleFor(score);
-          const dotX = cx + (r - 2) * Math.cos(dotA), dotY = cy - (r - 2) * Math.sin(dotA);
-
+          const bs = {x:ox+R*Math.cos(a0),y:oy+R*Math.sin(a0)}, be = {x:ox+R*Math.cos(a1),y:oy+R*Math.sin(a1)};
+          const bgArc = 'M'+bs.x+' '+bs.y+' A'+R+' '+R+' 0 0 1 '+be.x+' '+be.y;
+          let scArc = '';
+          if (score > 0) { const se = af(score); scArc = 'M'+bs.x+' '+bs.y+' A'+R+' '+R+' 0 0 1 '+(ox+R*Math.cos(se))+' '+(oy+R*Math.sin(se)); }
+          const na = af(score), nx = ox+(R-10)*Math.cos(na), ny = oy+(R-10)*Math.sin(na);
           return (
-            <svg width={W} height={H} viewBox={'0 0 ' + W + ' ' + H}>
-              <path d={arcD(0, steps, r - 2)} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={2.5} />
-              {score > 0 && <path d={arcD(0, score, r - 2)} fill="none" stroke={color} strokeWidth={2.5} opacity={0.8} />}
-              {ticks}
-              <circle cx={dotX} cy={dotY} r={3.5} fill={color} stroke="#fff" strokeWidth={1} />
-              <text x={cx} y={H - 1} fill={lightColor} fontSize={7} fontWeight={800} textAnchor="middle">{label}</text>
+            <svg width={S} height={S} viewBox={'0 0 '+S+' '+S}>
+              <path d={bgArc} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={2.5} />
+              {score>0 && <path d={scArc} fill="none" stroke={color} strokeWidth={2.5} opacity={0.7} />}
+              {els}
+              <line x1={ox} y1={oy} x2={nx} y2={ny} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+              <circle cx={ox} cy={oy} r={3} fill={color} stroke="#fff" strokeWidth={1} />
             </svg>
           );
         };
@@ -3848,6 +3833,12 @@
                       }
                       const totalH = (row + 1) * ROW_H;
 
+                      /* --- Center single-row chains horizontally --- */
+                      if (row === 0 && items.length > 0) {
+                        const shift = (maxTileW - cx) / 2;
+                        if (shift > 0) for (const item of items) item.x += shift;
+                      }
+
                       /* --- Badge positions --- */
                       const first = items[0], last = items[items.length - 1];
                       const firstH = first.orient === 'vertical' ? HW : VW;
@@ -3909,11 +3900,7 @@
                         : flyingTile.fromSlot === topSlot ? 'fly-from-top'
                         : flyingTile.fromSlot === leftSlot ? 'fly-from-left'
                         : 'fly-from-right';
-                      const posStyle = flyingTile.side === 'left'
-                        ? { top: '50%', left: '15%', transform: 'translate(-50%, -50%)' }
-                        : flyingTile.side === 'right'
-                        ? { top: '50%', right: '15%', transform: 'translate(50%, -50%)' }
-                        : { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+                      const posStyle = { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
                       return (
                         <div style={{
                           position: 'absolute',
@@ -3926,6 +3913,13 @@
                         </div>
                       );
                     })()}
+                    {/* Corner score dials — overlaid on board */}
+                    <div style={{ position: 'absolute', top: 0, left: 0, zIndex: 10, pointerEvents: 'none', opacity: 0.85 }}>
+                      <CornerDial score={score0} total={mt} corner="tl" color="#3b82f6" lightColor="#93c5fd" />
+                    </div>
+                    <div style={{ position: 'absolute', bottom: 0, right: 0, zIndex: 10, pointerEvents: 'none', opacity: 0.85 }}>
+                      <CornerDial score={score1} total={mt} corner="br" color="#ef4444" lightColor="#fca5a5" />
+                    </div>
                   </div>
 
                   {/* Right opponent — opposing team = red */}
@@ -3946,11 +3940,7 @@
                   </div>
                 </div>
 
-                {/* Score dials row — T1 left, T2 right */}
-                <div className="flex justify-between px-1" style={{ opacity: 0.8 }}>
-                  <TeamDial score={score0} total={mt} color="#3b82f6" lightColor="#93c5fd" label="T1" />
-                  <TeamDial score={score1} total={mt} color="#ef4444" lightColor="#fca5a5" label="T2" />
-                </div>
+                {/* Score dials removed from here — now overlaid on board corners */}
 
                 {/* My Hand — my team = blue */}
                 <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
