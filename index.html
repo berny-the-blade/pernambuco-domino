@@ -3831,11 +3831,7 @@
 
                   {/* Board */}
                   <div ref={boardRef} className="board-area p-2 flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', height: boardBox.h ? boardBox.h : 'auto' }}>
-                    {(!gameState.board || gameState.board.length === 0) ? (
-                      <div className="flex-1 flex items-center justify-center">
-                        <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
-                      </div>
-                    ) : (() => {
+                    {(!gameState.board || gameState.board.length === 0) ? null : (() => {
                       const board = gameState.board;
                       const HW = bDims.hw, VW = bDims.vw;
 
