@@ -3849,8 +3849,14 @@
                         if (i > 0 && wouldOverflow) {
                           row++;
                           dir *= -1;
-                          /* Start new row directly under the last tile (continuous L) */
-                          cursorX = lastRowEndX;
+
+                          // FIX: use the true chain end, not lastRowEndX blindly
+                          const prev = items[items.length - 1];
+                          const chainEnd = (dir === -1)
+                            ? (prev.x + prev.w)   // we were going right, now turning left
+                            : prev.x;             // we were going left, now turning right
+
+                          cursorX = chainEnd;
                         }
 
                         let px;
