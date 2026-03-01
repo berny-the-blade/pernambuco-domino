@@ -8498,6 +8498,9 @@
       // Hand strength for P0
       const handStrength = evaluateHandStrength(snap.hands[0], snap.leftEnd, snap.rightEnd, snap.board.length, 0, snap.knowledge);
 
+      // Save scroll position before DOM replacement to prevent jump
+      const _savedScrollY = window.scrollY;
+
       app.innerHTML = `
         <div class="max-w-7xl mx-auto p-3">
           <!-- Header -->
@@ -8677,7 +8680,10 @@
         </div>
       `;
 
-      // Auto-scroll log
+      // Restore scroll position after DOM replacement
+      window.scrollTo(0, _savedScrollY);
+
+      // Auto-scroll log (watch/quiz mode — overrides restore when stepping through moves)
       const activeLog = document.getElementById(`log-${currentStep}`);
       if (activeLog) activeLog.scrollIntoView({ block: 'nearest' });
 
