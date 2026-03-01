@@ -3805,7 +3805,7 @@
                       const offX = BADGE + 4;
 
                       /* Cap effective width so PC wraps earlier (compact like mobile) */
-                      const containerH = boardRef.current ? Math.floor(boardRef.current.getBoundingClientRect().height) - 16 : 300;
+                      const containerH = boardRef.current ? Math.floor(boardRef.current.clientHeight) : 300;
                       const aspect = boardSize === 'S' ? 1.10 : boardSize === 'M' ? 1.20 : 1.30;
                       const targetW = Math.floor(containerH * aspect);
                       const effW = Math.max(220, Math.min(maxTileW, targetW));
@@ -3817,11 +3817,13 @@
                       const corners = [];
 
                       const CELL_X = VW;
-                      const CELL_Y = VW + 6;
+                      const CELL_Y = VW;
+                      const DOUBLE_HC = Math.ceil(HW / CELL_Y);
+                      const ROW_STEP = DOUBLE_HC + 1;
 
                       function footprint(tile) {
                         const isD = tile.left === tile.right;
-                        if (isD) return { orient: 'vertical', wC: 1, hC: 2, pxW: VW, pxH: HW };
+                        if (isD) return { orient: 'vertical', wC: 1, hC: DOUBLE_HC, pxW: VW, pxH: HW };
                         return { orient: 'horizontal', wC: Math.ceil(HW / CELL_X), hC: 1, pxW: HW, pxH: VW };
                       }
 
@@ -3856,7 +3858,7 @@
                         if ((overflow || collide) && i > 0) {
                           const cornerGX = dir === +1 ? (GRID_W - 1) : 0;
                           corners.push({ gx: cornerGX, gy: rowG });
-                          rowG += 2;
+                          rowG += ROW_STEP;
                           dir *= -1;
                           gx = dir === +1 ? 0 : GRID_W;
                           i--;
