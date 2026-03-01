@@ -9134,8 +9134,8 @@
     // Blue (T1) = top-left corner, Red (T2) = bottom-right corner
     function renderScoringDial(teamScore, teamIdx) {
       const score = Math.min(teamScore, 6);
-      const r = 36; // radius
-      const W = 88, H = 56;
+      const r = 38; // radius
+      const W = 96, H = 62;
       const color = teamIdx === 0 ? '#3b82f6' : '#ef4444';
       const label = teamIdx === 0 ? 'T1' : 'T2';
       // T1 (blue) top-left: fan opens downward-right; T2 (red) bottom-right: fan opens upward-left
@@ -9154,12 +9154,12 @@
         const y1 = cy + (r - 7) * Math.sin(angle);
         const x2 = cx + r * Math.cos(angle);
         const y2 = cy + r * Math.sin(angle);
-        const tx = cx + (r + 10) * Math.cos(angle);
-        const ty = cy + (r + 10) * Math.sin(angle);
+        const tx = cx + (r + 12) * Math.cos(angle);
+        const ty = cy + (r + 12) * Math.sin(angle);
         const isActive = i <= score;
         const isCurrent = i === score;
         ticks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${isActive ? color : '#475569'}" stroke-width="${isCurrent ? 3 : 1.5}" />`;
-        ticks += `<text x="${tx}" y="${ty}" fill="${isCurrent ? '#fff' : isActive ? color : '#94a3b8'}" font-size="${isCurrent ? 13 : 11}" font-weight="${isCurrent ? 800 : 600}" font-family="monospace" text-anchor="middle" dominant-baseline="central" stroke="${isCurrent ? 'none' : 'none'}">${i}</text>`;
+        ticks += `<text x="${tx}" y="${ty}" fill="${isCurrent ? '#ffffff' : isActive ? color : '#cbd5e1'}" font-size="${isCurrent ? 16 : 13}" font-weight="${isCurrent ? 900 : 700}" font-family="monospace" text-anchor="middle" dominant-baseline="central" stroke="${isCurrent ? '#000' : 'none'}" stroke-width="${isCurrent ? 0.5 : 0}" paint-order="stroke">${i}</text>`;
       }
       // Pointer dot on current score
       const pointerAngle = startAngle + (score / 6) * (endAngle - startAngle);
@@ -9178,10 +9178,10 @@
       // Position: T1 top-left, T2 bottom-right
       const posStyle = isTopLeft ? 'top:2px;left:2px' : 'bottom:2px;right:2px';
 
-      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;${posStyle};opacity:0.9;pointer-events:none">
+      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="position:absolute;${posStyle};pointer-events:none">
         ${arcPath}${ticks}
-        <circle cx="${px}" cy="${py}" r="4" fill="${color}" stroke="#fff" stroke-width="1.5" />
-        <text x="${isTopLeft ? 12 : W - 12}" y="${isTopLeft ? 18 : H - 18}" fill="${color}" font-size="9" font-weight="700" text-anchor="middle" opacity="0.8">${label}</text>
+        <circle cx="${px}" cy="${py}" r="5" fill="${color}" stroke="#fff" stroke-width="2" />
+        <text x="${isTopLeft ? 14 : W - 14}" y="${isTopLeft ? 20 : H - 20}" fill="${color}" font-size="11" font-weight="800" text-anchor="middle" opacity="1.0">${label}</text>
       </svg>`;
     }
 

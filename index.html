@@ -413,6 +413,8 @@
       const [humanCount, setHumanCount] = useState(2);
       const [aiDifficulty, setAiDifficulty] = useState(localStorage.getItem('domino_ai_difficulty') || 'hard');
       const setAiDiff = (v) => { setAiDifficulty(v); localStorage.setItem('domino_ai_difficulty', v); };
+      const [botSpeed, setBotSpeed] = useState(localStorage.getItem('domino_bot_speed') || 'medium');
+      const setBotSpd = (v) => { setBotSpeed(v); localStorage.setItem('domino_bot_speed', v); };
       const [starterCountdown, setStarterCountdown] = useState(null);
       const [roundCountdown, setRoundCountdown] = useState(null);
       // === Player Profile System ===
@@ -531,7 +533,7 @@
 
         const initialState = {
           roomCode: code,
-          config: { humanCount: humanCount, humanSlots: humanSlots, aiDifficulty: aiDifficulty },
+          config: { humanCount: humanCount, humanSlots: humanSlots, aiDifficulty: aiDifficulty, botSpeed: botSpeed },
           players: players,
           gameStarted: false,
           gameEnded: false,
@@ -3033,7 +3035,7 @@
           } else {
             await botPass(currentSlot);
           }
-        }, 1800 + Math.random() * 700);
+        }, (() => { const spd = gameState?.config?.botSpeed || botSpeed; return spd === 'slow' ? 9000 + Math.random() * 2000 : spd === 'fast' ? 2000 + Math.random() * 2000 : 4000 + Math.random() * 2000; })());
 
         return () => clearTimeout(timeout);
       }, [gameState?.currentPlayer, gameState?.gameStarted]);
@@ -3291,6 +3293,31 @@
                   {aiDifficulty === 'easy' && 'Bots jogam pecas aleatorias'}
                   {aiDifficulty === 'medium' && 'Bots usam estrategia basica'}
                   {aiDifficulty === 'hard' && 'Bots usam IA completa com busca'}
+                </p>
+              </div>
+              )}
+
+              {humanCount < 4 && (
+              <div className="mb-5">
+                <label className="block text-sm font-semibold text-gray-600 mb-2">Velocidade dos Bots</label>
+                <div className="flex gap-2">
+                  {[{k:'slow',label:'Lento',emoji:'🐢'},{k:'medium',label:'Medio',emoji:'⚡'},{k:'fast',label:'Rapido',emoji:'🚀'}].map(d => (
+                    <button
+                      key={d.k}
+                      onClick={() => setBotSpd(d.k)}
+                      className="flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-200"
+                      style={botSpeed === d.k
+                        ? { background: d.k === 'slow' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : d.k === 'medium' ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'linear-gradient(135deg, #ef4444, #b91c1c)', color: 'white', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }
+                        : { background: '#f3f4f6', color: '#4b5563' }}
+                    >
+                      {d.emoji} {d.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-2 text-center">
+                  {botSpeed === 'slow' && 'Bots pensam ~10 segundos'}
+                  {botSpeed === 'medium' && 'Bots pensam ~5 segundos'}
+                  {botSpeed === 'fast' && 'Bots pensam ~3 segundos'}
                 </p>
               </div>
               )}
