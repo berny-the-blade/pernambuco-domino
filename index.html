@@ -3928,9 +3928,21 @@
                           <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
                           {turns.map((tr, idx) => (
-                            <div key={'turn-'+idx} style={{ position: 'absolute', left: offX + tr.x, top: tr.y, zIndex: 1 }}>
-                              <div className="board-tile" style={{ width: tr.w, height: tr.h, opacity: 0.22 }} />
-                            </div>
+                            <div
+                              key={'turn-'+idx}
+                              style={{
+                                position: 'absolute',
+                                left: offX + tr.x + Math.floor(tr.w / 2) - 2,
+                                top: tr.y,
+                                width: 4,
+                                height: tr.h,
+                                borderRadius: 3,
+                                background: 'rgba(245,240,225,0.20)',
+                                border: '1px solid rgba(168,152,120,0.25)',
+                                zIndex: 1,
+                                pointerEvents: 'none'
+                              }}
+                            />
                           ))}
                           {items.map(item => {
                             const t = board[item.i];
