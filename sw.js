@@ -1,4 +1,4 @@
-const CACHE_NAME = 'domino-pernambuco-v3';
+const CACHE_NAME = 'domino-pernambuco-v4';
 const ASSETS_TO_CACHE = [
   '/index.html',
   '/manifest.json',
