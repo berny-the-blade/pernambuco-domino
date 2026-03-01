@@ -74,11 +74,9 @@
     /* === Board tile === */
     .board-tile {
       background: linear-gradient(145deg, #f5f0e1, #e8e0cc);
-      border: 1.5px solid #a89878;
-      border-radius: 3px;
+      border: 1px solid #a89878;
+      border-radius: 2px;
       box-shadow: inset 0 0.5px 1px rgba(255,255,255,0.5);
-      margin-right: -1.5px;
-      position: relative;
     }
 
     /* === Face-down tiles (opponents) === */
@@ -3766,31 +3764,51 @@
                         );
                       }
 
-                      // Multi-row snake layout
-                      // Row 0: left-to-right, right-aligned
-                      // Odd rows: row-reverse (chain turns back, connects at right edge)
-                      // Even rows >0: left-to-right, left-aligned (connects at left edge)
-                      // First tile of each row after row 0 rendered VERTICAL (turn connector)
+                      // Multi-row snake layout with proper turn connectors
+                      // Row 0: right-aligned (chain grows left to right, overflows right)
+                      // Row 0→1 turn: vertical connector at RIGHT edge
+                      // Row 1: right-to-left (reversed), right-aligned
+                      // Row 1→2 turn: vertical connector at LEFT edge
+                      // etc.
                       return (
-                        <div>
+                        <div style={{ width: '100%' }}>
                           {rows.map((row, rIdx) => {
                             const isOdd = rIdx % 2 === 1;
-                            let flexDir = 'row';
-                            let justify = 'center';
-                            if (rIdx === 0) { justify = 'flex-end'; }
-                            else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
-                            else { justify = 'flex-start'; }
+                            // Turn connector is first tile of rows > 0
+                            const hasTurn = rIdx > 0;
+                            const turnIdx = hasTurn ? row[0] : null;
+                            const bodyTiles = hasTurn ? row.slice(1) : row;
+
+                            // Row direction and alignment
+                            const goesRight = !isOdd; // even rows go L→R, odd rows go R→L
+                            // Even rows align right (chain enters from left or turn is at left)
+                            // Odd rows: chain enters from right turn, flows left
+                            const rowStyle = {
+                              display: 'flex',
+                              flexDirection: goesRight ? 'row' : 'row-reverse',
+                              justifyContent: rIdx === 0 ? 'flex-end' : 'flex-start',
+                              alignItems: 'center',
+                            };
+
+                            // Turn connector: sits at the edge connecting to row above
+                            // For odd rows: turn is at RIGHT edge (chain came from right end of row above)
+                            // For even rows > 0: turn is at LEFT edge
+                            const turnAlign = isOdd ? 'flex-end' : 'flex-start';
 
                             return (
-                              <div key={rIdx} style={{ display: 'flex', flexDirection: flexDir, justifyContent: justify,
-                                alignItems: 'center', gap: GAP, marginBottom: 0 }}>
-                                {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
-                                {row.map((idx, posInRow) => {
-                                  const isTurn = posInRow === 0 && rIdx > 0;
-                                  const turnStyle = isTurn ? { marginTop: -1.5, zIndex: 1 } : undefined;
-                                  return makeTile(idx, isTurn, isOdd, turnStyle);
-                                })}
-                                {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
+                              <div key={rIdx}>
+                                {/* Turn connector row — sits between rows, aligned to correct edge */}
+                                {hasTurn && (
+                                  <div style={{ display: 'flex', justifyContent: turnAlign }}>
+                                    {makeTile(turnIdx, true, isOdd, { marginTop: -1.5, marginBottom: -1.5, zIndex: 1 })}
+                                  </div>
+                                )}
+                                {/* Main tile row */}
+                                <div style={rowStyle}>
+                                  {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
+                                  {bodyTiles.map(idx => makeTile(idx, false, isOdd))}
+                                  {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
+                                </div>
                               </div>
                             );
                           })}
