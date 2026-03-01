@@ -3622,13 +3622,28 @@
                       background: 'rgba(30,40,60,0.95)', border: '2px solid ' + (won ? 'rgba(250,204,21,0.5)' : 'rgba(239,68,68,0.5)'),
                       boxShadow: '0 8px 32px rgba(0,0,0,0.5)', maxWidth: 300, width: '85%'
                     }}>
-                      <div className="text-4xl mb-1">{won ? '\uD83C\uDFC6' : '\uD83D\uDC80'}</div>
-                      <div className={'text-xl font-extrabold mb-1 ' + (won ? 'text-yellow-400' : 'text-red-400')}>
-                        {won ? 'PARTIDA GANHA!' : 'PARTIDA PERDIDA!'}
-                      </div>
-                      <div className="text-white/70 text-sm mb-1">
-                        {won ? 'Seu time venceu a partida!' : 'Adversarios venceram a partida!'}
-                      </div>
+                      {(() => {
+                        const isBuchuda = (s0 === 0 || s1 === 0) && (s0 >= (gameState.matchTarget || 6) || s1 >= (gameState.matchTarget || 6));
+                        const buchuWord = Math.random() < 0.5 ? 'BUCHUDA' : 'DEDADA';
+                        return (
+                          <React.Fragment>
+                            <div className="text-4xl mb-1">{won ? (isBuchuda ? '\uD83D\uDCA5' : '\uD83C\uDFC6') : (isBuchuda ? '\uD83D\uDCA9' : '\uD83D\uDC80')}</div>
+                            {isBuchuda && (
+                              <div className="text-2xl font-black mb-1" style={{ color: '#f59e0b', textShadow: '0 0 20px rgba(245,158,11,0.6)', letterSpacing: 2, animation: 'pulse-glow 1.5s infinite' }}>
+                                {buchuWord}!
+                              </div>
+                            )}
+                            <div className={'text-xl font-extrabold mb-1 ' + (won ? 'text-yellow-400' : 'text-red-400')}>
+                              {won ? 'PARTIDA GANHA!' : 'PARTIDA PERDIDA!'}
+                            </div>
+                            <div className="text-white/70 text-sm mb-1">
+                              {isBuchuda
+                                ? (won ? buchuWord + '! Venceu sem deixar ponto!' : buchuWord + '! Perdeu sem marcar!')
+                                : (won ? 'Seu time venceu a partida!' : 'Adversarios venceram a partida!')}
+                            </div>
+                          </React.Fragment>
+                        );
+                      })()}
                       <div className="text-3xl font-extrabold text-white mb-1">{s0} - {s1}</div>
                       <div className="text-xs text-white/40 mb-3">Primeiro a {gameState.matchTarget || 6} pontos</div>
                       <div className="flex flex-col gap-2">
