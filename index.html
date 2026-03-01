@@ -3874,9 +3874,17 @@
 
                             let flexDir = 'row';
                             let justify = 'flex-start';
-                            if (rIdx === 0) justify = 'flex-end';
-                            else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
-                            else { flexDir = 'row'; justify = 'flex-start'; }
+
+                            // Center row 0 when short (early game), right-align when wrapping starts
+                            if (rIdx === 0) {
+                              justify = (board.length < 8) ? 'center' : 'flex-end';
+                            } else if (isOdd) {
+                              flexDir = 'row-reverse';
+                              justify = 'flex-start';
+                            } else {
+                              flexDir = 'row';
+                              justify = 'flex-start';
+                            }
 
                             return (
                               <div
