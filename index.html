@@ -490,6 +490,7 @@
 
       const roomRef = useRef(null);
       const boardRef = useRef(null);
+      const [boardBox, setBoardBox] = useState({ w: 0, h: 0 });
 
       const HUMAN_FILL_ORDER = [0, 2, 1, 3];
       const getHumanSlots = (count) => HUMAN_FILL_ORDER.slice(0, count);
@@ -3211,6 +3212,28 @@
         return () => clearTimeout(timeout);
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
+      /* Freeze board dimensions — only update on actual resize, not every render */
+      useEffect(() => {
+        if (screen !== 'game') return;
+        if (!boardRef.current) return;
+        let raf = 0;
+        const el = boardRef.current;
+        const update = () => {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(() => {
+            if (!el) return;
+            const w = Math.floor(el.clientWidth);
+            const h = Math.floor(el.clientHeight);
+            setBoardBox(prev => (prev.w === w && prev.h === h) ? prev : { w, h });
+          });
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        window.addEventListener('resize', update);
+        return () => { ro.disconnect(); window.removeEventListener('resize', update); cancelAnimationFrame(raf); };
+      }, [screen, boardSize, gameState?.board?.length]);
+
       // Domino dots pattern
       const DominoDots = ({ value, size = 'normal', dotPxProp, containerPxProp }) => {
         const dotPx = dotPxProp || (size === 'small' ? 4 : size === 'board' ? 5 : 7);
@@ -3802,12 +3825,13 @@
                       const board = gameState.board;
                       const HW = bDims.hw, VW = bDims.vw;
                       const BADGE = 24;
-                      const containerW = boardRef.current ? Math.floor(boardRef.current.clientWidth) - 16 : 300;
+                      /* Use frozen boardBox dimensions (stable across renders) */
+                      const containerW = boardBox.w ? (boardBox.w - 16) : 300;
+                      const containerH = boardBox.h || 300;
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
                       /* --- Connected snake layout: doubles vertical, everything else horizontal --- */
-                      const containerH = boardRef.current ? Math.floor(boardRef.current.clientHeight) : 300;
                       const WIDTH_PCT = boardSize === 'S' ? 0.78 : boardSize === 'M' ? 0.86 : 0.94;
                       const effW = Math.max(220, Math.floor(maxTileW * WIDTH_PCT));
 
@@ -3815,9 +3839,9 @@
                       const GAP_Y = Math.max(6, Math.floor(VW * 0.3));
                       const rowPitch = HW + GAP_Y;
 
-                      /* Walk board[] sequentially — it's already ordered left-end to right-end
-                         (unshift for left plays, push for right plays) */
-                      let cursorX = 0, row = 0, dir = +1;
+                      /* Deterministic row indexing — predictable tile count per row */
+                      const tilesPerRow = Math.max(4, Math.floor(effW / HW));
+                      let row = 0, dir = +1;
 
                       for (let i = 0; i < board.length; i++) {
                         const t = board[i];
@@ -3825,22 +3849,14 @@
                         const tw = isD ? VW : HW;
                         const th = isD ? HW : VW;
 
-                        /* Check if tile overflows current row */
-                        const wouldOverflow = dir === +1
-                          ? (cursorX + tw > effW)
-                          : (cursorX - tw < 0);
+                        const idxInRow = i % tilesPerRow;
+                        if (i > 0 && idxInRow === 0) { row++; dir *= -1; }
 
-                        if (wouldOverflow && i > 0) {
-                          /* Wrap: move to next row, reverse direction */
-                          row++;
-                          dir *= -1;
-                          cursorX = dir === +1 ? 0 : effW;
-                        }
-
-                        /* Place tile */
-                        let px;
-                        if (dir === +1) { px = cursorX; cursorX += tw; }
-                        else { cursorX -= tw; px = cursorX; }
+                        /* Compute px by slot; in reverse rows, mirror within effW */
+                        const slotX = idxInRow * HW;
+                        let px = (dir === +1) ? slotX : (effW - HW - slotX);
+                        /* Center doubles inside the HW-wide slot */
+                        if (isD) px += Math.floor((HW - VW) / 2);
 
                         const py = row * rowPitch;
                         items.push({
