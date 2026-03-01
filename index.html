@@ -643,6 +643,7 @@
         const game = {
           ...gameState,
           gameStarted: true,
+          gameEnded: false,
           hands: hands,
           dormidas: dormidas,
           board: [highestDoubleTile],
@@ -652,6 +653,9 @@
           passCount: 0,
           teamScores: [0, 0],
           scoreMultiplier: 1,
+          isDobrada: false,
+          lastWinningTeam: null,
+          waitingForStarterChoice: false,
           moveHistory: [{p: startPlayer, t: 'play', tile: highestDoubleTile}],
           message: gameState.players[startPlayer].name + ' jogou a carroca ' + highestDouble + '-' + highestDouble + '! Vez de ' + gameState.players[nextPlayer].name + '!',
           matchTarget: 6
