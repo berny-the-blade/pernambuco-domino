@@ -81,12 +81,51 @@
   <div id="app"></div>
 
   <script>
-    // ========== ACCESS GATE ==========
-    const _ACCESS_HASH = 'fe276eb219b8545a04656206ca44e101'; // MD5 of access code
-    function _md5(s){/* Minimal MD5 for password check */let h=0x67452301,g=0xefcdab89,f=0x98badcfe,e=0x10325476;const b=s+'\x80';const l=b.length;const w=[];for(let i=0;i<l;i++){if(i%4===0)w.push(0);w[w.length-1]|=b.charCodeAt(i)<<(i%4*8)}const pad=((l+8)>>>6)+1;while(w.length<pad*16)w.push(0);w[pad*16-2]=(s.length*8)&0xffffffff;function r(a,b){return(a<<b)|(a>>>(32-b))}function a(q,a2,b2,x,s2,t){return((r((a2+q+(x>>>0)+t)|0,s2)+b2)|0)>>>0}function ff(a2,b2,c,d,x,s2,t){return a(b2&c|~b2&d,a2,b2,x,s2,t)}function gg(a2,b2,c,d,x,s2,t){return a(b2&d|c&~d,a2,b2,x,s2,t)}function hh(a2,b2,c,d,x,s2,t){return a(b2^c^d,a2,b2,x,s2,t)}function ii(a2,b2,c,d,x,s2,t){return a(c^(b2|~d),a2,b2,x,s2,t)}for(let i=0;i<w.length;i+=16){let[A,B,C,D]=[h,g,f,e];const m=w.slice(i,i+16);A=ff(A,B,C,D,m[0],7,0xd76aa478);D=ff(D,A,B,C,m[1],12,0xe8c7b756);C=ff(C,D,A,B,m[2],17,0x242070db);B=ff(B,C,D,A,m[3],22,0xc1bdceee);A=ff(A,B,C,D,m[4],7,0xf57c0faf);D=ff(D,A,B,C,m[5],12,0x4787c62a);C=ff(C,D,A,B,m[6],17,0xa8304613);B=ff(B,C,D,A,m[7],22,0xfd469501);A=ff(A,B,C,D,m[8],7,0x698098d8);D=ff(D,A,B,C,m[9],12,0x8b44f7af);C=ff(C,D,A,B,m[10],17,0xffff5bb1);B=ff(B,C,D,A,m[11],22,0x895cd7be);A=ff(A,B,C,D,m[12],7,0x6b901122);D=ff(D,A,B,C,m[13],12,0xfd987193);C=ff(C,D,A,B,m[14],17,0xa679438e);B=ff(B,C,D,A,m[15],22,0x49b40821);A=gg(A,B,C,D,m[1],5,0xf61e2562);D=gg(D,A,B,C,m[6],9,0xc040b340);C=gg(C,D,A,B,m[11],14,0x265e5a51);B=gg(B,C,D,A,m[0],20,0xe9b6c7aa);A=gg(A,B,C,D,m[5],5,0xd62f105d);D=gg(D,A,B,C,m[10],9,0x02441453);C=gg(C,D,A,B,m[15],14,0xd8a1e681);B=gg(B,C,D,A,m[4],20,0xe7d3fbc8);A=gg(A,B,C,D,m[9],5,0x21e1cde6);D=gg(D,A,B,C,m[14],9,0xc33707d6);C=gg(C,D,A,B,m[3],14,0xf4d50d87);B=gg(B,C,D,A,m[8],20,0x455a14ed);A=gg(A,B,C,D,m[13],5,0xa9e3e905);D=gg(D,A,B,C,m[2],9,0xfcefa3f8);C=gg(C,D,A,B,m[7],14,0x676f02d9);B=gg(B,C,D,A,m[12],20,0x8d2a4c8a);A=hh(A,B,C,D,m[5],4,0xfffa3942);D=hh(D,A,B,C,m[8],11,0x8771f681);C=hh(C,D,A,B,m[11],16,0x6d9d6122);B=hh(B,C,D,A,m[14],23,0xfde5380c);A=hh(A,B,C,D,m[1],4,0xa4beea44);D=hh(D,A,B,C,m[4],11,0x4bdecfa9);C=hh(C,D,A,B,m[7],16,0xf6bb4b60);B=hh(B,C,D,A,m[10],23,0xbebfbc70);A=hh(A,B,C,D,m[13],4,0x289b7ec6);D=hh(D,A,B,C,m[0],11,0xeaa127fa);C=hh(C,D,A,B,m[3],16,0xd4ef3085);B=hh(B,C,D,A,m[6],23,0x04881d05);A=hh(A,B,C,D,m[9],4,0xd9d4d039);D=hh(D,A,B,C,m[12],11,0xe6db99e5);C=hh(C,D,A,B,m[15],16,0x1fa27cf8);B=hh(B,C,D,A,m[2],23,0xc4ac5665);A=ii(A,B,C,D,m[0],6,0xf4292244);D=ii(D,A,B,C,m[7],10,0x432aff97);C=ii(C,D,A,B,m[14],15,0xab9423a7);B=ii(B,C,D,A,m[5],21,0xfc93a039);A=ii(A,B,C,D,m[12],6,0x655b59c3);D=ii(D,A,B,C,m[3],10,0x8f0ccc92);C=ii(C,D,A,B,m[10],15,0xffeff47d);B=ii(B,C,D,A,m[1],21,0x85845dd1);A=ii(A,B,C,D,m[8],6,0x6fa87e4f);D=ii(D,A,B,C,m[15],10,0xfe2ce6e0);C=ii(C,D,A,B,m[6],15,0xa3014314);B=ii(B,C,D,A,m[13],21,0x4e0811a1);A=ii(A,B,C,D,m[4],6,0xf7537e82);D=ii(D,A,B,C,m[11],10,0xbd3af235);C=ii(C,D,A,B,m[2],15,0x2ad7d2bb);B=ii(B,C,D,A,m[9],21,0xeb86d391);h=(h+A)>>>0;g=(g+B)>>>0;f=(f+C)>>>0;e=(e+D)>>>0}return[h,g,f,e].map(v=>{let s='';for(let i=0;i<4;i++)s+=('0'+((v>>>(i*8))&0xff).toString(16)).slice(-2);return s}).join('')}
+    // ========== ACCESS GATE (WebCrypto SHA-256 + rate limiting) ==========
+    const _GATE_SALT = 'domino-trainer-2026';
+    const _GATE_HASH = '2b1128542cbcec0deaba1a5a6bcaeee5a5868ac086747c71d53e5e88939908d7';
+    async function _sha256(s) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    let _gateAttempts = 0;
+    let _gateLocked = false;
+    async function _gateCheck() {
+      if (_gateLocked) return;
+      const inp = document.getElementById('_gate_input');
+      const btn = document.getElementById('_gate_btn');
+      const err = document.getElementById('_gate_err');
+      const v = inp.value;
+      if (!v) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      const hash = await _sha256(v + ':' + _GATE_SALT);
+      if (hash === _GATE_HASH) {
+        sessionStorage.setItem('domino_access', hash);
+        location.reload();
+      } else {
+        _gateAttempts++;
+        inp.value = '';
+        const delay = Math.min(Math.pow(2, _gateAttempts) * 500, 30000);
+        err.textContent = _gateAttempts >= 5
+          ? 'Too many attempts. Wait ' + Math.round(delay/1000) + 's.'
+          : 'Invalid code. Contact the host for access.';
+        err.style.display = 'block';
+        if (_gateAttempts >= 3) {
+          _gateLocked = true;
+          inp.disabled = true;
+          btn.disabled = true;
+          btn.textContent = 'Wait ' + Math.round(delay/1000) + 's';
+          setTimeout(() => { _gateLocked = false; inp.disabled = false; btn.disabled = false; btn.textContent = 'Enter'; }, delay);
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Enter';
+        }
+      }
+    }
     (function(){
       const stored = sessionStorage.getItem('domino_access');
-      if (stored === _ACCESS_HASH) return;
+      if (stored === _GATE_HASH) return;
       document.getElementById('app').innerHTML = `
         <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f172a">
           <div style="background:#1e293b;padding:2rem;border-radius:12px;border:2px solid #334155;text-align:center;max-width:360px;width:90%">
@@ -94,17 +133,16 @@
             <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:1rem">This site is invite-only. Enter your access code:</p>
             <input id="_gate_input" type="password" placeholder="Access code"
               style="width:100%;padding:0.6rem;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:1rem;margin-bottom:0.75rem;text-align:center"
-              onkeydown="if(event.key==='Enter')document.getElementById('_gate_btn').click()">
+              onkeydown="if(event.key==='Enter')_gateCheck()">
             <br>
-            <button id="_gate_btn" onclick="
-              const v=document.getElementById('_gate_input').value;
-              if(_md5(v)===_ACCESS_HASH){sessionStorage.setItem('domino_access',_ACCESS_HASH);location.reload()}
-              else{document.getElementById('_gate_err').style.display='block';document.getElementById('_gate_input').value=''}
-            " style="background:#059669;color:white;padding:0.5rem 2rem;border:none;border-radius:6px;cursor:pointer;font-size:1rem">Enter</button>
+            <button id="_gate_btn" onclick="_gateCheck()"
+              style="background:#059669;color:white;padding:0.5rem 2rem;border:none;border-radius:6px;cursor:pointer;font-size:1rem">Enter</button>
             <div id="_gate_err" style="display:none;color:#f87171;font-size:0.8rem;margin-top:0.5rem">Invalid code. Contact the host for access.</div>
           </div>
         </div>`;
       throw new Error('ACCESS_GATE');
+    })();
+
     })();
 
     // ========== LANGUAGE / TRANSLATION ==========
@@ -1597,7 +1635,7 @@
         voids: { 1: [4, 2] },
         passHistory: [{ player: 1, leftEnd: 4, rightEnd: 2 }],
         correctTile: '2-4', correctSide: 'left',
-        explanation: '<b>[2|4] LEFT makes ends 2/1.</b> Wait — actually placing [2|4] on LEFT puts 2 on the left end. But we need to also block the right. The key is [2|4] LEFT → ends become 2/1. P1 is void in both 4 and 2, so end-2 blocks them on the left. However [1-5] RIGHT → ends 4/5 doesn\'t help. Actually re-checking: [2|4] LEFT → new leftEnd=2 (since 4 matches leftEnd 4, other side 2 exposed). Ends 2/1. P1 void in 2, so left side blocked for P1. <em>Rule: exploit confirmed voids — even partial blocks constrain opponent options.</em>'
+        explanation: '<b>[2|4] LEFT → ends 2/1.</b> The 4 matches leftEnd 4, exposing 2. P1 is void in both 4 and 2 (confirmed by their pass on 4/2), so end-2 keeps P1 blocked on the left side. Other options: [1|5] RIGHT → ends 4/5 opens end-5 which P1 can play on. <em>Rule: exploit confirmed voids — even partial blocks constrain opponent options.</em>'
       },
       {
         id: 'audit-block-02', title: 'Cross Void', difficulty: 4, category: 'blocking',
@@ -1703,7 +1741,7 @@
         voids: {},
         passHistory: [],
         correctTile: '0-6', correctSide: 'right',
-        explanation: '<b>[0|6] RIGHT → ends 5/0.</b> Partner (P2) has 2 tiles with [0|3],[2|4]. Hmm, this doesn\'t feed partner directly. Re-examining: actually [1|5] LEFT creates 1/6 removing partner\'s 5-access. The key is keeping end-5 alive. [0|6] RIGHT keeps end-5. Partner can\'t play on 5 with [0|3],[2|4] though. Actually the best play is [3|4] — can\'t match either end. [0|6] RIGHT → ends 5/0, partner has [0|3] to play. <em>Rule: open an end that matches partner\'s remaining tiles, even if it means sacrificing your own suit.</em>'
+        explanation: '<b>[0|6] RIGHT → ends 5/0.</b> Partner (P2) has [2|2] — needs a 2-end eventually. This play blocks P1 ([1|3] can\'t match 5 or 0) and keeps end-5 for your [1|5]. After P1 and P2 both pass, you play again to build toward end-2 for partner. Alternative: [1|5] LEFT → ends 1/6 lets P1 play [1|3] immediately, losing tempo. <em>Rule: block opponents first, then build toward partner\'s number over multiple turns.</em>'
       },
       {
         id: 'audit-partner-02', title: 'Sacrifice for Partner', difficulty: 4, category: 'feeding',
@@ -1715,8 +1753,8 @@
         otherHands: { 1: ['1-2', '2-2'], 2: ['1-1'], 3: ['2-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '1-3', correctSide: 'right',
-        explanation: '<b>[1|3] RIGHT → ends 2/3.</b> Partner (P2) has [1|1] — they need a 1-end. But [1|3] RIGHT removes end-1! Wait — actually this is wrong. [0|2] LEFT → ends 0/1, partner plays [1|1]. That\'s the feed! <em>Rule: when partner has 1 tile, trace which end number matches their last tile and create that end.</em>'
+        correctTile: '0-2', correctSide: 'left',
+        explanation: '<b>[0|2] LEFT → ends 0/1.</b> Partner (P2) has [1|1] — they need a 1-end. This play keeps end-1 alive so partner can finish. The alternative [1|3] RIGHT → ends 2/3 removes end-1 entirely, stranding partner. <em>Rule: when partner has 1 tile, trace which end number matches their last tile and preserve or create that end.</em>'
       },
       {
         id: 'audit-partner-03', title: 'Partner\'s Strong Suit', difficulty: 3, category: 'feeding',
@@ -1728,8 +1766,8 @@
         otherHands: { 1: ['3-6', '2-5', '0-4', '5-5'], 2: ['1-5', '5-6', '0-1', '6-6'], 3: ['2-2', '3-4', '0-2', '1-1'] },
         voids: {},
         passHistory: [],
-        correctTile: '2-4', correctSide: 'left',
-        explanation: '<b>[2|4] LEFT → ends 2/6.</b> Actually this removes end-4, hurting partner. Re-examining: [2|4] LEFT means 4 matches leftEnd 4, exposing 2. Ends become 2/6. But partner (P2) has [0|4],[4|4],[1|4],[3|6] — they have many 4-tiles. Removing end-4 is bad! Better: [1|6] RIGHT → ends 4/1. Keeps end-4 for partner. <em>Rule: when partner dominates a suit (3+ plays), keep that number as a board end.</em>'
+        correctTile: '1-6', correctSide: 'right',
+        explanation: '<b>[1|6] RIGHT → ends 4/1.</b> Partner (P2) has many 4-tiles — keeping end-4 alive lets them play. The alternative [2|4] LEFT → ends 2/6 removes end-4, stranding partner\'s strong suit. <em>Rule: when partner dominates a suit (3+ plays), keep that number as a board end.</em>'
       },
       {
         id: 'audit-partner-04', title: 'Team Close-Out', difficulty: 4, category: 'feeding',
@@ -1931,8 +1969,8 @@
         otherHands: { 1: ['2-5', '0-4', '0-2', '2-3', '0-3', '1-5'], 2: ['1-2', '2-2', '4-5', '2-4', '1-6'], 3: ['1-3', '1-1', '4-4', '0-6', '5-5'] },
         voids: {},
         passHistory: [],
-        correctTile: '0-1', correctSide: 'right',
-        explanation: '<b>[0|1] can\'t play (0≠6, 0≠3, 1≠6, 1≠3).</b> Re-examining playable tiles: [2|6] LEFT, [3|6] LEFT, [5|6] LEFT, [6|6] LEFT all match end-6. [3|6] also matches RIGHT (3=3). Best: [3|6] RIGHT → ends 6/6. Wait, that narrows the board. [5|6] LEFT → ends 5/3. This hides your 6-dominance by removing end-6. Opponents see a 5-end, not knowing you have three more 6-tiles. <em>Rule: in opening, avoid playing from your strongest suit if possible — disguise your hand composition.</em>'
+        correctTile: '5-6', correctSide: 'left',
+        explanation: '<b>[5|6] LEFT → ends 5/3.</b> You hold four 6-tiles — playing [5|6] on end-6 removes the 6-end from the board, hiding your dominance. Opponents see ends 5/3 and can\'t tell you still hold [2|6], [3|6], [6|6]. Alternatives: [3|6] RIGHT → ends 6/6 screams "I want 6s." [6|6] LEFT keeps end-6 and burns your double. <em>Rule: in opening, disguise your strongest suit — don\'t let opponents see what you\'re collecting.</em>'
       },
       {
         id: 'audit-tempo-03', title: 'Double Timing', difficulty: 3, category: 'tempo',
@@ -2051,6 +2089,139 @@
       return true;
     }
 
+    // Validate all curated puzzles at startup — log and hide broken ones
+    const _brokenPuzzleIds = new Set();
+    function validateAllPuzzles() {
+      const contradictionMarkers = [
+        /Wait\s*—\s*actually/i, /this is wrong/i, /Re-examining/i,
+        /Hmm,/i, /actually this removes/i, /can't play \(/i
+      ];
+      let errors = 0;
+      for (const p of PUZZLES) {
+        const issues = [];
+        // 1. correctTile must be parseable
+        const ct = parseTileId(p.correctTile);
+        if (!ct) {
+          issues.push(`correctTile '${p.correctTile}' not found in tile set`);
+        } else {
+          // 2. correctTile must be in myHand
+          if (!p.myHand.includes(p.correctTile) && !p.myHand.includes(p.correctTile.split('-').reverse().join('-'))) {
+            issues.push(`correctTile '${p.correctTile}' not in myHand [${p.myHand}]`);
+          }
+          // 3. correctTile must be playable on the given board ends
+          if (p.board.length > 0 && !canPlay(ct, p.leftEnd, p.rightEnd, p.board.length)) {
+            issues.push(`correctTile '${p.correctTile}' unplayable (ends ${p.leftEnd}/${p.rightEnd})`);
+          }
+          // 4. correctSide must be valid for this tile on these ends
+          if (ct && p.correctSide && p.board.length > 0) {
+            if (p.correctSide === 'left' && ct.left !== p.leftEnd && ct.right !== p.leftEnd) {
+              issues.push(`correctSide 'left' but tile '${p.correctTile}' can't match leftEnd ${p.leftEnd}`);
+            }
+            if (p.correctSide === 'right' && ct.left !== p.rightEnd && ct.right !== p.rightEnd) {
+              issues.push(`correctSide 'right' but tile '${p.correctTile}' can't match rightEnd ${p.rightEnd}`);
+            }
+          }
+        }
+        // 5. Must have at least 2 legal moves (not trivial)
+        const hand = p.myHand.map(parseTileId).filter(Boolean);
+        const playable = hand.filter(t => canPlay(t, p.leftEnd, p.rightEnd, p.board.length));
+        if (playable.length < 2) {
+          issues.push(`only ${playable.length} playable tile(s) — trivial`);
+        }
+        // 6. Explanation must not contain self-contradiction markers
+        if (p.explanation) {
+          for (const re of contradictionMarkers) {
+            if (re.test(p.explanation)) {
+              issues.push(`explanation contains contradiction marker: ${re}`);
+              break;
+            }
+          }
+        }
+        if (issues.length > 0) {
+          errors++;
+          _brokenPuzzleIds.add(p.id);
+          console.warn(`[PUZZLE INVALID] ${p.id}: ${issues.join('; ')}`);
+        }
+      }
+      if (errors > 0) {
+        console.warn(`[PUZZLE VALIDATOR] ${errors}/${PUZZLES.length} curated puzzles have issues (hidden from UI)`);
+      } else {
+        console.log(`[PUZZLE VALIDATOR] All ${PUZZLES.length} curated puzzles pass validation`);
+      }
+    }
+
+    // Sanity self-test: puzzle validation + determinism check + smoke test
+    let _selfTestRunning = false;
+    async function runSanityTest() {
+      if (_selfTestRunning) return;
+      _selfTestRunning = true;
+      const el = document.getElementById('selftest-output');
+      if (!el) return;
+      const log = (msg, color) => { el.innerHTML += `<div style="color:${color||'#94a3b8'}">${msg}</div>`; el.scrollTop = el.scrollHeight; };
+      el.innerHTML = '';
+      log('=== Sanity Self-Test ===', '#34d399');
+
+      // 1. Puzzle validation
+      log('\\n[1/3] Validating curated puzzles...', '#38bdf8');
+      let pFail = 0;
+      for (const p of PUZZLES) {
+        const ct = parseTileId(p.correctTile);
+        if (!ct || (p.board.length > 0 && !canPlay(ct, p.leftEnd, p.rightEnd, p.board.length))) {
+          log(`  FAIL: ${p.id} — correctTile unplayable`, '#ef4444');
+          pFail++;
+        }
+      }
+      log(pFail === 0
+        ? `  All ${PUZZLES.length} puzzles pass`
+        : `  ${pFail}/${PUZZLES.length} puzzles FAILED`, pFail ? '#ef4444' : '#22c55e');
+
+      // 2. Determinism check (fixed seed should produce identical game)
+      log('\\n[2/3] Determinism check (fixed seed)...', '#38bdf8');
+      try {
+        const savedSeed = currentSeed;
+        currentSeed = 42;
+        solverRng = new SplitMix64(42);
+        const deck1 = shuffleDeck(ALL_TILES);
+        const ids1 = deck1.map(t => t.id).join(',');
+        currentSeed = 42;
+        solverRng = new SplitMix64(42);
+        const deck2 = shuffleDeck(ALL_TILES);
+        const ids2 = deck2.map(t => t.id).join(',');
+        currentSeed = savedSeed;
+        solverRng = new SplitMix64(savedSeed);
+        if (ids1 === ids2) {
+          log('  Deterministic: same seed = same shuffle', '#22c55e');
+        } else {
+          log('  FAIL: same seed produced different shuffles!', '#ef4444');
+        }
+      } catch(e) {
+        log(`  ERROR: ${e.message}`, '#ef4444');
+      }
+
+      // 3. Smoke test: 20 self-play games
+      log('\\n[3/3] Smoke test: 20 self-play games...', '#38bdf8');
+      try {
+        await new Promise(resolve => {
+          let done = 0;
+          const result = selfPlayBatch(20, (summary, finished) => {
+            if (finished) {
+              log(`  Completed: T1 ${summary.team0Wins}W / T2 ${summary.team1Wins}W, ${summary.blockedPct}% blocked`, '#22c55e');
+              resolve();
+            }
+          });
+          if (result && result.games) {
+            log(`  Completed: T1 ${result.team0Wins}W / T2 ${result.team1Wins}W, ${result.blockedPct}% blocked`, '#22c55e');
+            resolve();
+          }
+        });
+      } catch(e) {
+        log(`  ERROR: ${e.message}`, '#ef4444');
+      }
+
+      log('\\n=== Self-Test Complete ===', '#34d399');
+      _selfTestRunning = false;
+    }
+
     function scanGameForPuzzles(analysisCache, snapshots) {
       if (!analysisCache || !snapshots) return [];
       const puzzles = [];
@@ -2076,9 +2247,10 @@
     }
 
     function getAllPuzzles() {
-      // Combine curated + generated puzzles
+      // Combine curated + generated puzzles, filtering out broken curated ones
+      const curated = PUZZLES.filter(p => !_brokenPuzzleIds.has(p.id));
       const generated = loadGeneratedPuzzles();
-      return [...PUZZLES, ...generated];
+      return [...curated, ...generated];
     }
 
     function loadPuzzle(def) {
@@ -12424,9 +12596,20 @@
             <div class="bg-slate-800 rounded-lg p-3 inline-block">
               <div class="text-xs text-slate-400">${_t('accuracy')}: <span class="text-emerald-400 font-bold">${(stats.optimalMoves / stats.totalMoves * 100).toFixed(1)}%</span> ${_t('perfect_over')} ${stats.totalMoves} ${_t('moves')}</div>
             </div>` : ''}
-            <div class="mt-4 text-xs text-slate-600">
-              ${_t('keyboard_help')}
+            <div class="mt-4 flex items-center justify-center gap-3">
+              <span class="text-xs text-slate-600">${_t('keyboard_help')}</span>
+              <button class="text-xs text-slate-500 hover:text-slate-300 underline" onclick="runSanityTest()">Run Self-Test</button>
             </div>
+            <div id="selftest-output" style="display:none;max-height:200px;overflow-y:auto;text-align:left;font-family:monospace;font-size:11px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px;margin-top:8px"
+              ></div>
+            <script>
+              document.addEventListener('click', e => {
+                if (e.target.textContent === 'Run Self-Test') {
+                  const o = document.getElementById('selftest-output');
+                  if (o) o.style.display = 'block';
+                }
+              });
+            </script>
           </div>
         </div>`;
     }
@@ -12739,6 +12922,9 @@
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(render, 150);
     });
+
+    // Validate curated puzzles (logs issues, hides broken ones)
+    validateAllPuzzles();
 
     // Load puzzle progress
     loadPuzzleCompletion();
