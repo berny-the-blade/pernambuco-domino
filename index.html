@@ -3804,76 +3804,52 @@
                       const maxTileW = Math.floor(containerW - BADGE * 2 - 8);
                       const offX = BADGE + 4;
 
-                      /* Stable play width: fixed % of available width (no height dependency) */
+                      /* --- Connected snake layout: doubles vertical, everything else horizontal --- */
                       const containerH = boardRef.current ? Math.floor(boardRef.current.clientHeight) : 300;
                       const WIDTH_PCT = boardSize === 'S' ? 0.78 : boardSize === 'M' ? 0.86 : 0.94;
                       const effW = Math.max(220, Math.floor(maxTileW * WIDTH_PCT));
 
-                      /* --- Deterministic grid layout with occupancy (NO overlaps) ---
-                         Rules: doubles vertical, everything else horizontal.
-                         Wrapping uses synthetic corner spacer (not a rotated tile). */
                       const items = [];
-                      const corners = [];
+                      const GAP_Y = Math.max(6, Math.floor(VW * 0.3));
+                      const rowPitch = HW + GAP_Y;
 
-                      const CELL_X = VW;
-                      const CELL_Y = VW + 2;
-                      const DOUBLE_HC = Math.ceil(HW / CELL_Y);
-                      const ROW_STEP = DOUBLE_HC + 1;
-
-                      function footprint(tile) {
-                        const isD = tile.left === tile.right;
-                        if (isD) return { orient: 'vertical', wC: 1, hC: DOUBLE_HC, pxW: VW, pxH: HW };
-                        return { orient: 'horizontal', wC: Math.ceil(HW / CELL_X), hC: 1, pxW: HW, pxH: VW };
-                      }
-
-                      const occ = new Set();
-                      const occKey = (gx, gy) => gx + ',' + gy;
-                      function canPlace(gx, gy, wC, hC) {
-                        for (let dx = 0; dx < wC; dx++)
-                          for (let dy = 0; dy < hC; dy++)
-                            if (occ.has(occKey(gx + dx, gy + dy))) return false;
-                        return true;
-                      }
-                      function markOcc(gx, gy, wC, hC) {
-                        for (let dx = 0; dx < wC; dx++)
-                          for (let dy = 0; dy < hC; dy++) occ.add(occKey(gx + dx, gy + dy));
-                      }
-
-                      const GRID_W = Math.max(1, Math.floor(effW / CELL_X));
-                      let dir = +1, rowG = 0, gx = 0;
+                      /* Walk board[] sequentially — it's already ordered left-end to right-end
+                         (unshift for left plays, push for right plays) */
+                      let cursorX = 0, row = 0, dir = +1;
 
                       for (let i = 0; i < board.length; i++) {
                         const t = board[i];
-                        const fp = footprint(t);
+                        const isD = (t.left === t.right);
+                        const tw = isD ? VW : HW;
+                        const th = isD ? HW : VW;
 
-                        let candGX = dir === +1 ? gx : (gx - fp.wC);
-                        let candGY = rowG;
+                        /* Check if tile overflows current row */
+                        const wouldOverflow = dir === +1
+                          ? (cursorX + tw > effW)
+                          : (cursorX - tw < 0);
 
-                        if (i === 0) { candGX = Math.floor((GRID_W - fp.wC) / 2); gx = candGX + fp.wC; }
-
-                        const overflow = candGX < 0 || (candGX + fp.wC) > GRID_W;
-                        const collide = !canPlace(candGX, candGY, fp.wC, fp.hC);
-
-                        if ((overflow || collide) && i > 0) {
-                          const cornerGX = dir === +1 ? (GRID_W - 1) : 0;
-                          corners.push({ gx: cornerGX, gy: rowG });
-                          rowG += ROW_STEP;
+                        if (wouldOverflow && i > 0) {
+                          /* Wrap: move to next row, reverse direction */
+                          row++;
                           dir *= -1;
-                          gx = dir === +1 ? 0 : GRID_W;
-                          i--;
-                          continue;
+                          cursorX = dir === +1 ? 0 : effW;
                         }
 
-                        markOcc(candGX, candGY, fp.wC, fp.hC);
-                        const px = candGX * CELL_X;
-                        const py = candGY * CELL_Y;
-                        items.push({ i, x: px, y: py, orient: fp.orient, flip: (dir === -1 && fp.orient === 'horizontal'), w: fp.pxW, h: fp.pxH, dir });
+                        /* Place tile */
+                        let px;
+                        if (dir === +1) { px = cursorX; cursorX += tw; }
+                        else { cursorX -= tw; px = cursorX; }
 
-                        if (dir === +1) gx = candGX + fp.wC;
-                        else gx = candGX;
+                        const py = row * rowPitch;
+                        items.push({
+                          i, x: px, y: py,
+                          orient: isD ? 'vertical' : 'horizontal',
+                          flip: (dir === -1 && !isD),
+                          w: tw, h: th, dir
+                        });
                       }
 
-                      /* Anchor first tile to center, then clamp so nothing leaves play area */
+                      /* Center the whole chain within effW x containerH, clamped */
                       const firstIt = items[0];
                       let shiftX = (effW / 2) - (firstIt.x + firstIt.w / 2);
                       let shiftY = (containerH / 2) - (firstIt.y + firstIt.h / 2);
@@ -3883,15 +3859,9 @@
                         minPX = Math.min(minPX, it.x); maxPX = Math.max(maxPX, it.x + it.w);
                         minPY = Math.min(minPY, it.y); maxPY = Math.max(maxPY, it.y + it.h);
                       }
-                      for (const c of corners) {
-                        const cx = c.gx * CELL_X, cy = c.gy * CELL_Y;
-                        minPX = Math.min(minPX, cx); maxPX = Math.max(maxPX, cx + VW);
-                        minPY = Math.min(minPY, cy); maxPY = Math.max(maxPY, cy + VW);
-                      }
                       shiftX = Math.max(-minPX, Math.min(shiftX, effW - maxPX));
                       shiftY = Math.max(-minPY, Math.min(shiftY, containerH - maxPY));
                       for (const it of items) { it.x = Math.round(it.x + shiftX); it.y = Math.round(it.y + shiftY); }
-                      for (const c of corners) { c.x = Math.round(c.gx * CELL_X + shiftX); c.y = Math.round(c.gy * CELL_Y + shiftY); }
 
                       const drawW = effW + BADGE * 2 + 8;
                       const first = items[0], last = items[items.length - 1];
@@ -3913,11 +3883,6 @@
                         <div style={{ position: 'relative', width: drawW, height: containerH, margin: '0 auto' }}>
                           <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
-                          {corners.map((c, idx) => (
-                            <div key={'corner'+idx} style={{ position: 'absolute', left: offX + c.x, top: c.y }}>
-                              <div className="board-tile" style={{ width: VW, height: VW, opacity: 0.18, borderRadius: 3 }} />
-                            </div>
-                          ))}
                           {items.map(item => {
                             const t = board[item.i];
                             return (
