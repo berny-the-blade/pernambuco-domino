@@ -35,13 +35,16 @@ from match_equity import get_match_equity, delta_me, DOB_VALUES
 
 
 def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
-                     mcts_sims, result_queue, value_target='me'):
+                     mcts_sims, result_queue, value_target='me',
+                     high_sim_fraction=0.1, high_sim_multiplier=4):
     """
     Isolated CPU process. Plays games against itself and pipes training data back.
 
     Each data point: (state_np, mask_np, pi_np, v_target)
 
     value_target: 'me' for ΔME (match equity), 'points' for points/4 (legacy)
+    high_sim_fraction: fraction of games using high sim count (default 10%)
+    high_sim_multiplier: multiplier for high-quality games (default 4×)
     """
     device = torch.device("cpu")
     model = DominoNet().to(device)
@@ -52,10 +55,16 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     # Unique seed per worker
     np.random.seed(int(time.time() * 1000) % (2**31) + worker_id * 1000)
 
-    mcts = DominoMCTS(model, num_simulations=mcts_sims) if use_mcts else None
+    # Mixed sim budget: 90% at base sims, 10% at 4× base sims
+    mcts_base = DominoMCTS(model, num_simulations=mcts_sims) if use_mcts else None
+    mcts_high = DominoMCTS(model, num_simulations=mcts_sims * high_sim_multiplier) if use_mcts else None
     worker_data = []
 
     for game_idx in range(num_games):
+        # Mixed sim budget: this match uses high sims if in the top fraction
+        use_high_sims = use_mcts and (np.random.random() < high_sim_fraction)
+        mcts = mcts_high if use_high_sims else mcts_base
+
         # Play a full match (first to 6) for ME context
         match = DominoMatch(target_points=6)
         match_history = []  # list of (game_history, match_state_before)
@@ -252,19 +261,25 @@ class Orchestrator:
     """Manages the generational self-play + training loop with arena gatekeeper.
 
     Value targets: ΔME (match equity delta) or legacy points/4.
-    Arena: duplicate-deal matches with side-swap. Promotion requires >52% winrate
-    with lower 95% CI > 50%.
+    Arena: sequential SPRT-style duplicate-deal matches with side-swap.
+    Starts with 100 seeds, extends to 400 if inconclusive.
     """
 
-    ARENA_SEEDS = 100       # duplicate deals (×2 side-swap = 200 matches)
-    ARENA_MIN_WINRATE = 0.52  # challenger must win ≥52% of matches
+    ARENA_SEEDS_MIN = 100    # start with 100 seeds (200 matches)
+    ARENA_SEEDS_MAX = 400    # extend up to 400 seeds (800 matches)
+    ARENA_SEEDS_STEP = 100   # add 100 seeds per extension
 
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=False,
-                 mcts_sims=50, value_target='me'):
+                 mcts_sims=50, value_target='me',
+                 high_sim_fraction=0.1, high_sim_multiplier=4):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.high_sim_fraction = high_sim_fraction
+        self.high_sim_multiplier = high_sim_multiplier
         print(f"Orchestrator device: {self.device}")
         print(f"Workers: {num_workers}, Buffer: {buffer_size}, "
-              f"MCTS: {use_mcts} ({mcts_sims} sims), Value: {value_target}")
+              f"MCTS: {use_mcts} ({mcts_sims} sims, "
+              f"{high_sim_fraction:.0%} at {mcts_sims * high_sim_multiplier}), "
+              f"Value: {value_target}")
 
         self.model = DominoNet().to(self.device)
         self.champion_weights = {
@@ -314,7 +329,8 @@ class Orchestrator:
                     target=self_play_worker,
                     args=(w_id, shared_weights, games_per_worker,
                           self.use_mcts, self.mcts_sims, result_queue,
-                          self.value_target)
+                          self.value_target,
+                          self.high_sim_fraction, self.high_sim_multiplier)
                 )
                 p.start()
                 processes.append(p)
@@ -397,19 +413,8 @@ class Orchestrator:
         print(f"\nTraining complete. {total_generations} generations. "
               f"Rejections: {self.rejections}")
 
-    def _arena_evaluate(self, challenger_weights):
-        """Run arena: challenger vs champion with duplicate deals.
-        Returns True if challenger promoted (≥52% winrate, lower 95% CI > 50%)."""
-        total_matches = self.ARENA_SEEDS * 2  # each seed played from both sides
-        print(f"Arena: {self.ARENA_SEEDS} seeds × 2 sides = "
-              f"{total_matches} matches (threshold: {self.ARENA_MIN_WINRATE:.0%})...")
-        t0 = time.time()
-
-        # Generate deterministic seeds
-        seeds = list(range(self.generation * 10000,
-                           self.generation * 10000 + self.ARENA_SEEDS))
-
-        # Split seeds across workers
+    def _run_arena_batch(self, challenger_weights, seeds):
+        """Run a batch of arena seeds in parallel. Returns (c_wins, ch_wins, total)."""
         ctx = mp.get_context('spawn')
         result_queue = ctx.Queue()
         n_workers = min(self.num_workers, len(seeds))
@@ -421,59 +426,117 @@ class Orchestrator:
             end = start + chunk if w_id < n_workers - 1 else len(seeds)
             if start >= len(seeds):
                 break
-            worker_seeds = seeds[start:end]
             p = ctx.Process(
                 target=arena_worker,
                 args=(w_id, self.champion_weights, challenger_weights,
-                      worker_seeds, result_queue)
+                      seeds[start:end], result_queue)
             )
             p.start()
             processes.append(p)
 
-        # Collect results (3-tuple: challenger_wins, champion_wins, total_matches)
-        challenger_wins = 0
-        champion_wins = 0
-        matches_played = 0
+        c_wins, ch_wins, total = 0, 0, 0
         for _ in range(len(processes)):
             try:
-                c_w, ch_w, t_m = result_queue.get(timeout=300)
-                challenger_wins += c_w
-                champion_wins += ch_w
-                matches_played += t_m
+                cw, chw, tm = result_queue.get(timeout=300)
+                c_wins += cw
+                ch_wins += chw
+                total += tm
             except Exception as e:
                 print(f"  Arena worker error: {e}")
 
         for p in processes:
             p.join(timeout=30)
 
-        if matches_played == 0:
-            win_rate = 0.5
-        else:
-            win_rate = challenger_wins / matches_played
+        return c_wins, ch_wins, total
 
-        # 95% CI using normal approximation: p ± 1.96 * sqrt(p*(1-p)/n)
+    def _arena_evaluate(self, challenger_weights):
+        """Sequential SPRT-style arena: extend matches if result is inconclusive.
+
+        Protocol:
+          1. Run 100 seeds (200 matches)
+          2. If win_rate < 47% → early reject (clearly worse)
+          3. If win_rate > 55% → early promote (clearly better)
+          4. Otherwise → extend by 100 seeds, repeat up to ARENA_SEEDS_MAX
+          5. Final decision: lower 95% CI > 50% → promote
+        """
+        t0 = time.time()
+        challenger_wins = 0
+        champion_wins = 0
+        matches_played = 0
+        seeds_used = 0
+
+        print(f"Arena: sequential SPRT (min {self.ARENA_SEEDS_MIN}, "
+              f"max {self.ARENA_SEEDS_MAX} seeds, ×2 sides each)...")
+
+        while seeds_used < self.ARENA_SEEDS_MAX:
+            batch_size = min(self.ARENA_SEEDS_STEP,
+                             self.ARENA_SEEDS_MAX - seeds_used)
+            seed_base = self.generation * 10000 + seeds_used
+            seeds = list(range(seed_base, seed_base + batch_size))
+
+            cw, chw, tm = self._run_arena_batch(challenger_weights, seeds)
+            challenger_wins += cw
+            champion_wins += chw
+            matches_played += tm
+            seeds_used += batch_size
+
+            if matches_played == 0:
+                win_rate = 0.5
+            else:
+                win_rate = challenger_wins / matches_played
+
+            ci_half = 1.96 * np.sqrt(
+                win_rate * (1 - win_rate) / max(matches_played, 1))
+            ci_lower = win_rate - ci_half
+            ci_upper = win_rate + ci_half
+
+            print(f"  [{seeds_used} seeds / {matches_played} matches] "
+                  f"Challenger {challenger_wins}W vs Champion {champion_wins}W "
+                  f"({win_rate:.1%}, CI: [{ci_lower:.1%}, {ci_upper:.1%}])")
+
+            # Early decisions (only after minimum seeds)
+            if seeds_used >= self.ARENA_SEEDS_MIN:
+                # Early reject: clearly worse
+                if win_rate < 0.47:
+                    print(f"  EARLY REJECT (win_rate {win_rate:.1%} < 47%)")
+                    return False
+                # Early promote: clearly better
+                if win_rate > 0.55 and ci_lower > 0.50:
+                    elapsed = time.time() - t0
+                    print(f"  EARLY PROMOTE! ({win_rate:.1%}, "
+                          f"CI lower {ci_lower:.1%} > 50%) in {elapsed:.1f}s")
+                    return True
+                # Conclusive: CI entirely above or below 50%
+                if ci_lower > 0.50:
+                    elapsed = time.time() - t0
+                    print(f"  PROMOTED! (CI lower {ci_lower:.1%} > 50%) "
+                          f"in {elapsed:.1f}s")
+                    return True
+                if ci_upper < 0.50:
+                    print(f"  REJECTED (CI upper {ci_upper:.1%} < 50%)")
+                    return False
+
+            # If more seeds available and result is inconclusive, extend
+            if seeds_used < self.ARENA_SEEDS_MAX:
+                print(f"  Inconclusive — extending arena...")
+
+        # Final decision after max seeds
+        elapsed = time.time() - t0
         if matches_played > 0:
-            ci_half = 1.96 * np.sqrt(win_rate * (1 - win_rate) / matches_played)
+            win_rate = challenger_wins / matches_played
+            ci_half = 1.96 * np.sqrt(
+                win_rate * (1 - win_rate) / matches_played)
             ci_lower = win_rate - ci_half
         else:
-            ci_lower = 0.0
+            win_rate, ci_lower = 0.5, 0.0
 
-        elapsed = time.time() - t0
-        print(f"  Arena result: Challenger {challenger_wins}W vs "
-              f"Champion {champion_wins}W / {matches_played} matches "
-              f"({win_rate:.1%}, 95% CI lower: {ci_lower:.1%}) in {elapsed:.1f}s")
-
-        if win_rate >= self.ARENA_MIN_WINRATE and ci_lower > 0.50:
-            print(f"  PROMOTED! ({win_rate:.1%} >= {self.ARENA_MIN_WINRATE:.0%}, "
-                  f"CI lower {ci_lower:.1%} > 50%)")
+        if ci_lower > 0.50:
+            print(f"  PROMOTED (final: {win_rate:.1%}, "
+                  f"CI lower {ci_lower:.1%} > 50%) in {elapsed:.1f}s")
             return True
         else:
-            reason = []
-            if win_rate < self.ARENA_MIN_WINRATE:
-                reason.append(f"winrate {win_rate:.1%} < {self.ARENA_MIN_WINRATE:.0%}")
-            if ci_lower <= 0.50:
-                reason.append(f"CI lower {ci_lower:.1%} <= 50%")
-            print(f"  REJECTED. ({', '.join(reason)})")
+            print(f"  REJECTED (final: {win_rate:.1%}, "
+                  f"CI lower {ci_lower:.1%} <= 50%) in {elapsed:.1f}s")
             return False
 
     def load_checkpoint(self, path):
@@ -500,7 +563,11 @@ def main():
     parser.add_argument('--mcts', action='store_true',
                         help='Use IS-MCTS (slower but stronger)')
     parser.add_argument('--mcts-sims', type=int, default=50,
-                        help='MCTS simulations per move')
+                        help='MCTS simulations per move (base budget)')
+    parser.add_argument('--high-sim-fraction', type=float, default=0.1,
+                        help='Fraction of games using high sim count (default 0.1)')
+    parser.add_argument('--high-sim-multiplier', type=int, default=4,
+                        help='Multiplier for high-quality games (default 4x)')
     parser.add_argument('--value-target', type=str, default='me',
                         choices=['me', 'points'],
                         help='Value target: "me" for ΔME (default), '
@@ -515,6 +582,8 @@ def main():
         use_mcts=args.mcts,
         mcts_sims=args.mcts_sims,
         value_target=args.value_target,
+        high_sim_fraction=args.high_sim_fraction,
+        high_sim_multiplier=args.high_sim_multiplier,
     )
 
     if args.resume:
