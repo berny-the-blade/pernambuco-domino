@@ -3822,17 +3822,18 @@
                         }
 
                         if (wouldOverflow) {
-                          /* 1) Insert SYNTHETIC visual connector on CURRENT row edge */
-                          const cx2 = goRight ? maxTileW - VW : 0;
+                          const dirBefore = goRight ? 1 : -1;
+                          /* Synthetic connector on CURRENT row edge, centered in row */
+                          const cx2 = goRight ? (maxTileW - VW) : 0;
                           const cy2 = row * ROW_H + (ROW_H - HW) / 2;
-                          items.push({ id: 'turn-' + row, row, x: cx2, y: cy2, orient: 'vertical', flip: false, turn: true, dir: goRight ? 1 : -1, w: VW, h: HW });
-
-                          /* 2) Move to next row, reverse direction */
+                          items.push({ id: 'turn-' + row + '-' + i, row, x: cx2, y: cy2, orient: 'vertical', flip: false, turn: true, dir: dirBefore, w: VW, h: HW });
+                          /* Advance to next row, reverse direction */
                           row++;
                           goRight = !goRight;
                           cursorX = goRight ? 0 : maxTileW;
-
-                          /* 3) Fall through: place the REAL tile normally on the new row */
+                          /* Re-place the SAME real tile on the new row */
+                          i--;
+                          continue;
                         }
 
                         /* Normal tile placement */
@@ -3843,20 +3844,11 @@
                         items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
                       }
 
-                      /* --- Centering --- */
-                      const hasTurns = items.some(it => it.turn);
-                      if (hasTurns) {
-                        /* Turns exist: center entire chain as one unit to preserve connections */
-                        let minX = Infinity, maxX2 = -Infinity;
-                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
-                        const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
+                      /* --- Center by anchoring first tile to middle --- */
+                      if (items.length > 0) {
+                        const firstReal = items.find(it => !it.turn) || items[0];
+                        const shift = (maxTileW / 2) - (firstReal.x + firstReal.w / 2);
                         for (const it of items) it.x += shift;
-                      } else {
-                        /* No turns: center the single row */
-                        let minX = Infinity, maxX2 = -Infinity;
-                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
-                        const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
-                        if (shift > 0) for (const it of items) it.x += shift;
                       }
 
                       const totalH = (row + 1) * ROW_H;
@@ -3883,10 +3875,12 @@
                           <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
                           {items.map(item => {
                             if (item.turn) {
-                              /* Synthetic connector: blank board-tile (no pips) */
+                              /* Synthetic connector: semi-transparent blank tile */
                               return (
                                 <div key={item.id} style={{ position: 'absolute', left: offX + item.x, top: item.y }}>
-                                  <div className="board-tile" style={{ width: VW, height: HW, flexDirection: 'column' }} />
+                                  <div style={{ width: VW, height: HW, borderRadius: 4,
+                                    background: 'rgba(245,240,225,0.25)', border: '1px solid rgba(168,152,120,0.55)',
+                                    boxShadow: 'inset 0 0.5px 1px rgba(255,255,255,0.25)' }} />
                                 </div>
                               );
                             }
