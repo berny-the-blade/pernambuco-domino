@@ -466,7 +466,7 @@
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
-      const BOARD_DIMS = { S: { hw: 44, vw: 22, minH: 192 }, M: { hw: 52, vw: 26, minH: 288 }, L: { hw: 64, vw: 32, minH: 384 } };
+      const BOARD_DIMS = { S: { hw: 44, vw: 22, minH: 180 }, M: { hw: 52, vw: 26, minH: 240 }, L: { hw: 58, vw: 29, minH: 280 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
       const roomRef = useRef(null);
@@ -3145,7 +3145,7 @@
         );
       };
 
-      const HAND_DIMS = { S: { w: 44, h: 80, dot: 6, cont: 28 }, M: { w: 52, h: 96, dot: 7, cont: 32 }, L: { w: 60, h: 110, dot: 8, cont: 36 } };
+      const HAND_DIMS = { S: { w: 42, h: 76, dot: 6, cont: 26 }, M: { w: 48, h: 88, dot: 7, cont: 30 }, L: { w: 54, h: 98, dot: 7, cont: 32 } };
       const hDims = HAND_DIMS[boardSize] || HAND_DIMS.M;
       const DominoTile = ({ tile, playable, onClick }) => (
         <div
