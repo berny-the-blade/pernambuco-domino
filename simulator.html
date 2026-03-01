@@ -173,6 +173,29 @@
       tab_stats: { en: 'Stats', pt: 'Estatísticas' },
       tab_history: { en: 'History', pt: 'Histórico' },
       tab_guide: { en: 'Guide', pt: 'Guia' },
+      tab_profile: { en: 'Profile', pt: 'Perfil' },
+      profile_title: { en: 'Player Profile', pt: 'Perfil do Jogador' },
+      new_player: { en: 'New Player', pt: 'Novo Jogador' },
+      switch_player: { en: 'Switch', pt: 'Trocar' },
+      enter_name: { en: 'Enter your name:', pt: 'Digite seu nome:' },
+      guest: { en: 'Guest', pt: 'Convidado' },
+      accuracy: { en: 'Accuracy', pt: 'Precisão' },
+      games_played: { en: 'Games Played', pt: 'Jogos' },
+      improving: { en: 'improving', pt: 'melhorando' },
+      declining: { en: 'declining', pt: 'piorando' },
+      stable: { en: 'stable', pt: 'estável' },
+      repeated_warning: { en: 'Watch out: you\'ve made', pt: 'Cuidado: você cometeu' },
+      errors_last5: { en: 'errors in the last 5 games', pt: 'erros nos últimos 5 jogos' },
+      start_decision: { en: 'Start', pt: 'Iniciar' },
+      roll_decision: { en: 'Let Roll', pt: 'Rolar' },
+      most_common_mistake: { en: 'Most common mistake', pt: 'Erro mais comum' },
+      move_quality: { en: 'Move Quality', pt: 'Qualidade das Jogadas' },
+      accuracy_trend: { en: 'Accuracy Trend', pt: 'Tendência de Precisão' },
+      mistake_breakdown: { en: 'Mistake Breakdown', pt: 'Tipos de Erro' },
+      start_vs_roll: { en: 'Start vs Roll', pt: 'Iniciar vs Rolar' },
+      no_data_yet: { en: 'Play some games to see your stats here', pt: 'Jogue algumas partidas para ver suas estatísticas aqui' },
+      delete_player: { en: 'Delete', pt: 'Excluir' },
+      confirm_delete: { en: 'Delete this player profile? Stats will be lost.', pt: 'Excluir este perfil? As estatísticas serão perdidas.' },
       // Difficulty picker
       opp_strength: { en: 'Opponent Strength (P1 & P3)', pt: 'Força dos Oponentes (P1 & P3)' },
       part_strength: { en: 'Partner Strength (P2)', pt: 'Força do Parceiro (P2)' },
@@ -923,6 +946,15 @@
         stats[type].count++;
         stats[type].totalSeverity += severity;
         try { localStorage.setItem(this._key, JSON.stringify(stats)); } catch(e) {}
+        // Also record to active player profile
+        const pid = getActivePlayerId();
+        if (pid) {
+          const ps = _loadPlayerStats(pid);
+          if (ps && ps.leaks && ps.leaks.hasOwnProperty(type)) {
+            ps.leaks[type]++;
+            _savePlayerStats(pid, ps);
+          }
+        }
       },
       getStats() { return this._load(); },
       getWeakestArea() {
@@ -2743,6 +2775,236 @@
       localStorage.setItem('domino_elo', JSON.stringify(eloRatings));
     }
 
+    // ========== PLAYER PROFILES ==========
+
+    const PLAYERS_KEY = 'domino_players';
+
+    function _loadPlayers() {
+      try { return JSON.parse(localStorage.getItem(PLAYERS_KEY)) || { activePlayer: null, players: {} }; }
+      catch(e) { return { activePlayer: null, players: {} }; }
+    }
+    function _savePlayers(data) {
+      try { localStorage.setItem(PLAYERS_KEY, JSON.stringify(data)); } catch(e) {}
+    }
+
+    function createPlayer(name) {
+      const data = _loadPlayers();
+      const id = 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      data.players[id] = { id, name, created: new Date().toISOString(), lastPlayed: new Date().toISOString() };
+      data.activePlayer = id;
+      _savePlayers(data);
+      _initPlayerStats(id);
+      render();
+      return id;
+    }
+
+    function switchPlayer(id) {
+      const data = _loadPlayers();
+      if (!data.players[id]) return;
+      // Finalize current session before switching
+      _finalizeSession();
+      data.activePlayer = id;
+      data.players[id].lastPlayed = new Date().toISOString();
+      _savePlayers(data);
+      render();
+    }
+
+    function deletePlayer(id) {
+      const data = _loadPlayers();
+      if (!data.players[id]) return;
+      delete data.players[id];
+      try { localStorage.removeItem('domino_player_' + id + '_stats'); } catch(e) {}
+      if (data.activePlayer === id) {
+        const remaining = Object.keys(data.players);
+        data.activePlayer = remaining.length > 0 ? remaining[0] : null;
+      }
+      _savePlayers(data);
+      render();
+    }
+
+    function getActivePlayer() {
+      const data = _loadPlayers();
+      if (!data.activePlayer || !data.players[data.activePlayer]) return null;
+      return data.players[data.activePlayer];
+    }
+
+    function getActivePlayerId() {
+      const data = _loadPlayers();
+      return data.activePlayer;
+    }
+
+    function getAllPlayers() {
+      return _loadPlayers().players;
+    }
+
+    // ========== PER-PLAYER STATS ==========
+
+    function _playerStatsKey(id) { return 'domino_player_' + id + '_stats'; }
+
+    function _initPlayerStats(id) {
+      const existing = _loadPlayerStats(id);
+      if (existing) return;
+      const blank = {
+        totalGames: 0, totalMoves: 0,
+        optimalMoves: 0, goodMoves: 0, okMoves: 0, badMoves: 0,
+        totalEquityLoss: 0,
+        leaks: { BLOCKING_MISS: 0, FEED_ERROR: 0, DOUBLE_TIMING: 0, DEAD_END: 0, PIP_WASTE: 0, PARTNER_IGNORE: 0 },
+        sessions: [],
+        recentGames: [],
+        startRoll: { startGames: 0, startWins: 0, rollGames: 0, rollWins: 0 },
+      };
+      try { localStorage.setItem(_playerStatsKey(id), JSON.stringify(blank)); } catch(e) {}
+    }
+
+    function _loadPlayerStats(id) {
+      try { const s = localStorage.getItem(_playerStatsKey(id)); return s ? JSON.parse(s) : null; }
+      catch(e) { return null; }
+    }
+
+    function _savePlayerStats(id, stats) {
+      try { localStorage.setItem(_playerStatsKey(id), JSON.stringify(stats)); } catch(e) {}
+    }
+
+    // Session tracking
+    let _sessionStart = null;
+    let _sessionGames = 0;
+    let _sessionMoves = 0;
+    let _sessionOptimal = 0;
+    let _sessionGood = 0;
+    let _sessionLeaks = {};
+    let _sessionEqLossSum = 0;
+    let _lastActivityTime = null;
+    const SESSION_TIMEOUT = 10 * 60 * 1000; // 10 min
+
+    function _ensureSession() {
+      const now = Date.now();
+      if (!_sessionStart || (_lastActivityTime && now - _lastActivityTime > SESSION_TIMEOUT)) {
+        _finalizeSession();
+        _sessionStart = now;
+        _sessionGames = 0; _sessionMoves = 0; _sessionOptimal = 0; _sessionGood = 0;
+        _sessionLeaks = {}; _sessionEqLossSum = 0;
+      }
+      _lastActivityTime = now;
+    }
+
+    function _finalizeSession() {
+      if (!_sessionStart || _sessionGames === 0) { _sessionStart = null; return; }
+      const pid = getActivePlayerId();
+      if (!pid) { _sessionStart = null; return; }
+      const ps = _loadPlayerStats(pid);
+      if (!ps) { _sessionStart = null; return; }
+      ps.sessions.push({
+        date: new Date(_sessionStart).toISOString().slice(0, 10),
+        games: _sessionGames,
+        moves: _sessionMoves,
+        accuracy: _sessionMoves > 0 ? Math.round((_sessionOptimal + _sessionGood) / _sessionMoves * 1000) / 1000 : 0,
+        leaks: { ..._sessionLeaks },
+        avgEqLoss: _sessionMoves > 0 ? Math.round(_sessionEqLossSum / _sessionMoves * 1000) / 1000 : 0,
+      });
+      if (ps.sessions.length > 50) ps.sessions = ps.sessions.slice(-50);
+      _savePlayerStats(pid, ps);
+      _sessionStart = null;
+    }
+
+    // Record a graded move to player stats
+    function _recordPlayerMove(grade, eqLoss, leakType) {
+      const pid = getActivePlayerId();
+      if (!pid) return;
+      _ensureSession();
+      const ps = _loadPlayerStats(pid);
+      if (!ps) return;
+      ps.totalMoves++;
+      if (grade === 'perfect') { ps.optimalMoves++; _sessionOptimal++; }
+      else if (grade === 'good') { ps.goodMoves++; _sessionGood++; }
+      else if (grade === 'ok') ps.okMoves++;
+      else if (grade === 'bad') ps.badMoves++;
+      ps.totalEquityLoss += eqLoss || 0;
+      _sessionMoves++;
+      _sessionEqLossSum += eqLoss || 0;
+      if (leakType && ps.leaks.hasOwnProperty(leakType)) {
+        ps.leaks[leakType]++;
+        _sessionLeaks[leakType] = (_sessionLeaks[leakType] || 0) + 1;
+      }
+      _savePlayerStats(pid, ps);
+    }
+
+    // Record a completed game to player stats
+    function _recordPlayerGame(gameRecord) {
+      const pid = getActivePlayerId();
+      if (!pid) return;
+      _ensureSession();
+      const ps = _loadPlayerStats(pid);
+      if (!ps) return;
+      ps.totalGames++;
+      _sessionGames++;
+      const a = gameRecord.analysis;
+      const entry = {
+        date: gameRecord.date,
+        result: gameRecord.outcome && gameRecord.outcome.team === 0 ? 'win' : gameRecord.outcome && gameRecord.outcome.type === 'tie' ? 'tie' : 'loss',
+        points: gameRecord.outcome ? gameRecord.outcome.points || 0 : 0,
+        moves: a ? a.moves : 0,
+        accuracy: a && a.moves > 0 ? Math.round((a.perfect + a.good) / a.moves * 1000) / 1000 : 0,
+        worstMistake: null,
+      };
+      if (a && a.moveDetails) {
+        const worst = a.moveDetails.reduce((w, d) => d.eqLoss > (w ? w.eqLoss : 0) ? d : w, null);
+        if (worst && worst.eqLoss > 0.02) {
+          entry.worstMistake = { eqLoss: worst.eqLoss, moveNum: worst.move };
+        }
+      }
+      ps.recentGames.push(entry);
+      if (ps.recentGames.length > 100) ps.recentGames = ps.recentGames.slice(-100);
+      _savePlayerStats(pid, ps);
+      // Check for repeated mistakes
+      _checkRepeatedMistakes(ps);
+    }
+
+    // Record start/roll decision
+    let _currentStartDecision = null; // 'start' | 'roll' | null
+
+    function _recordStartRollResult(decision, won) {
+      const pid = getActivePlayerId();
+      if (!pid) return;
+      const ps = _loadPlayerStats(pid);
+      if (!ps) return;
+      if (!ps.startRoll) ps.startRoll = { startGames: 0, startWins: 0, rollGames: 0, rollWins: 0 };
+      if (decision === 'start') {
+        ps.startRoll.startGames++;
+        if (won) ps.startRoll.startWins++;
+      } else if (decision === 'roll') {
+        ps.startRoll.rollGames++;
+        if (won) ps.startRoll.rollWins++;
+      }
+      _savePlayerStats(pid, ps);
+    }
+
+    // Repeated mistake detection
+    let _mistakeToast = null;
+    let _mistakeToastTimeout = null;
+
+    function _checkRepeatedMistakes(ps) {
+      const recent5 = ps.recentGames.slice(-5);
+      if (recent5.length < 5) return;
+      // Count leaks by examining the main leak stats delta over recent games
+      // Use the session leaks which track recent activity
+      for (const type of Object.keys(LEAK_TYPES)) {
+        // Count how many of the last 5 games had this leak by checking recent game data
+        const recentCount = _sessionLeaks[type] || 0;
+        if (recentCount >= 3) {
+          _showMistakeToast(type, recentCount);
+          break;
+        }
+      }
+    }
+
+    function _showMistakeToast(leakType, count) {
+      const name = LEAK_TYPES[leakType] || leakType;
+      _mistakeToast = `${_t('repeated_warning')} ${count} ${name} ${_t('errors_last5')}`;
+      if (_mistakeToastTimeout) clearTimeout(_mistakeToastTimeout);
+      _mistakeToastTimeout = setTimeout(() => { _mistakeToast = null; render(); }, 8000);
+      render();
+    }
+
     function shuffleDeck(deck) {
       const s = [...deck];
       const rng = getRng();
@@ -4276,6 +4538,14 @@
                     }))
                   };
                   saveGameHistory();
+                  // Record to player profile after analysis completes
+                  if (idx >= 0) _recordPlayerGame(gameHistory[idx]);
+                  // Record start/roll outcome
+                  if (_currentStartDecision && gameHistory[idx].outcome) {
+                    const won = gameHistory[idx].outcome.team === 0;
+                    _recordStartRollResult(_currentStartDecision, won);
+                    _currentStartDecision = null;
+                  }
                   render();
                 }
               }
@@ -7925,6 +8195,8 @@
       });
       if (stats.history.length > 30) stats.history.shift();
       saveStats();
+      // Record to player profile
+      _recordPlayerMove(grade, equityLoss < 90 ? equityLoss : 0, null);
 
       // Save puzzle completion (best grade)
       if (puzzleMode && puzzleDef) {
@@ -8179,6 +8451,7 @@
           <!-- Header -->
           <div class="flex items-center justify-between mb-3">
             <h1 class="text-lg font-bold text-emerald-400">${_t('title')}
+              ${getActivePlayer() ? `<span class="text-xs text-amber-400 font-normal ml-1 cursor-pointer" onclick="setTab('profile')">${getActivePlayer().name}</span>` : ''}
               <span class="text-sm text-slate-400 font-normal ml-2">${_t('match')}: <span class="text-blue-400 font-bold">${matchScore[0]}</span>-<span class="text-red-400 font-bold">${matchScore[1]}</span>/6</span>
               ${currentGame && currentGame.outcome && currentGame.outcome.multiplier > 1 ? ` <span class="text-orange-400 text-sm animate-pulse">${_t('dobrada')} x${currentGame.outcome.multiplier}</span>` : ''}
             </h1>
@@ -8228,6 +8501,7 @@
                   ${starterChoicePending ? renderStarterChoice() : ''}
                   ${playOpeningPending ? renderOpeningOverlay() : ''}
                   ${playStarterPending ? renderPlayStarterChoice() : ''}
+                  ${_mistakeToast ? `<div class="absolute top-2 left-1/2 -translate-x-1/2 bg-orange-900/90 border border-orange-500 text-orange-200 text-xs px-3 py-1.5 rounded-lg shadow-lg z-30 animate-pulse max-w-[90%] text-center">${_mistakeToast}</div>` : ''}
                   ${playMatchWinner !== null ? renderMatchWinnerOverlay() : ''}
                 </div>
                 <div class="w-20 flex-shrink-0">
@@ -8332,6 +8606,7 @@
                   <div class="tab ${rightPanelTab === 'stats' ? 'active' : ''}" onclick="setTab('stats')">${_t('tab_stats')}</div>
                   <div class="tab ${rightPanelTab === 'history' ? 'active' : ''}" onclick="setTab('history')">${_t('tab_history')}</div>
                   <div class="tab ${rightPanelTab === 'guide' ? 'active' : ''}" onclick="setTab('guide')">${_t('tab_guide')}</div>
+                  <div class="tab ${rightPanelTab === 'profile' ? 'active' : ''}" onclick="setTab('profile')" style="${rightPanelTab === 'profile' ? 'border-color:#f59e0b;color:#f59e0b' : ''}">${_t('tab_profile')}</div>
                 </div>
 
                 ${rightPanelTab === 'reasoning' ? renderReasoningPanel(snap, pNames, pTeams, teamColors) :
@@ -8342,6 +8617,7 @@
                   rightPanelTab === 'pro' ? renderProPanel(snap, pNames, pTeams, teamColors) :
                   rightPanelTab === 'history' ? renderHistoryPanel() :
                   rightPanelTab === 'guide' ? renderGuidePanel() :
+                  rightPanelTab === 'profile' ? renderProfilePanel() :
                   renderStatsPanel()}
               </div>
             </div>
@@ -11006,6 +11282,262 @@
       </div>`;
     }
 
+    // ========== PROFILE PANEL ==========
+
+    function renderProfilePanel() {
+      const player = getActivePlayer();
+      const allPlayers = getAllPlayers();
+      const playerList = Object.values(allPlayers);
+
+      // Player selector UI
+      let selectorHTML = `<div class="bg-slate-900 rounded-lg p-3 mb-3">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-xs font-bold text-amber-400">${_t('profile_title')}</div>
+          <button class="btn btn-gray text-xs" onclick="promptNewPlayer()">${_t('new_player')}</button>
+        </div>`;
+
+      if (playerList.length === 0) {
+        selectorHTML += `<div class="text-center py-3">
+          <div class="text-slate-400 text-sm mb-2">${_t('no_data_yet')}</div>
+          <button class="btn btn-yellow text-sm" onclick="promptNewPlayer()">${_t('new_player')}</button>
+        </div></div>`;
+        return `<div class="space-y-3 flex-1 overflow-y-auto">${selectorHTML}</div>`;
+      }
+
+      selectorHTML += `<div class="flex flex-wrap gap-1">`;
+      for (const p of playerList) {
+        const isActive = player && player.id === p.id;
+        selectorHTML += `<button class="text-xs px-2 py-1 rounded ${isActive ? 'bg-amber-600 text-white font-bold' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}" onclick="switchPlayer('${p.id}')">${p.name}</button>`;
+      }
+      selectorHTML += `</div></div>`;
+
+      if (!player) return `<div class="space-y-3 flex-1 overflow-y-auto">${selectorHTML}</div>`;
+
+      const ps = _loadPlayerStats(player.id);
+      if (!ps || ps.totalGames === 0) {
+        return `<div class="space-y-3 flex-1 overflow-y-auto">${selectorHTML}
+          <div class="bg-slate-900 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-amber-400 mb-1">${player.name}</div>
+            <div class="text-slate-400 text-sm">${_t('no_data_yet')}</div>
+          </div>
+        </div>`;
+      }
+
+      const totalMoves = ps.totalMoves || 1;
+      const accuracy = ((ps.optimalMoves + ps.goodMoves) / totalMoves * 100).toFixed(1);
+      const perfectPct = (ps.optimalMoves / totalMoves * 100).toFixed(0);
+
+      // Section A: Overview Card
+      const overviewHTML = `<div class="bg-slate-900 rounded-lg p-3 text-center">
+        <div class="text-xl font-bold text-amber-400 mb-1">${player.name}</div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div>
+            <div class="text-2xl font-bold ${parseFloat(accuracy) >= 60 ? 'text-emerald-400' : parseFloat(accuracy) >= 40 ? 'text-yellow-400' : 'text-red-400'}">${accuracy}%</div>
+            <div class="text-xs text-slate-400">${_t('accuracy')}</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-blue-400">${ps.totalGames}</div>
+            <div class="text-xs text-slate-400">${_t('games_played')}</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-purple-400">${eloRatings.player}</div>
+            <div class="text-xs text-slate-400">Elo</div>
+          </div>
+        </div>
+        ${ps.totalMoves > 0 ? `<div class="text-xs text-slate-500 mt-1">${_t('perfect')}: ${perfectPct}% | Avg EL: ${(ps.totalEquityLoss / totalMoves).toFixed(3)}</div>` : ''}
+      </div>`;
+
+      // Section B: Accuracy Trend (canvas-based)
+      let trendHTML = '';
+      if (ps.sessions.length >= 3 || ps.recentGames.length >= 5) {
+        const trendId = 'profile-trend-' + Date.now();
+        const dataPoints = ps.sessions.length >= 3
+          ? ps.sessions.map(s => s.accuracy * 100)
+          : ps.recentGames.slice(-20).map(g => g.accuracy * 100);
+        const labels = ps.sessions.length >= 3
+          ? ps.sessions.map(s => s.date.slice(5))
+          : ps.recentGames.slice(-20).map((g, i) => '' + (i + 1));
+        // Determine trend direction
+        const recent = dataPoints.slice(-5);
+        const prev = dataPoints.slice(-10, -5);
+        const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+        const prevAvg = prev.length > 0 ? prev.reduce((a, b) => a + b, 0) / prev.length : recentAvg;
+        const trendDir = recentAvg > prevAvg + 2 ? _t('improving') : recentAvg < prevAvg - 2 ? _t('declining') : _t('stable');
+        const trendColor = recentAvg > prevAvg + 2 ? 'text-emerald-400' : recentAvg < prevAvg - 2 ? 'text-red-400' : 'text-slate-400';
+
+        trendHTML = `<div class="bg-slate-900 rounded-lg p-3">
+          <div class="flex justify-between items-center mb-2">
+            <div class="text-xs font-bold text-slate-400">${_t('accuracy_trend')}</div>
+            <div class="text-xs ${trendColor}">${trendDir}</div>
+          </div>
+          <canvas id="${trendId}" width="280" height="80" style="width:100%;height:80px"></canvas>
+        </div>`;
+
+        // Schedule canvas draw after render
+        setTimeout(() => {
+          const c = document.getElementById(trendId);
+          if (!c) return;
+          const ctx = c.getContext('2d');
+          const W = c.width, H = c.height;
+          ctx.clearRect(0, 0, W, H);
+          const minV = Math.max(0, Math.min(...dataPoints) - 10);
+          const maxV = Math.min(100, Math.max(...dataPoints) + 10);
+          const range = maxV - minV || 1;
+          const n = dataPoints.length;
+          const xStep = (W - 10) / Math.max(n - 1, 1);
+
+          // Grid lines
+          ctx.strokeStyle = '#334155'; ctx.lineWidth = 0.5;
+          for (let y = 0; y <= 4; y++) {
+            const yy = 5 + (H - 10) * y / 4;
+            ctx.beginPath(); ctx.moveTo(5, yy); ctx.lineTo(W - 5, yy); ctx.stroke();
+          }
+
+          // Line
+          ctx.strokeStyle = recentAvg > prevAvg + 2 ? '#22c55e' : recentAvg < prevAvg - 2 ? '#ef4444' : '#94a3b8';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          for (let i = 0; i < n; i++) {
+            const x = 5 + i * xStep;
+            const y = H - 5 - ((dataPoints[i] - minV) / range) * (H - 10);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+
+          // Points
+          for (let i = 0; i < n; i++) {
+            const x = 5 + i * xStep;
+            const y = H - 5 - ((dataPoints[i] - minV) / range) * (H - 10);
+            ctx.fillStyle = dataPoints[i] >= 60 ? '#22c55e' : dataPoints[i] >= 40 ? '#eab308' : '#ef4444';
+            ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+          }
+        }, 50);
+      }
+
+      // Section C: Mistake Breakdown
+      const leakEntries = Object.entries(ps.leaks).filter(([k, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      const totalLeaks = leakEntries.reduce((s, [k, v]) => s + v, 0);
+      let mistakeHTML = '';
+      if (totalLeaks > 0) {
+        const leakColors = { BLOCKING_MISS: '#ef4444', FEED_ERROR: '#f97316', DOUBLE_TIMING: '#eab308', DEAD_END: '#a855f7', PIP_WASTE: '#3b82f6', PARTNER_IGNORE: '#ec4899' };
+        const topMistake = leakEntries[0];
+        mistakeHTML = `<div class="bg-slate-900 rounded-lg p-3">
+          <div class="text-xs font-bold text-slate-400 mb-2">${_t('mistake_breakdown')}</div>
+          <div class="space-y-1.5">
+            ${leakEntries.map(([type, count]) => {
+              const pct = Math.round(count / totalLeaks * 100);
+              const color = leakColors[type] || '#94a3b8';
+              const label = LEAK_TYPES[type] || type;
+              return `<div class="flex items-center gap-2">
+                <span class="text-xs w-20 truncate" style="color:${color}">${label}</span>
+                <div class="flex-1 bg-slate-700 rounded-full h-2">
+                  <div class="h-2 rounded-full" style="width:${pct}%;background:${color}"></div>
+                </div>
+                <span class="text-xs text-slate-400 w-8 text-right">${count}</span>
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="text-xs text-orange-400 mt-2 border-t border-slate-700 pt-1">${_t('most_common_mistake')}: <b>${LEAK_TYPES[topMistake[0]]}</b> (${topMistake[1]}x)</div>
+        </div>`;
+      }
+
+      // Section D: Move Quality Distribution
+      const qualityHTML = `<div class="bg-slate-900 rounded-lg p-3">
+        <div class="text-xs font-bold text-slate-400 mb-2">${_t('move_quality')}</div>
+        <div class="space-y-1.5">
+          ${[
+            { label: _t('perfect'), count: ps.optimalMoves, color: '#22c55e' },
+            { label: appLang==='pt'?'Imprecisão':'Inaccuracy', count: ps.goodMoves, color: '#86efac' },
+            { label: _t('mistake'), count: ps.okMoves, color: '#eab308' },
+            { label: _t('blunder'), count: ps.badMoves, color: '#ef4444' }
+          ].map(g => {
+            const pct = (g.count / totalMoves * 100).toFixed(0);
+            return `<div class="flex items-center gap-2">
+              <span class="text-xs w-16" style="color:${g.color}">${g.label}</span>
+              <div class="flex-1 bg-slate-700 rounded-full h-2">
+                <div class="h-2 rounded-full" style="width:${pct}%;background:${g.color}"></div>
+              </div>
+              <span class="text-xs text-slate-400 w-14 text-right">${g.count} (${pct}%)</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+      // Section E: Start vs Roll Stats
+      let startRollHTML = '';
+      if (ps.startRoll && (ps.startRoll.startGames > 0 || ps.startRoll.rollGames > 0)) {
+        const sr = ps.startRoll;
+        const startWR = sr.startGames > 0 ? (sr.startWins / sr.startGames * 100).toFixed(0) : '—';
+        const rollWR = sr.rollGames > 0 ? (sr.rollWins / sr.rollGames * 100).toFixed(0) : '—';
+        const totalSR = sr.startGames + sr.rollGames;
+        const recommendation = totalSR >= 20
+          ? (sr.startGames > 0 && sr.rollGames > 0
+            ? (sr.startWins / sr.startGames > sr.rollWins / sr.rollGames ? 'Starting seems stronger for you' : 'Rolling seems stronger for you')
+            : '')
+          : `${20 - totalSR} more games needed for recommendation`;
+
+        startRollHTML = `<div class="bg-slate-900 rounded-lg p-3">
+          <div class="text-xs font-bold text-slate-400 mb-2">${_t('start_vs_roll')}</div>
+          <div class="grid grid-cols-2 gap-3 text-center">
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-lg font-bold text-emerald-400">${startWR}%</div>
+              <div class="text-xs text-slate-400">${_t('start_decision')} (${sr.startGames})</div>
+            </div>
+            <div class="bg-slate-800 rounded p-2">
+              <div class="text-lg font-bold text-blue-400">${rollWR}%</div>
+              <div class="text-xs text-slate-400">${_t('roll_decision')} (${sr.rollGames})</div>
+            </div>
+          </div>
+          ${recommendation ? `<div class="text-xs text-slate-500 mt-1 text-center">${recommendation}</div>` : ''}
+        </div>`;
+      }
+
+      // Recent games list
+      const recentGames = ps.recentGames.slice(-10).reverse();
+      let recentHTML = '';
+      if (recentGames.length > 0) {
+        recentHTML = `<div class="bg-slate-900 rounded-lg p-2">
+          <div class="text-xs font-bold text-slate-400 mb-1">${appLang==='pt'?'Jogos Recentes':'Recent Games'}</div>
+          <div class="space-y-0.5 max-h-[150px] overflow-y-auto">
+            ${recentGames.map(g => {
+              const d = new Date(g.date);
+              const dateStr = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+              const resultColor = g.result === 'win' ? 'text-emerald-400' : g.result === 'tie' ? 'text-yellow-400' : 'text-red-400';
+              const resultText = g.result === 'win' ? 'W' : g.result === 'tie' ? 'T' : 'L';
+              const accColor = g.accuracy >= 0.6 ? 'text-emerald-400' : g.accuracy >= 0.4 ? 'text-yellow-400' : 'text-red-400';
+              return `<div class="flex items-center gap-2 py-0.5 text-xs">
+                <span class="text-slate-500 w-14">${dateStr}</span>
+                <span class="font-bold ${resultColor} w-4">${resultText}</span>
+                <span class="${accColor} font-mono w-10">${(g.accuracy*100).toFixed(0)}%</span>
+                ${g.worstMistake ? `<span class="text-red-400">EL:${g.worstMistake.eqLoss.toFixed(2)}</span>` : '<span class="text-emerald-400">clean</span>'}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }
+
+      // Delete button
+      const deleteHTML = `<div class="text-center mt-2">
+        <button class="text-xs text-red-500 hover:text-red-400" onclick="if(confirm('${_t('confirm_delete').replace(/'/g, "\\'")}')) deletePlayer('${player.id}')">${_t('delete_player')}</button>
+      </div>`;
+
+      return `<div class="space-y-3 flex-1 overflow-y-auto">
+        ${selectorHTML}
+        ${overviewHTML}
+        ${trendHTML}
+        ${qualityHTML}
+        ${mistakeHTML}
+        ${startRollHTML}
+        ${recentHTML}
+        ${deleteHTML}
+      </div>`;
+    }
+
+    function promptNewPlayer() {
+      const name = prompt(_t('enter_name'));
+      if (name && name.trim()) createPlayer(name.trim());
+    }
+
     function renderStatsPanel() {
       const total = stats.totalMoves;
       const accuracy = total > 0 ? ((stats.optimalMoves / total) * 100).toFixed(1) : '0.0';
@@ -11977,6 +12509,8 @@
 
     function chooseStarter(player) {
       starterChoicePending = false;
+      // Track start/roll decision: player 0 or 2 = our team starts, otherwise roll
+      _currentStartDecision = (player === 0 || player === 2) ? 'start' : 'roll';
       const hands = pendingHands;
       pendingHands = null;
       launchGame(player, true, hands); // free choice of opening tile with pre-dealt hands
