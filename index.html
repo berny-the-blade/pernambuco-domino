@@ -3487,7 +3487,12 @@
                 {/* Partner (top) — same team = blue */}
                 <div className={'player-panel p-3 mb-2 mx-12 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
                   <div className="flex items-center justify-center gap-2 mb-2">
-                    <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={36} />
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={36} />
+                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[topSlot] || []).length}</span>
+                      </div>
+                    </div>
                     <span className="text-xs font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
                     {isBot(topSlot)
                       ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
@@ -3504,10 +3509,14 @@
                   {/* Left opponent — opposing team = red */}
                   <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 52, borderTop: '3px solid #ef4444' }}>
                     <div className="mb-1 flex flex-col items-center gap-1">
-                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={32} />
+                      <div style={{ position: 'relative' }}>
+                        <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={32} />
+                        <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
+                        </div>
+                      </div>
                       {gameState.currentPlayer === leftSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</div>}
                     </div>
-                    <TileBack count={(gameState.hands?.[leftSlot] || []).length} vertical={true} partner={false} />
                     <div className="text-[8px] text-white/60 mt-1 text-center truncate font-bold" style={{ maxWidth: 48 }}>{gameState.players?.[leftSlot]?.name}</div>
                   </div>
 
@@ -3538,7 +3547,13 @@
                       }
                       if (cur.length > 0) rows.push(cur);
 
-                      const EndBadge = () => null;
+                      const EndBadge = ({ num }) => (
+                        <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.35)',
+                          border: '1.5px solid rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', flexShrink: 0 }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{num}</span>
+                        </div>
+                      );
 
                       const makeTile = (idx, forceVertical, flipped) => {
                         const t = board[idx];
@@ -3604,10 +3619,14 @@
                   {/* Right opponent — opposing team = red */}
                   <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 52, borderTop: '3px solid #ef4444' }}>
                     <div className="mb-1 flex flex-col items-center gap-1">
-                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={32} />
+                      <div style={{ position: 'relative' }}>
+                        <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={32} />
+                        <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
+                        </div>
+                      </div>
                       {gameState.currentPlayer === rightSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</div>}
                     </div>
-                    <TileBack count={(gameState.hands?.[rightSlot] || []).length} vertical={true} partner={false} />
                     <div className="text-[8px] text-white/60 mt-1 text-center truncate font-bold" style={{ maxWidth: 48 }}>{gameState.players?.[rightSlot]?.name}</div>
                   </div>
                 </div>
@@ -3615,9 +3634,13 @@
                 {/* My Hand — my team = blue */}
                 <div className={'my-hand p-3 mx-4 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
                   <div className="flex items-center justify-center gap-2 mb-2">
-                    <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={36} />
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={36} />
+                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
+                      </div>
+                    </div>
                     <span className="text-xs font-bold text-white/80">Voce</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-bold">{myHand.length} pecas</span>
                     {isMyTurn && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                   </div>
 
