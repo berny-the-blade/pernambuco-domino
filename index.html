@@ -3822,14 +3822,16 @@
                         }
 
                         if (wouldOverflow) {
-                          /* Turn tile: attach to cursor (no gap), center vertically */
+                          /* Turn tile: bridge between current row and next row.
+                             Assign to next row so it gets centered with that row's tiles. */
                           let tx = goRight ? cursorX : cursorX - turn.w;
                           tx = Math.max(0, Math.min(tx, maxTileW - turn.w));
-                          const ty = row * ROW_H + (ROW_H - turn.h) / 2;
-                          items.push({ i, row, x: tx, y: ty, orient: 'vertical', flip: false, turn: true, dir: goRight ? 1 : -1, w: turn.w, h: turn.h });
                           row++;
                           goRight = !goRight;
-                          cursorX = goRight ? tx : tx + turn.w;
+                          /* Y spans from previous row into new row */
+                          const ty = row * ROW_H - turn.h / 2;
+                          items.push({ i, row, x: tx, y: ty, orient: 'vertical', flip: false, turn: true, dir: goRight ? 1 : -1, w: turn.w, h: turn.h });
+                          cursorX = goRight ? tx + turn.w : tx;
                           continue;
                         }
 
@@ -3842,17 +3844,26 @@
                         items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w, h });
                       }
 
-                      /* --- Per-row centering (fixes drift on ALL chains) --- */
-                      const rowMap = new Map();
-                      for (const it of items) {
-                        if (!rowMap.has(it.row)) rowMap.set(it.row, []);
-                        rowMap.get(it.row).push(it);
-                      }
-                      for (const [, arr] of rowMap) {
+                      /* --- Centering: if no turns, center each row; if turns exist, center all rows as one unit --- */
+                      const hasTurns = items.some(it => it.turn);
+                      if (!hasTurns) {
+                        const rowMap = new Map();
+                        for (const it of items) {
+                          if (!rowMap.has(it.row)) rowMap.set(it.row, []);
+                          rowMap.get(it.row).push(it);
+                        }
+                        for (const [, arr] of rowMap) {
+                          let minX = Infinity, maxX2 = -Infinity;
+                          for (const it of arr) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                          const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
+                          for (const it of arr) it.x += shift;
+                        }
+                      } else {
+                        /* With turns: center the entire chain as one unit so connections are preserved */
                         let minX = Infinity, maxX2 = -Infinity;
-                        for (const it of arr) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
+                        for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
                         const shift = (maxTileW - (maxX2 - minX)) / 2 - minX;
-                        for (const it of arr) it.x += shift;
+                        for (const it of items) it.x += shift;
                       }
 
                       const totalH = (row + 1) * ROW_H;
