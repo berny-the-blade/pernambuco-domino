@@ -121,8 +121,8 @@
     /* === My hand panel === */
     .my-hand {
       background: rgba(0,0,0,0.25);
-      border: 2px solid rgba(255,255,255,0.1);
-      border-radius: 16px;
+      border: 1.5px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
       backdrop-filter: blur(4px);
       transition: all 0.3s ease;
     }
@@ -3224,7 +3224,7 @@
         );
       };
 
-      const HAND_DIMS = { S: { w: 42, h: 76, dot: 6, cont: 26 }, M: { w: 48, h: 88, dot: 7, cont: 30 }, L: { w: 54, h: 98, dot: 7, cont: 32 } };
+      const HAND_DIMS = { S: { w: 36, h: 64, dot: 5, cont: 22 }, M: { w: 42, h: 74, dot: 6, cont: 26 }, L: { w: 48, h: 84, dot: 7, cont: 28 } };
       const hDims = HAND_DIMS[boardSize] || HAND_DIMS.M;
       const DominoTile = ({ tile, playable, onClick }) => (
         <div
@@ -3922,19 +3922,19 @@
                 </div>
 
                 {/* My Hand — my team = blue */}
-                <div className={'my-hand px-2 py-1.5 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
-                  <div className="flex items-center justify-center gap-2 mb-1">
+                <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
+                  <div className="flex items-center justify-center gap-1.5" style={{ marginBottom: 2 }}>
                     <div style={{ position: 'relative', flexShrink: 0 }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={28} />
-                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={22} />
+                      <div style={{ position: 'absolute', bottom: -2, right: -2, width: 14, height: 14, borderRadius: '50%', background: '#16a34a', border: '1.5px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
                       </div>
                     </div>
-                    <span className="text-[11px] font-bold text-white/80">Voce</span>
-                    {isMyTurn && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
+                    <span className="text-[10px] font-bold text-white/80">Voce</span>
+                    {isMyTurn && <span className="text-[8px] px-1 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                   </div>
 
-                  <div className="flex flex-wrap gap-1.5 justify-center mb-1">
+                  <div className="flex flex-wrap gap-1 justify-center" style={{ marginBottom: 2 }}>
                     {myHand.map(tile => (
                       <DominoTile
                         key={tile.id}
@@ -3952,13 +3952,13 @@
                     ))}
                   </div>
                   {isMyTurn && !myHand.some(t => canPlayTile(t)) && (
-                    <div className="text-center text-xs font-bold text-yellow-300/80 py-1 animate-slide-down">
-                      Sem peca valida — passando automaticamente...
+                    <div className="text-center text-[10px] font-bold text-yellow-300/80 animate-slide-down">
+                      Sem peca — passando...
                     </div>
                   )}
                   {isMyTurn && moveTimer !== null && myHand.some(t => canPlayTile(t)) && (
-                    <div className="text-center mt-1">
-                      <span className={'inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ' + (moveTimer <= 3 ? 'bg-red-500/30 text-red-300' : 'bg-white/10 text-white/60')}>
+                    <div className="text-center">
+                      <span className={'inline-block px-1.5 py-0 rounded-full text-[9px] font-bold ' + (moveTimer <= 3 ? 'bg-red-500/30 text-red-300' : 'bg-white/10 text-white/60')}>
                         {moveTimer}s
                       </span>
                     </div>
