@@ -3833,52 +3833,28 @@
                         );
                       }
 
-                      // Multi-row snake layout with proper turn connectors
-                      // Row 0: right-aligned (chain grows left to right, overflows right)
-                      // Row 0→1 turn: vertical connector at RIGHT edge
-                      // Row 1: right-to-left (reversed), right-aligned
-                      // Row 1→2 turn: vertical connector at LEFT edge
-                      // etc.
+                      // Multi-row snake: all tiles in one row per line, turn tiles inline
+                      // Row 0: L→R, right-aligned. Odd rows: R→L. Even>0: L→R.
+                      // Turn connector = first tile of row rendered vertical, inline with row.
                       return (
                         <div style={{ width: '100%' }}>
                           {rows.map((row, rIdx) => {
                             const isOdd = rIdx % 2 === 1;
-                            // Turn connector is first tile of rows > 0
-                            const hasTurn = rIdx > 0;
-                            const turnIdx = hasTurn ? row[0] : null;
-                            const bodyTiles = hasTurn ? row.slice(1) : row;
-
-                            // Row direction and alignment
-                            const goesRight = !isOdd; // even rows go L→R, odd rows go R→L
-                            // Even rows align right (chain enters from left or turn is at left)
-                            // Odd rows: chain enters from right turn, flows left
-                            const rowStyle = {
-                              display: 'flex',
-                              flexDirection: goesRight ? 'row' : 'row-reverse',
-                              justifyContent: rIdx === 0 ? 'flex-end' : 'flex-start',
-                              alignItems: 'center',
-                              gap: 0,
-                            };
-
-                            // Turn connector: sits at the edge connecting to row above
-                            // For odd rows: turn is at RIGHT edge (chain came from right end of row above)
-                            // For even rows > 0: turn is at LEFT edge
-                            const turnAlign = isOdd ? 'flex-end' : 'flex-start';
-
+                            const goesRight = !isOdd;
                             return (
-                              <div key={rIdx}>
-                                {/* Turn connector row — sits between rows, aligned to correct edge */}
-                                {hasTurn && (
-                                  <div style={{ display: 'flex', justifyContent: turnAlign }}>
-                                    {makeTile(turnIdx, true, isOdd, { marginTop: -1.5, marginBottom: -1.5, zIndex: 1 })}
-                                  </div>
-                                )}
-                                {/* Main tile row */}
-                                <div style={rowStyle}>
-                                  {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
-                                  {bodyTiles.map(idx => makeTile(idx, false, isOdd))}
-                                  {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
-                                </div>
+                              <div key={rIdx} style={{
+                                display: 'flex',
+                                flexDirection: goesRight ? 'row' : 'row-reverse',
+                                justifyContent: rIdx === 0 ? 'flex-end' : 'flex-start',
+                                alignItems: 'center',
+                                flexWrap: 'nowrap',
+                              }}>
+                                {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
+                                {row.map((idx, posInRow) => {
+                                  const isTurn = posInRow === 0 && rIdx > 0;
+                                  return makeTile(idx, isTurn, isOdd);
+                                })}
+                                {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
                               </div>
                             );
                           })}
@@ -3919,13 +3895,6 @@
                         </div>
                       );
                     })()}
-                    {/* Score dials — T1 top-left, T2 bottom-right */}
-                    <div style={{ position: 'absolute', top: 2, left: 2, opacity: 0.75, zIndex: 10, pointerEvents: 'none' }}>
-                      <TeamDial score={score0} total={mt} color="#3b82f6" lightColor="#93c5fd" label="T1" />
-                    </div>
-                    <div style={{ position: 'absolute', bottom: 2, right: 2, opacity: 0.75, zIndex: 10, pointerEvents: 'none' }}>
-                      <TeamDial score={score1} total={mt} color="#ef4444" lightColor="#fca5a5" label="T2" />
-                    </div>
                   </div>
 
                   {/* Right opponent — opposing team = red */}
@@ -3944,6 +3913,12 @@
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Score dials row — T1 left, T2 right */}
+                <div className="flex justify-between px-1" style={{ opacity: 0.8 }}>
+                  <TeamDial score={score0} total={mt} color="#3b82f6" lightColor="#93c5fd" label="T1" />
+                  <TeamDial score={score1} total={mt} color="#ef4444" lightColor="#fca5a5" label="T2" />
                 </div>
 
                 {/* My Hand — my team = blue */}
