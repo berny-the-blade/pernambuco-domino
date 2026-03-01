@@ -3788,73 +3788,81 @@
                       </div>
                     ) : (() => {
                       const board = gameState.board;
-                      const HW = bDims.hw, VW = bDims.vw, GAP = 0;
-                      const MAX_W = boardRef.current ? boardRef.current.clientWidth - 28 : 280;
+                      const HW = bDims.hw, VW = bDims.vw;
+                      const ROW_H = HW + 2;
+                      const BADGE = 24;
+                      const containerW = boardRef.current ? boardRef.current.clientWidth - 16 : 300;
+                      const maxTileW = containerW - BADGE * 2 - 8;
+                      const offX = BADGE + 4;
 
-                      // Row-breaking (snake layout from simulator)
-                      const rows = [];
-                      let cur = [], w = 0;
+                      /* --- Grid-based layout: walk chain, place tiles, turn at edges --- */
+                      const items = [];
+                      let cx = 0, row = 0, goRight = true, lastDir = 1;
                       for (let i = 0; i < board.length; i++) {
-                        const isD = board[i].left === board[i].right;
+                        const t = board[i];
+                        const isD = t.left === t.right;
                         const tw = isD ? VW : HW;
-                        const need = cur.length > 0 ? tw + GAP : tw;
-                        if (w + need > MAX_W && cur.length > 0) {
-                          rows.push(cur);
-                          cur = [i]; w = tw;
+                        const th = isD ? HW : VW;
+                        let needsTurn = false;
+                        if (i > 0) {
+                          if (goRight && cx + tw > maxTileW) needsTurn = true;
+                          if (!goRight && cx - tw < 0) needsTurn = true;
+                        }
+                        if (needsTurn) {
+                          const tx = goRight ? maxTileW - VW : 0;
+                          items.push({ i, x: tx, y: row * ROW_H, orient: 'vertical', flip: !goRight, turn: true, dir: goRight ? 1 : -1 });
+                          row++;
+                          goRight = !goRight;
+                          lastDir = goRight ? 1 : -1;
+                          cx = goRight ? VW : maxTileW - VW;
                         } else {
-                          cur.push(i); w += need;
+                          let px;
+                          if (goRight) { px = cx; cx += tw; } else { cx -= tw; px = cx; }
+                          const py = row * ROW_H + (ROW_H - th) / 2;
+                          items.push({ i, x: px, y: py, orient: isD ? 'vertical' : 'horizontal', flip: !goRight, dir: goRight ? 1 : -1 });
+                          lastDir = goRight ? 1 : -1;
                         }
                       }
-                      if (cur.length > 0) rows.push(cur);
+                      const totalH = (row + 1) * ROW_H;
 
-                      const EndBadge = ({ num }) => (
-                        <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#10b981',
+                      /* --- Badge positions --- */
+                      const first = items[0], last = items[items.length - 1];
+                      const firstH = first.orient === 'vertical' ? HW : VW;
+                      const lastTW = last.orient === 'vertical' ? VW : HW;
+                      const lastH = last.orient === 'vertical' ? HW : VW;
+                      const lbx = first.x - BADGE - 2;
+                      const lby = first.y + (firstH - BADGE) / 2;
+                      let rbx, rby;
+                      if (last.turn) {
+                        rbx = last.x + (VW - BADGE) / 2;
+                        rby = last.y + HW + 2;
+                      } else if (last.dir === 1) {
+                        rbx = last.x + lastTW + 2;
+                        rby = last.y + (lastH - BADGE) / 2;
+                      } else {
+                        rbx = last.x - BADGE - 2;
+                        rby = last.y + (lastH - BADGE) / 2;
+                      }
+
+                      const EndBadge = ({ num, bx, by }) => (
+                        <div style={{ position: 'absolute', left: offX + bx, top: by, width: BADGE, height: BADGE, borderRadius: '50%', background: '#10b981',
                           border: '2px solid #064e3b', display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', flexShrink: 0, boxShadow: '0 0 6px rgba(16,185,129,0.5)' }}>
+                          justifyContent: 'center', zIndex: 5, boxShadow: '0 0 6px rgba(16,185,129,0.5)' }}>
                           <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{num}</span>
                         </div>
                       );
 
-                      const makeTile = (idx, forceVertical, flipped, extraStyle) => {
-                        const t = board[idx];
-                        const isD = t.left === t.right;
-                        const orient = (isD || forceVertical) ? 'vertical' : 'horizontal';
-                        return <BoardTile key={t.id || idx} tile={t} orientation={orient} flipped={flipped} extraStyle={extraStyle} />;
-                      };
-
-                      // Single row — centered with end badges
-                      if (rows.length === 1) {
-                        return (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: GAP }}>
-                            <EndBadge num={gameState.leftEnd} />
-                            {rows[0].map(idx => makeTile(idx, false, false))}
-                            <EndBadge num={gameState.rightEnd} />
-                          </div>
-                        );
-                      }
-
-                      // Multi-row snake: all tiles in one row per line, turn tiles inline
-                      // Row 0: L→R, right-aligned. Odd rows: R→L. Even>0: L→R.
-                      // Turn connector = first tile of row rendered vertical, inline with row.
                       return (
-                        <div style={{ width: '100%' }}>
-                          {rows.map((row, rIdx) => {
-                            const isOdd = rIdx % 2 === 1;
-                            const goesRight = !isOdd;
+                        <div style={{ position: 'relative', width: containerW, height: Math.max(totalH, VW + 4), margin: '0 auto' }}>
+                          <EndBadge num={gameState.leftEnd} bx={lbx} by={lby} />
+                          <EndBadge num={gameState.rightEnd} bx={rbx} by={rby} />
+                          {items.map(item => {
+                            const t = board[item.i];
+                            const isD = t.left === t.right;
+                            const orient = (isD || item.turn) ? 'vertical' : 'horizontal';
                             return (
-                              <div key={rIdx} style={{
-                                display: 'flex',
-                                flexDirection: goesRight ? 'row' : 'row-reverse',
-                                justifyContent: rIdx === 0 ? 'flex-end' : 'flex-start',
-                                alignItems: 'center',
-                                flexWrap: 'nowrap',
-                              }}>
-                                {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
-                                {row.map((idx, posInRow) => {
-                                  const isTurn = posInRow === 0 && rIdx > 0;
-                                  return makeTile(idx, isTurn, isOdd);
-                                })}
-                                {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
+                              <div key={t.id || item.i} style={{ position: 'absolute', left: offX + item.x, top: item.y }}>
+                                <BoardTile tile={t} orientation={orient} flipped={item.flip} />
                               </div>
                             );
                           })}
