@@ -416,6 +416,7 @@
       const [botSpeed, setBotSpeed] = useState(localStorage.getItem('domino_bot_speed') || 'medium');
       const setBotSpd = (v) => { setBotSpeed(v); localStorage.setItem('domino_bot_speed', v); };
       const [starterCountdown, setStarterCountdown] = useState(null);
+      const [moveTimer, setMoveTimer] = useState(null);
       const [roundCountdown, setRoundCountdown] = useState(null);
       // === Player Profile System ===
       const HUMAN_PROFILES = [
@@ -3040,6 +3041,50 @@
         return () => clearTimeout(timeout);
       }, [gameState?.currentPlayer, gameState?.gameStarted]);
 
+      // Auto-pass: if it's the human's turn and no valid moves, auto-pass after 1.5s
+      useEffect(() => {
+        if (!gameState || !gameState.gameStarted || gameState.gameEnded) return;
+        if (gameState.currentPlayer !== playerSlot) return;
+        if (!gameState.players?.[playerSlot]?.isHuman) return;
+        if (!gameState.board || gameState.board.length === 0) return;
+        const hasValid = gameState.hands[playerSlot].some(t => canPlayTile(t));
+        if (hasValid) return;
+        const timeout = setTimeout(() => {
+          pass();
+        }, 1500);
+        return () => clearTimeout(timeout);
+      }, [gameState?.currentPlayer, gameState?.gameStarted]);
+
+      // Move timer: 10 second countdown for human player, auto-play random valid tile on timeout
+      useEffect(() => {
+        if (!gameState || !gameState.gameStarted || gameState.gameEnded) return;
+        if (gameState.currentPlayer !== playerSlot) { setMoveTimer(null); return; }
+        if (!gameState.players?.[playerSlot]?.isHuman) { setMoveTimer(null); return; }
+        const hasValid = gameState.hands[playerSlot].some(t => canPlayTile(t));
+        if (!hasValid) { setMoveTimer(null); return; } // auto-pass handles this
+        setMoveTimer(10);
+        const iv = setInterval(() => {
+          setMoveTimer(prev => {
+            if (prev <= 1) {
+              clearInterval(iv);
+              // Auto-play: pick first valid tile
+              const hand = gameState.hands[playerSlot];
+              const validTile = hand.find(t => canPlayTile(t));
+              if (validTile) {
+                if (canPlayOnBothEnds(validTile)) {
+                  playTile(validTile, 'left');
+                } else {
+                  playTile(validTile);
+                }
+              }
+              return null;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        return () => { clearInterval(iv); };
+      }, [gameState?.currentPlayer, gameState?.gameStarted]);
+
       // Auto-start for solo mode (1 human)
       useEffect(() => {
         if (!gameState || gameState.gameStarted) return;
@@ -3514,37 +3559,32 @@
           <div className="min-h-screen felt-bg p-2 animate-fade-in">
             <div className="max-w-2xl mx-auto">
 
-              {/* Score bar */}
-              <div className="score-bar p-3 mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="text-xs font-bold uppercase tracking-wider" style={{ color: '#93c5fd' }}>Time 1</div>
+              {/* Score bar + size toggle */}
+              <div className="score-bar px-2 py-1.5 mb-1 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] font-bold uppercase" style={{ color: '#93c5fd' }}>T1</div>
                   <ScorePips score={score0} total={mt} color="#3b82f6" />
-                  <div className="text-lg font-extrabold" style={{ color: '#93c5fd' }}>{score0}</div>
+                  <div className="text-base font-extrabold" style={{ color: '#93c5fd' }}>{score0}</div>
                 </div>
-                <div className="text-xs font-bold text-gray-500 px-2">VS</div>
-                <div className="flex items-center gap-3">
-                  <div className="text-lg font-extrabold" style={{ color: '#fca5a5' }}>{score1}</div>
-                  <ScorePips score={score1} total={mt} color="#ef4444" />
-                  <div className="text-xs font-bold uppercase tracking-wider" style={{ color: '#fca5a5' }}>Time 2</div>
-                </div>
-              </div>
-
-              {/* Board size toggle */}
-              <div className="flex justify-center mb-1">
-                <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
+                <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
                   {['S','M','L'].map(sz => (
                     <button key={sz} onClick={() => setBoardSize(sz)}
-                      className="px-2 py-0.5 text-[10px] font-bold transition-colors"
-                      style={{ background: boardSize === sz ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)', color: boardSize === sz ? '#fff' : 'rgba(255,255,255,0.4)' }}>
+                      className="px-1.5 py-0.5 text-[9px] font-bold"
+                      style={{ background: boardSize === sz ? 'rgba(255,255,255,0.2)' : 'transparent', color: boardSize === sz ? '#fff' : 'rgba(255,255,255,0.3)' }}>
                       {sz}
                     </button>
                   ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-base font-extrabold" style={{ color: '#fca5a5' }}>{score1}</div>
+                  <ScorePips score={score1} total={mt} color="#ef4444" />
+                  <div className="text-[10px] font-bold uppercase" style={{ color: '#fca5a5' }}>T2</div>
                 </div>
               </div>
 
               {/* Message toast */}
               {gameState.message && (
-                <div className="msg-toast p-3 mb-2 text-center text-sm font-semibold animate-slide-down">
+                <div className="msg-toast px-2 py-1 mb-1 text-center text-xs font-semibold animate-slide-down">
                   {gameState.message}
                 </div>
               )}
@@ -3628,44 +3668,51 @@
               )}
 
               {/* Game Table */}
-              <div className="felt-bg rounded-2xl p-3 mb-2 relative" style={{ border: '2px solid rgba(255,255,255,0.08)' }}>
+              <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
 
                 {/* Partner (top) — same team = blue */}
-                <div className={'player-panel p-3 mb-2 mx-12 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
-                  <div className="flex items-center justify-center gap-2 mb-2">
-                    <div style={{ position: 'relative', flexShrink: 0 }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={36} />
-                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[topSlot] || []).length}</span>
-                      </div>
+                <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={28} />
+                    <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[topSlot] || []).length}</span>
                     </div>
-                    <span className="text-xs font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
-                    {isBot(topSlot)
-                      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
-                      : <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/30 text-green-200 font-bold">PARCEIRO</span>
-                    }
-                    {gameState.currentPlayer === topSlot && <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</span>}
                   </div>
-                  <TileBack count={(gameState.hands?.[topSlot] || []).length} vertical={false} partner={!isBot(topSlot)} />
+                  <span className="text-[11px] font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
+                  {isBot(topSlot)
+                    ? <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
+                    : <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/30 text-green-200 font-bold">PARCEIRO</span>
+                  }
+                  {gameState.currentPlayer === topSlot && <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</span>}
+                  <div className="flex gap-0.5 ml-1">
+                    {Array.from({ length: (gameState.hands?.[topSlot] || []).length }).map((_, i) => (
+                      <div key={i} className="tile-back" style={{ width: 10, height: 18 }}></div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Middle row */}
-                <div className="flex items-stretch mb-2 gap-2">
+                <div className="flex items-stretch mb-1 gap-1">
 
                   {/* Left opponent — opposing team = red */}
-                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 56, borderTop: '3px solid #ef4444' }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48, borderTop: '2px solid #ef4444' }}>
                     <div style={{ position: 'relative' }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={32} />
+                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={28} />
                       <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
                       </div>
                     </div>
-                    <div className="text-[9px] text-white/70 mt-1 text-center truncate font-bold" style={{ maxWidth: 52 }}>{gameState.players?.[leftSlot]?.name}</div>
-                    {gameState.currentPlayer === leftSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
+                    <div className="text-[8px] text-white/60 mt-0.5 text-center truncate font-bold" style={{ maxWidth: 46 }}>{gameState.players?.[leftSlot]?.name}</div>
+                    {gameState.currentPlayer === leftSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
+                    <div className="flex flex-col gap-0.5 items-center mt-1">
+                      {Array.from({ length: (gameState.hands?.[leftSlot] || []).length }).map((_, i) => (
+                        <div key={i} className="tile-back" style={{ width: 8, height: 14 }}></div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Board */}
-                  <div ref={boardRef} className="board-area flex-1 p-3 overflow-auto flex flex-col items-center justify-center" style={{ position: 'relative', minHeight: bDims.minH }}>
+                  <div ref={boardRef} className="board-area flex-1 p-2 overflow-auto flex flex-col items-center justify-center" style={{ position: 'relative', minHeight: bDims.minH }}>
                     {(!gameState.board || gameState.board.length === 0) ? (
                       <div className="flex-1 flex items-center justify-center">
                         <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
@@ -3761,32 +3808,37 @@
                   </div>
 
                   {/* Right opponent — opposing team = red */}
-                  <div className={'player-panel p-2 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 56, borderTop: '3px solid #ef4444' }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48, borderTop: '2px solid #ef4444' }}>
                     <div style={{ position: 'relative' }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={32} />
+                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={28} />
                       <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
                       </div>
                     </div>
-                    <div className="text-[9px] text-white/70 mt-1 text-center truncate font-bold" style={{ maxWidth: 52 }}>{gameState.players?.[rightSlot]?.name}</div>
-                    {gameState.currentPlayer === rightSlot && <div className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
+                    <div className="text-[8px] text-white/60 mt-0.5 text-center truncate font-bold" style={{ maxWidth: 46 }}>{gameState.players?.[rightSlot]?.name}</div>
+                    {gameState.currentPlayer === rightSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
+                    <div className="flex flex-col gap-0.5 items-center mt-1">
+                      {Array.from({ length: (gameState.hands?.[rightSlot] || []).length }).map((_, i) => (
+                        <div key={i} className="tile-back" style={{ width: 8, height: 14 }}></div>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
                 {/* My Hand — my team = blue */}
-                <div className={'my-hand p-3 mx-4 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
-                  <div className="flex items-center justify-center gap-2 mb-2">
+                <div className={'my-hand px-2 py-1.5 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6' }}>
+                  <div className="flex items-center justify-center gap-2 mb-1">
                     <div style={{ position: 'relative', flexShrink: 0 }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={36} />
-                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
+                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={28} />
+                      <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
                       </div>
                     </div>
-                    <span className="text-xs font-bold text-white/80">Voce</span>
-                    {isMyTurn && <span className="text-[10px] px-2 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
+                    <span className="text-[11px] font-bold text-white/80">Voce</span>
+                    {isMyTurn && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                   </div>
 
-                  <div className="flex flex-wrap gap-2 justify-center mb-2">
+                  <div className="flex flex-wrap gap-1.5 justify-center mb-1">
                     {myHand.map(tile => (
                       <DominoTile
                         key={tile.id}
@@ -3803,10 +3855,17 @@
                       />
                     ))}
                   </div>
-                  {isMyTurn && (
-                    <button onClick={pass} className="btn-pass w-full">
-                      Passar
-                    </button>
+                  {isMyTurn && !myHand.some(t => canPlayTile(t)) && (
+                    <div className="text-center text-xs font-bold text-yellow-300/80 py-1 animate-slide-down">
+                      Sem peca valida — passando automaticamente...
+                    </div>
+                  )}
+                  {isMyTurn && moveTimer !== null && myHand.some(t => canPlayTile(t)) && (
+                    <div className="text-center mt-1">
+                      <span className={'inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ' + (moveTimer <= 3 ? 'bg-red-500/30 text-red-300' : 'bg-white/10 text-white/60')}>
+                        {moveTimer}s
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -3815,8 +3874,8 @@
 
               {/* Dormidas revealed after round ends */}
               {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.dormidas && gameState.dormidas.length > 0 && (
-                <div className="p-3 rounded-xl mb-2" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="text-[10px] text-white/40 font-bold text-center mb-1">Dormidas</div>
+                <div className="px-2 py-1.5 rounded-lg mb-1" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="text-[9px] text-white/40 font-bold text-center mb-0.5">Dormidas</div>
                   <div className="flex gap-1 justify-center flex-wrap">
                     {gameState.dormidas.map(tile => (
                       <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
@@ -3827,7 +3886,7 @@
 
               {/* Action buttons */}
               {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
-                <button onClick={() => { setRoundCountdown(null); newRound(); }} className="btn-primary w-full text-lg animate-bounce-in">
+                <button onClick={() => { setRoundCountdown(null); newRound(); }} className="btn-primary w-full text-base animate-bounce-in py-2">
                   Proxima Rodada{roundCountdown ? ' (' + roundCountdown + 's)' : ''}
                 </button>
               )}
