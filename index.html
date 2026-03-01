@@ -3086,8 +3086,17 @@
         // Only player 0 (host) handles bot moves to avoid duplicates
         if (playerSlot !== 0) return;
 
+        // Check if bot can play before deciding delay
+        const botHand = gameState.hands[currentSlot];
+        const canPlay = botHand.some(t =>
+          t.left === gameState.leftEnd || t.right === gameState.leftEnd ||
+          t.left === gameState.rightEnd || t.right === gameState.rightEnd
+        );
+        // If bot can't play, pass immediately (no artificial delay)
+        const delay = !canPlay ? 300
+          : (() => { const spd = gameState?.config?.botSpeed || botSpeed; return spd === 'instant' ? 100 : spd === 'slow' ? 9000 + Math.random() * 2000 : spd === 'fast' ? 2000 + Math.random() * 2000 : 4000 + Math.random() * 2000; })();
+
         const timeout = setTimeout(async () => {
-          const botHand = gameState.hands[currentSlot];
           const knowledge = buildKnowledge(gameState.moveHistory);
           const bLen = gameState.board?.length || 0;
 
@@ -3100,7 +3109,7 @@
           } else {
             await botPass(currentSlot);
           }
-        }, (() => { const spd = gameState?.config?.botSpeed || botSpeed; return spd === 'instant' ? 100 : spd === 'slow' ? 9000 + Math.random() * 2000 : spd === 'fast' ? 2000 + Math.random() * 2000 : 4000 + Math.random() * 2000; })());
+        }, delay);
 
         return () => clearTimeout(timeout);
       }, [gameState?.currentPlayer, gameState?.gameStarted]);
