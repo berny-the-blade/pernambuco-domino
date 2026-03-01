@@ -662,10 +662,19 @@
         await db.ref('rooms/' + roomCode).update({
           waitingForStarterChoice: false,
           starterChoiceDeadline: null,
+          starterVotes: null,
           currentPlayer: starterSlot,
           message: gameState.players[starterSlot].name + ' comeca!'
         });
       };
+
+      // Submit starter vote (each human on winning team votes independently)
+      const submitStarterVote = async (chosenSlot) => {
+        await db.ref('rooms/' + roomCode + '/starterVotes/' + playerSlot).set(chosenSlot);
+      };
+
+      // Pip count for a hand (tiebreaker: fewer pips = starts)
+      const handPipCount = (hand) => hand.reduce((s, t) => s + t.left + t.right, 0);
 
       const startGame = async () => {
         const cfg = gameState?.config || { humanCount: 2, humanSlots: [0, 2] };
@@ -3057,22 +3066,43 @@
         return () => clearInterval(interval);
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
-      // Auto-pick starter after timer expires (host only)
+      // Resolve starter votes: when both humans on winning team have voted
+      useEffect(() => {
+        if (!gameState?.waitingForStarterChoice) return;
+        if (playerSlot !== 0) return; // only host resolves
+        const votes = gameState.starterVotes;
+        if (!votes) return;
+        const winTeam = gameState.lastWinningTeam;
+        const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
+        const humanSlots = winSlots.filter(s => gameState.players?.[s]?.isHuman);
+        if (humanSlots.length < 2) return; // solo human — direct pick, no voting needed
+        const v0 = votes[humanSlots[0]], v1 = votes[humanSlots[1]];
+        if (v0 === undefined || v1 === undefined) return; // waiting for both
+        if (v0 === v1) {
+          // Both agree on the same player
+          startGameWithStarter(v0);
+        } else {
+          // Conflict — tiebreak: fewer pips starts
+          const pips0 = handPipCount(gameState.hands?.[humanSlots[0]] || []);
+          const pips1 = handPipCount(gameState.hands?.[humanSlots[1]] || []);
+          startGameWithStarter(pips0 <= pips1 ? humanSlots[0] : humanSlots[1]);
+        }
+      }, [gameState?.starterVotes, gameState?.waitingForStarterChoice]);
+
+      // Auto-pick starter after timer expires (host only) — pip tiebreak, no randomness
       useEffect(() => {
         if (!gameState?.waitingForStarterChoice || !gameState?.starterChoiceDeadline) return;
         if (playerSlot !== 0) return;
+        const pickByPips = () => {
+          const winTeam = gameState.lastWinningTeam;
+          const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
+          const pips0 = handPipCount(gameState.hands?.[winSlots[0]] || []);
+          const pips1 = handPipCount(gameState.hands?.[winSlots[1]] || []);
+          startGameWithStarter(pips0 <= pips1 ? winSlots[0] : winSlots[1]);
+        };
         const timeLeft = gameState.starterChoiceDeadline - Date.now();
-        if (timeLeft <= 0) {
-          const winTeam = gameState.lastWinningTeam;
-          const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
-          startGameWithStarter(winSlots[Math.floor(Math.random() * 2)]);
-          return;
-        }
-        const timeout = setTimeout(() => {
-          const winTeam = gameState.lastWinningTeam;
-          const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
-          startGameWithStarter(winSlots[Math.floor(Math.random() * 2)]);
-        }, timeLeft);
+        if (timeLeft <= 0) { pickByPips(); return; }
+        const timeout = setTimeout(pickByPips, timeLeft);
         return () => clearTimeout(timeout);
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
@@ -3500,10 +3530,37 @@
                 const isHumanOnWinTeam = gameState.players?.[playerSlot]?.isHuman && isOnWinTeam;
                 if (!isHumanOnWinTeam) return null;
                 const partnerOnTeam = winSlots.find(s => s !== playerSlot);
+                const partnerIsHuman = gameState.players?.[partnerOnTeam]?.isHuman;
+                const myVote = gameState.starterVotes?.[playerSlot];
+                const partnerVote = gameState.starterVotes?.[partnerOnTeam];
+                const hasVoted = myVote !== undefined && myVote !== null;
+
+                // Solo human on winning team — direct pick (no voting)
+                if (!partnerIsHuman) {
+                  return (
+                    <div className="glass-card p-5 mb-2 text-center animate-bounce-in">
+                      <p className="font-bold mb-1 text-gray-800">Quem comeca a proxima rodada?</p>
+                      <p className="text-xs text-gray-500 mb-3">Veja suas pecas abaixo e escolha.</p>
+                      {starterCountdown !== null && (
+                        <div className="mb-3">
+                          <span className={'inline-block px-3 py-1 rounded-full text-xs font-bold ' + (starterCountdown <= 10 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600')}>
+                            {starterCountdown}s
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex gap-3 justify-center">
+                        <button onClick={() => startGameWithStarter(playerSlot)} className="side-btn right">Eu comeco</button>
+                        <button onClick={() => startGameWithStarter(partnerOnTeam)} className="side-btn left">{gameState.players[partnerOnTeam]?.name} comeca</button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Both humans — simultaneous voting
                 return (
                   <div className="glass-card p-5 mb-2 text-center animate-bounce-in">
                     <p className="font-bold mb-1 text-gray-800">Quem comeca a proxima rodada?</p>
-                    <p className="text-xs text-gray-500 mb-3">Veja suas pecas abaixo e escolha.</p>
+                    <p className="text-xs text-gray-500 mb-2">Voce e {gameState.players[partnerOnTeam]?.name} votam ao mesmo tempo.</p>
                     {starterCountdown !== null && (
                       <div className="mb-3">
                         <span className={'inline-block px-3 py-1 rounded-full text-xs font-bold ' + (starterCountdown <= 10 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600')}>
@@ -3511,10 +3568,22 @@
                         </span>
                       </div>
                     )}
-                    <div className="flex gap-3 justify-center">
-                      <button onClick={() => startGameWithStarter(playerSlot)} className="side-btn right">Eu comeco</button>
-                      <button onClick={() => startGameWithStarter(partnerOnTeam)} className="side-btn left">{gameState.players[partnerOnTeam]?.name} comeca</button>
-                    </div>
+                    {!hasVoted ? (
+                      <div className="flex gap-3 justify-center">
+                        <button onClick={() => submitStarterVote(playerSlot)} className="side-btn right">Eu comeco</button>
+                        <button onClick={() => submitStarterVote(partnerOnTeam)} className="side-btn left">{gameState.players[partnerOnTeam]?.name} comeca</button>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-bold text-green-600 mb-1">Voto registrado!</p>
+                        <p className="text-xs text-gray-500">
+                          {partnerVote !== undefined && partnerVote !== null
+                            ? 'Parceiro tambem votou — decidindo...'
+                            : 'Esperando ' + gameState.players[partnerOnTeam]?.name + ' votar...'}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-2">Se nao concordarem, quem tem menos pontos na mao comeca.</p>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
