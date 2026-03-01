@@ -3844,18 +3844,19 @@
                         if (goRight) { px = cursorX; cursorX += tw; }
                         else { cursorX -= tw; px = cursorX; }
                         const py = row * ROW_H + (ROW_H - th) / 2;
-                        items.push({ i, row, x: px, y: py, orient: baseOrient, flip: !goRight, turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
+                        items.push({ i, row, x: px, y: py, orient: baseOrient, flip: (!goRight && baseOrient === 'horizontal'), turn: false, dir: goRight ? 1 : -1, w: tw, h: th });
                       }
 
-                      /* --- Center entire chain, clamped to bounds --- */
+                      /* --- Anchor first tile centered, clamped to bounds.
+                           Single stable shift preserves connector alignment. --- */
                       if (items.length > 0) {
+                        const firstReal = items.find(it => !it.turn) || items[0];
+                        const desiredShift = (maxTileW / 2) - (firstReal.x + firstReal.w / 2);
                         let minX = Infinity, maxX2 = -Infinity;
                         for (const it of items) { minX = Math.min(minX, it.x); maxX2 = Math.max(maxX2, it.x + it.w); }
-                        const span = maxX2 - minX;
-                        let shift = (maxTileW - span) / 2 - minX;
-                        /* Clamp: don't push left of 0 or right of maxTileW */
-                        if (minX + shift < 0) shift = -minX;
-                        if (maxX2 + shift > maxTileW) shift = maxTileW - maxX2;
+                        const minShift = -minX;
+                        const maxShift = maxTileW - maxX2;
+                        const shift = Math.max(minShift, Math.min(desiredShift, maxShift));
                         for (const it of items) it.x += shift;
                       }
 
