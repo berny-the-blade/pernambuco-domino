@@ -460,6 +460,10 @@
       };
 
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
+      const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
+      const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
+      const BOARD_DIMS = { S: { hw: 44, vw: 22, minH: 192 }, M: { hw: 52, vw: 26, minH: 288 }, L: { hw: 64, vw: 32, minH: 384 } };
+      const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
       const roomRef = useRef(null);
       const boardRef = useRef(null);
@@ -3048,9 +3052,9 @@
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
       // Domino dots pattern
-      const DominoDots = ({ value, size = 'normal' }) => {
-        const dotPx = size === 'small' ? 4 : size === 'board' ? 5 : 7;
-        const containerPx = size === 'small' ? 18 : size === 'board' ? 22 : 32;
+      const DominoDots = ({ value, size = 'normal', dotPxProp, containerPxProp }) => {
+        const dotPx = dotPxProp || (size === 'small' ? 4 : size === 'board' ? 5 : 7);
+        const containerPx = containerPxProp || (size === 'small' ? 18 : size === 'board' ? 22 : 32);
 
         const patterns = {
           0: [],
@@ -3084,17 +3088,19 @@
         );
       };
 
+      const HAND_DIMS = { S: { w: 44, h: 80, dot: 6, cont: 28 }, M: { w: 52, h: 96, dot: 7, cont: 32 }, L: { w: 60, h: 110, dot: 8, cont: 36 } };
+      const hDims = HAND_DIMS[boardSize] || HAND_DIMS.M;
       const DominoTile = ({ tile, playable, onClick }) => (
         <div
           onClick={onClick}
           className={'domino-tile inline-flex flex-col ' + (playable ? 'playable' : 'unplayable')}
-          style={{ width: 48, height: 88 }}
+          style={{ width: hDims.w, height: hDims.h }}
         >
           <div className="flex-1 flex items-center justify-center" style={{ borderBottom: '1.5px solid #c8b898' }}>
-            <DominoDots value={tile.left} />
+            <DominoDots value={tile.left} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
           </div>
           <div className="flex-1 flex items-center justify-center">
-            <DominoDots value={tile.right} />
+            <DominoDots value={tile.right} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
           </div>
         </div>
       );
@@ -3106,19 +3112,22 @@
         const dividerStyle = isVertical
           ? { borderBottom: '1px solid #b8a888', width: '100%' }
           : { borderRight: '1px solid #b8a888', height: '100%' };
+        const hw = bDims.hw, vw = bDims.vw;
+        const bDotPx = vw <= 22 ? 3 : vw <= 26 ? 4 : 5;
+        const bContPx = vw <= 22 ? 15 : vw <= 26 ? 18 : 22;
         return (
           <div
             className="board-tile inline-flex"
             style={isVertical
-              ? { width: 26, height: 52, flexDirection: 'column' }
-              : { width: 52, height: 26, flexDirection: 'row' }}
+              ? { width: vw, height: hw, flexDirection: 'column' }
+              : { width: hw, height: vw, flexDirection: 'row' }}
           >
             <div className="flex-1 flex items-center justify-center">
-              <DominoDots value={val1} size="small" />
+              <DominoDots value={val1} dotPxProp={bDotPx} containerPxProp={bContPx} />
             </div>
             <div style={dividerStyle}></div>
             <div className="flex-1 flex items-center justify-center">
-              <DominoDots value={val2} size="small" />
+              <DominoDots value={val2} dotPxProp={bDotPx} containerPxProp={bContPx} />
             </div>
           </div>
         );
@@ -3413,6 +3422,19 @@
                 </div>
               </div>
 
+              {/* Board size toggle */}
+              <div className="flex justify-center mb-1">
+                <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
+                  {['S','M','L'].map(sz => (
+                    <button key={sz} onClick={() => setBoardSize(sz)}
+                      className="px-2 py-0.5 text-[10px] font-bold transition-colors"
+                      style={{ background: boardSize === sz ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)', color: boardSize === sz ? '#fff' : 'rgba(255,255,255,0.4)' }}>
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Message toast */}
               {gameState.message && (
                 <div className="msg-toast p-3 mb-2 text-center text-sm font-semibold animate-slide-down">
@@ -3490,14 +3512,14 @@
                   </div>
 
                   {/* Board */}
-                  <div ref={boardRef} className="board-area flex-1 p-3 min-h-72 overflow-auto flex flex-col items-center justify-center" style={{ position: 'relative' }}>
+                  <div ref={boardRef} className="board-area flex-1 p-3 overflow-auto flex flex-col items-center justify-center" style={{ position: 'relative', minHeight: bDims.minH }}>
                     {(!gameState.board || gameState.board.length === 0) ? (
                       <div className="flex-1 flex items-center justify-center">
                         <p className="text-green-700/40 text-sm font-semibold">Mesa vazia</p>
                       </div>
                     ) : (() => {
                       const board = gameState.board;
-                      const HW = 52, VW = 26, GAP = 1;
+                      const HW = bDims.hw, VW = bDims.vw, GAP = 1;
                       const MAX_W = boardRef.current ? boardRef.current.clientWidth - 28 : 280;
 
                       // Row-breaking (snake layout from simulator)
