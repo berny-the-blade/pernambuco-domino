@@ -454,6 +454,8 @@
       const [starterCountdown, setStarterCountdown] = useState(null);
       const [moveTimer, setMoveTimer] = useState(null);
       const [roundCountdown, setRoundCountdown] = useState(null);
+      const [showNextBtn, setShowNextBtn] = useState(false);
+      const [showNextBtn, setShowNextBtn] = useState(false);
       const [flyingTile, setFlyingTile] = useState(null);
       const [animations, setAnimations] = useState(localStorage.getItem('domino_animations') !== 'off');
       const setAnim = (v) => { setAnimations(v); localStorage.setItem('domino_animations', v ? 'on' : 'off'); };
@@ -3154,20 +3156,22 @@
         }
       }, [gameState?.teamScores?.[0], gameState?.teamScores?.[1]]);
 
-      // Auto-start next round — 8s for blocked games (reveal tiles), 7s for wins
+      // Auto-start next round — 20s countdown, show button over board after 10s
       useEffect(() => {
         const shouldCount = gameState && gameState.gameStarted && !gameState.gameEnded
           && gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && playerSlot === 0;
-        if (!shouldCount) { setRoundCountdown(null); return; }
+        if (!shouldCount) { setRoundCountdown(null); setShowNextBtn(false); return; }
         const delay = 20;
         setRoundCountdown(delay);
+        setShowNextBtn(false);
+        const btnTimer = setTimeout(() => setShowNextBtn(true), 10000);
         const iv = setInterval(() => {
           setRoundCountdown(prev => {
             if (prev <= 1) { clearInterval(iv); newRound(); return null; }
             return prev - 1;
           });
         }, 1000);
-        return () => clearInterval(iv);
+        return () => { clearInterval(iv); clearTimeout(btnTimer); };
       }, [gameState?.currentPlayer, gameState?.gameEnded, gameState?.waitingForStarterChoice]);
 
       // Bot AI - runs when it's a bot's turn
@@ -4228,6 +4232,16 @@
                     }}>
                       <CornerDial score={score1} animScore={animScore1} total={mt} corner="br" color="#ef4444" lightColor="#fca5a5" />
                     </div>
+                    {/* Proxima Rodada — overlays on board after 10s */}
+                    {showNextBtn && gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
+                      <div style={{ position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 40 }}>
+                        <button onClick={() => { setRoundCountdown(null); setShowNextBtn(false); newRound(); }}
+                          className="btn-primary animate-bounce-in"
+                          style={{ fontSize: 15, fontWeight: 800, padding: '10px 28px', whiteSpace: 'nowrap', boxShadow: '0 4px 24px rgba(0,0,0,0.6)', borderRadius: 12 }}>
+                          Proxima Rodada{roundCountdown ? ' (' + roundCountdown + 's)' : ''}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right opponent — opposing team = red */}
@@ -4469,12 +4483,7 @@
                 </div>
               )}
 
-              {/* Action buttons */}
-              {gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
-                <button onClick={() => { setRoundCountdown(null); newRound(); }} className="btn-primary w-full text-base animate-bounce-in py-2">
-                  Proxima Rodada{roundCountdown ? ' (' + roundCountdown + 's)' : ''}
-                </button>
-              )}
+              {/* Action button removed from here — now overlays on board after 10s */}
 
               {gameState.gameEnded && (() => {
                 const myTeam = playerSlot % 2;
