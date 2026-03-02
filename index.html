@@ -3757,27 +3757,7 @@
                 </div>
               </div>
 
-              {/* Round announcement overlay */}
-              {roundAnnouncement && (
-                <div className="animate-bounce-in" style={{
-                  position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  zIndex: 50, pointerEvents: 'none'
-                }}>
-                  <div style={{
-                    background: 'rgba(0,0,0,0.75)', borderRadius: 20, padding: '24px 40px',
-                    textAlign: 'center', backdropFilter: 'blur(8px)'
-                  }}>
-                    <div style={{ fontSize: 48, marginBottom: 4 }}>{roundAnnouncement.emoji}</div>
-                    <div style={{ fontSize: 32, fontWeight: 900, color: '#fbbf24', textShadow: '0 2px 8px rgba(0,0,0,0.5)', letterSpacing: 2 }}>
-                      {roundAnnouncement.label}
-                    </div>
-                    <div style={{ fontSize: 14, color: '#fff', marginTop: 6, fontWeight: 700 }}>
-                      {roundAnnouncement.playerName} — +{roundAnnouncement.points} ponto{roundAnnouncement.points > 1 ? 's' : ''}
-                    </div>
-                  </div>
-                </div>
-              )}
+              {/* Round announcement — rendered below board in the layout flow */}
 
               {/* Message toast */}
               {gameState.message && !roundAnnouncement && (
@@ -4131,6 +4111,26 @@
                 </div>
 
                 {/* Score dials removed from here — now overlaid on board corners */}
+
+                {/* Round announcement banner — below board, above hand */}
+                {roundAnnouncement && (
+                  <div className="animate-bounce-in" style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    padding: '6px 16px', margin: '4px 8px 0',
+                    background: 'rgba(0,0,0,0.7)', borderRadius: 12,
+                    backdropFilter: 'blur(6px)', border: '1px solid rgba(251,191,36,0.3)'
+                  }}>
+                    <span style={{ fontSize: 28 }}>{roundAnnouncement.emoji}</span>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#fbbf24', textShadow: '0 2px 6px rgba(0,0,0,0.5)', letterSpacing: 2 }}>
+                        {roundAnnouncement.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
+                        {roundAnnouncement.playerName} — +{roundAnnouncement.points} ponto{roundAnnouncement.points > 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* My Hand — my team = blue */}
                 <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ borderLeft: '3px solid #3b82f6', marginTop: 4 }}>
