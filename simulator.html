@@ -9050,8 +9050,8 @@
                   ${renderScoringDial(matchScore[0], 0)}
                   ${renderScoringDial(matchScore[1], 1)}
                   ${renderRemovedTiles()}
-                  <div class="board-snake" id="board-snake" style="padding-bottom:32px">
-                    ${renderBoard(snap)}
+                  <div class="board-snake" id="board-snake" style="display:flex;align-items:center;justify-content:center;min-height:calc(100% - 60px);padding-bottom:32px">
+                    <div style="width:100%">${renderBoard(snap)}</div>
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
                   ${starterChoicePending ? renderStarterChoice() : ''}
@@ -9812,7 +9812,7 @@
         const isOdd = rIdx % 2 === 1;
         let flexDir = 'row';
         let justify = 'center';
-        if (rIdx === 0) { justify = (board.length < 8) ? 'center' : 'flex-end'; }
+        if (rIdx === 0) { justify = (snap.board.length < 8) ? 'center' : 'flex-end'; }
         else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
         else { justify = 'flex-start'; }
 
@@ -13242,6 +13242,22 @@
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(render, 150);
     });
+
+    // Auto-create default player profile if none exists
+    (function ensureDefaultProfile() {
+      const data = _loadPlayers();
+      if (!data.activePlayer || !data.players[data.activePlayer]) {
+        const players = Object.keys(data.players);
+        if (players.length > 0) {
+          // Activate the first existing profile
+          data.activePlayer = players[0];
+          _savePlayers(data);
+        } else {
+          // Create a default profile
+          createPlayer('Player');
+        }
+      }
+    })();
 
     // Validate curated puzzles (logs issues, hides broken ones)
     validateAllPuzzles();
