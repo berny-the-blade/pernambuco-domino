@@ -9050,7 +9050,7 @@
                   ${renderScoringDial(matchScore[0], 0)}
                   ${renderScoringDial(matchScore[1], 1)}
                   ${renderRemovedTiles()}
-                  <div class="board-snake" id="board-snake" style="display:flex;align-items:center;justify-content:center;min-height:calc(100% - 60px);padding-bottom:32px">
+                  <div class="board-snake" id="board-snake" style="display:flex;align-items:center;justify-content:center;min-height:calc(100% - 90px);padding:64px 8px 32px 8px">
                     <div style="width:100%">${renderBoard(snap)}</div>
                   </div>
                   ${snap.outcome ? renderOutcomeOverlay(snap, pTeams) : ''}
@@ -9185,9 +9185,11 @@
       // Restore scroll position after DOM replacement
       window.scrollTo(0, _savedScrollY);
 
-      // Auto-scroll log (watch/quiz mode — overrides restore when stepping through moves)
-      const activeLog = document.getElementById(`log-${currentStep}`);
-      if (activeLog) activeLog.scrollIntoView({ block: 'nearest' });
+      // Auto-scroll log (watch/quiz mode only — skip during play to prevent jump)
+      if (gameMode !== 'play') {
+        const activeLog = document.getElementById(`log-${currentStep}`);
+        if (activeLog) activeLog.scrollIntoView({ block: 'nearest' });
+      }
 
       // If should quiz and mode=quiz, trigger after render
       if (shouldQuiz && !quizWaiting && !quizShowingResult) {
