@@ -511,6 +511,8 @@
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
+      const [tileLayout, setTileLayoutRaw] = useState(localStorage.getItem('domino_tile_layout') || 'H');
+      const setTileLayout = (v) => { setTileLayoutRaw(v); localStorage.setItem('domino_tile_layout', v); };
       const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 48, vw: 24 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
@@ -3793,14 +3795,23 @@
           <div className="felt-bg animate-fade-in" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
             <div className="max-w-2xl mx-auto" style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'column', padding: 8 }}>
 
-              {/* Size toggle only */}
-              <div className="flex justify-center mb-1">
+              {/* Size + layout toggle */}
+              <div className="flex justify-center mb-1 gap-2">
                 <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
                   {['S','M','L'].map(sz => (
                     <button key={sz} onClick={() => setBoardSize(sz)}
                       className="px-1.5 py-0.5 text-[9px] font-bold"
                       style={{ background: boardSize === sz ? 'rgba(255,255,255,0.2)' : 'transparent', color: boardSize === sz ? '#fff' : 'rgba(255,255,255,0.3)' }}>
                       {sz}
+                    </button>
+                  ))}
+                </div>
+                <div className="inline-flex rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                  {['H','V'].map(ly => (
+                    <button key={ly} onClick={() => setTileLayout(ly)}
+                      className="px-1.5 py-0.5 text-[9px] font-bold"
+                      style={{ background: tileLayout === ly ? 'rgba(255,255,255,0.2)' : 'transparent', color: tileLayout === ly ? '#fff' : 'rgba(255,255,255,0.3)' }}>
+                      {ly}
                     </button>
                   ))}
                 </div>
@@ -3908,7 +3919,7 @@
                       for (let i = 0; i < board.length; i++) {
                         const t = board[i];
                         const isD = t.left === t.right;
-                        const tw = isD ? VW : HW;
+                        const tw = (tileLayout === 'V' || isD) ? VW : HW;
                         const need = cur.length > 0 ? (tw + GAP) : tw;
 
                         if (w + need > maxW && cur.length > 0) {
@@ -3995,7 +4006,7 @@
                                 {rowIdxs.map((tileIndex) => {
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
-                                  const orient = isD ? 'vertical' : 'horizontal';
+                                  const orient = (tileLayout === 'V' || isD) ? 'vertical' : 'horizontal';
                                   const flip = isOdd && orient === 'horizontal';
 
                                   const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
