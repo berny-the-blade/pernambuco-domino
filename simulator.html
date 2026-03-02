@@ -185,6 +185,7 @@
       watch: { en: 'Watch', pt: 'Assistir' }, quiz: { en: 'Quiz', pt: 'Quiz' }, play: { en: 'Play', pt: 'Jogar' },
       new_game: { en: 'New Game', pt: 'Novo Jogo' },
       export_btn: { en: 'Export', pt: 'Exportar' }, import_btn: { en: 'Import', pt: 'Importar' },
+      seed_label: { en: 'Seed', pt: 'Semente' }, seed_prompt: { en: 'Enter seed (integer):', pt: 'Informe a semente (inteiro):' }, seed_set: { en: 'Seed set to', pt: 'Semente definida:' }, seed_invalid: { en: 'Invalid seed — must be an integer', pt: 'Semente inválida — deve ser inteiro' },
       puzzles: { en: 'Puzzles', pt: 'Puzzles' }, hint: { en: 'Hint', pt: 'Dica' }, pass: { en: 'Pass', pt: 'Passar' },
       play_again: { en: 'Play Again', pt: 'Jogar Novamente' },
       change_diff: { en: 'Change Difficulty', pt: 'Mudar Dificuldade' },
@@ -709,6 +710,26 @@
       return currentSeed;
     }
     function getRng() { return solverRng || { random: Math.random, randomInt: n => Math.floor(Math.random() * n), shuffle: arr => { for (let i = arr.length-1; i>0; i--) { const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; } }; }
+
+    function applySeed(seed) {
+      const n = parseInt(seed, 10);
+      if (isNaN(n)) { alert(_t('seed_invalid')); return false; }
+      currentSeed = n >>> 0; // coerce to uint32
+      solverRng = new SplitMix64(currentSeed);
+      return true;
+    }
+
+    function promptSeed() {
+      const input = prompt(_t('seed_prompt'), currentSeed != null ? String(currentSeed) : '');
+      if (input === null) return; // cancelled
+      if (applySeed(input)) {
+        alert(`${_t('seed_set')} ${currentSeed}`);
+      }
+    }
+
+    function seedContext() {
+      return `seed=${currentSeed ?? 'none'} mode=${gameMode} step=${currentStep}`;
+    }
 
     // ========== LRU CACHE ==========
     class LRUCache {
@@ -2220,6 +2241,127 @@
       _selfTestRunning = false;
     }
 
+    // ========== BELIEF CALIBRATION TEST ==========
+    // Measures how well the belief model predicts actual tile locations.
+    // Runs a batch of self-play games, at each decision point samples K deals
+    // from the belief system and checks against the true hands.
+    let _beliefCalibRunning = false;
+    let _beliefCalibResults = null;
+
+    async function runBeliefCalibration(numGames = 10, samplesPerPoint = 50) {
+      if (_beliefCalibRunning) return;
+      _beliefCalibRunning = true;
+      _beliefCalibResults = { games: 0, checkpoints: 0, totalContradictions: 0, totalSamples: 0,
+        entropyOverTime: [], contradictionByMove: [], avgContradictionRate: 0 };
+
+      const savedSeed = currentSeed;
+      const savedRng = solverRng;
+      const savedBelief = belief;
+
+      for (let g = 0; g < numGames; g++) {
+        // Fresh seeded game
+        currentSeed = 10000 + g;
+        solverRng = new SplitMix64(currentSeed);
+        const deck = shuffleDeck([...ALL_TILES]);
+        const hands = [deck.slice(0, 6), deck.slice(6, 12), deck.slice(12, 18), deck.slice(18, 24)];
+        const trueHands = hands.map(h => new Set(h.map(t => t.id)));
+
+        // Init knowledge + belief for this game
+        const knowledge = new Knowledge();
+        belief = new BeliefModel();
+        const eTracker = new EntropyTracker();
+
+        // Find opening (highest double)
+        let starter = -1, starterTile = null;
+        for (let d = 6; d >= 0; d--) {
+          for (let p = 0; p < 4; p++) {
+            const dbl = hands[p].find(t => t.left === d && t.right === d);
+            if (dbl) { starter = p; starterTile = dbl; break; }
+          }
+          if (starter >= 0) break;
+        }
+        if (starter < 0) { starter = 0; starterTile = hands[0][0]; }
+
+        let board = [starterTile];
+        let lE = starterTile.left, rE = starterTile.right;
+        hands[starter] = hands[starter].filter(t => t.id !== starterTile.id);
+        knowledge.recordPlay(starter, starterTile);
+        belief.recordPlay(starterTile.id);
+        let cur = (starter + 1) % 4;
+        let passCount = 0;
+        let moveIdx = 1;
+
+        while (passCount < 4 && hands.some(h => h.length > 0)) {
+          const handSizes = hands.map(h => h.length);
+          if (handSizes[cur] === 0) { cur = (cur + 1) % 4; continue; }
+
+          const playable = hands[cur].filter(t => canPlay(t, lE, rE, board.length));
+          if (playable.length === 0) {
+            knowledge.recordPass(cur, lE, rE);
+            passCount++;
+            cur = (cur + 1) % 4;
+            moveIdx++;
+            continue;
+          }
+          passCount = 0;
+
+          // Calibration checkpoint: sample deals and compare to truth
+          if (moveIdx >= 3 && handSizes.reduce((a, b) => a + b, 0) > 4) {
+            belief.syncFromKnowledge(knowledge);
+            computeBeliefs(knowledge, handSizes, hands[cur], cur, 100);
+            eTracker.record(moveIdx, belief);
+
+            const sampler = new BeliefSampler(new SplitMix64(currentSeed + moveIdx));
+            const { deals } = sampler.sampleDeals(hands[cur], handSizes, belief, cur, samplesPerPoint);
+            let contradictions = 0;
+            for (const deal of deals) {
+              for (let p = 0; p < 4; p++) {
+                if (p === cur) continue;
+                for (const t of deal[p]) {
+                  if (!trueHands[p].has(t.id)) { contradictions++; break; }
+                }
+              }
+            }
+            _beliefCalibResults.checkpoints++;
+            _beliefCalibResults.totalContradictions += contradictions;
+            _beliefCalibResults.totalSamples += deals.length;
+            _beliefCalibResults.contradictionByMove.push({ move: moveIdx, rate: deals.length > 0 ? contradictions / deals.length : 0 });
+
+            const ent = [0, 1, 2, 3].map(p => belief.getEntropy(p));
+            _beliefCalibResults.entropyOverTime.push({ move: moveIdx, game: g, entropy: ent });
+          }
+
+          // Play heuristic move
+          const decision = smartAI(hands[cur], lE, rE, board.length, cur, knowledge);
+          if (!decision) { cur = (cur + 1) % 4; moveIdx++; continue; }
+          const tile = decision.tile;
+          const side = decision.side || (canPlay(tile, lE, rE, board.length) ? (tile.left === lE || tile.right === lE ? 'left' : 'right') : 'left');
+          hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+          trueHands[cur].delete(tile.id);
+          board.push(tile);
+          knowledge.recordPlay(cur, tile);
+          belief.recordPlay(tile.id);
+          const ends = computeNewEnds(tile, side, lE, rE);
+          lE = ends.newLeft; rE = ends.newRight;
+          cur = (cur + 1) % 4;
+          moveIdx++;
+        }
+        _beliefCalibResults.games++;
+      }
+
+      // Compute summary
+      _beliefCalibResults.avgContradictionRate = _beliefCalibResults.totalSamples > 0
+        ? (_beliefCalibResults.totalContradictions / _beliefCalibResults.totalSamples * 100).toFixed(1)
+        : 0;
+
+      // Restore state
+      currentSeed = savedSeed;
+      solverRng = savedRng;
+      belief = savedBelief;
+      _beliefCalibRunning = false;
+      render();
+    }
+
     function scanGameForPuzzles(analysisCache, snapshots) {
       if (!analysisCache || !snapshots) return [];
       const puzzles = [];
@@ -2431,9 +2573,141 @@
               }).join('')}</div>
             </div>`;
           }).join('')}
-          <div class="text-center mt-4">
+          <div class="text-center mt-4 flex justify-center gap-2">
             <button class="btn btn-gray" onclick="closePuzzleBrowser();">Back</button>
+            <button class="btn text-xs" style="background:#78350f;color:#fbbf24;border:1px solid #92400e;" onclick="_showPuzzleQA=true;render();" title="Puzzle QA Panel">QA</button>
           </div>
+        </div>
+      </div>`;
+    }
+
+    // ========== PUZZLE QA PANEL ==========
+
+    let _puzzleQAResults = null;
+    let _showPuzzleQA = false;
+    let _puzzleQARunning = false;
+
+    async function runPuzzleQA() {
+      if (_puzzleQARunning) return;
+      _puzzleQARunning = true;
+      _puzzleQAResults = [];
+
+      for (const p of PUZZLES) {
+        const result = { id: p.id, title: p.title, category: p.category, difficulty: p.difficulty,
+          broken: _brokenPuzzleIds.has(p.id), issues: [], correctTile: p.correctTile, correctSide: p.correctSide || 'any',
+          smartTop1: null, smartTop1Side: null, mcTop1: null, mcTop1Side: null, agree: false, mcAgree: false };
+
+        // Validation issues
+        const ct = parseTileId(p.correctTile);
+        if (!ct) { result.issues.push('correctTile not found'); }
+        else {
+          if (!p.myHand.includes(p.correctTile) && !p.myHand.includes(p.correctTile.split('-').reverse().join('-')))
+            result.issues.push('correctTile not in hand');
+          if (p.board.length > 0 && !canPlay(ct, p.leftEnd, p.rightEnd, p.board.length))
+            result.issues.push('correctTile unplayable');
+        }
+        const hand = p.myHand.map(parseTileId).filter(Boolean);
+        const playable = hand.filter(t => canPlay(t, p.leftEnd, p.rightEnd, p.board.length));
+        if (playable.length < 2) result.issues.push('trivial (<2 moves)');
+
+        // SmartAI comparison
+        try {
+          const knowledge = new Knowledge();
+          const boardTiles = buildChain(p.board, p.leftEnd);
+          for (const t of boardTiles) knowledge.recordPlay(-1, t);
+          for (const [pl, nums] of Object.entries(p.voids || {})) {
+            for (const n of nums) knowledge.cantHave[+pl].add(n);
+          }
+          const allOpts = smartAI(hand, p.leftEnd, p.rightEnd, boardTiles.length, 0, knowledge, true);
+          if (allOpts.length > 0) {
+            result.smartTop1 = `${allOpts[0].tile.left}-${allOpts[0].tile.right}`;
+            result.smartTop1Side = allOpts[0].side || 'any';
+            result.agree = result.smartTop1 === p.correctTile || result.smartTop1 === p.correctTile.split('-').reverse().join('-');
+          }
+
+          // MC comparison (small sim count for QA speed)
+          if (playable.length > 1 && ct) {
+            const otherHands = {
+              1: (p.otherHands[1] || []).map(parseTileId),
+              2: (p.otherHands[2] || []).map(parseTileId),
+              3: (p.otherHands[3] || []).map(parseTileId)
+            };
+            const snap = {
+              hands: [hand, otherHands[1], otherHands[2], otherHands[3]],
+              board: boardTiles, leftEnd: p.leftEnd, rightEnd: p.rightEnd, knowledge
+            };
+            const mcRes = monteCarloEval(snap, 0, 40);
+            if (mcRes.length > 0) {
+              result.mcTop1 = `${mcRes[0].tile.left}-${mcRes[0].tile.right}`;
+              result.mcTop1Side = mcRes[0].side || 'any';
+              result.mcAgree = result.mcTop1 === p.correctTile || result.mcTop1 === p.correctTile.split('-').reverse().join('-');
+            }
+          }
+        } catch (e) {
+          result.issues.push(`eval error: ${e.message}`);
+        }
+
+        _puzzleQAResults.push(result);
+      }
+      _puzzleQARunning = false;
+      render();
+    }
+
+    function renderPuzzleQAPanel() {
+      const results = _puzzleQAResults;
+      const total = results ? results.length : PUZZLES.length;
+      const broken = results ? results.filter(r => r.broken).length : _brokenPuzzleIds.size;
+      const disagree = results ? results.filter(r => !r.agree && !r.broken).length : '?';
+      const mcDisagree = results ? results.filter(r => !r.mcAgree && !r.broken).length : '?';
+
+      return `<div class="flex items-center justify-center min-h-screen">
+        <div class="max-w-5xl w-full p-4">
+          <div class="flex items-center justify-between mb-4">
+            <h1 class="text-2xl font-bold text-orange-400">Puzzle QA Panel</h1>
+            <div class="flex gap-2 items-center">
+              <span class="text-xs text-slate-400">${total} puzzles | <span class="text-red-400">${broken} broken</span> | <span class="text-amber-400">${disagree} smartAI disagree</span> | <span class="text-purple-400">${mcDisagree} MC disagree</span></span>
+              <button class="btn btn-blue text-xs" onclick="runPuzzleQA()" ${_puzzleQARunning ? 'disabled' : ''}>${_puzzleQARunning ? 'Running...' : results ? 'Re-run QA' : 'Run QA'}</button>
+              <button class="btn btn-gray text-xs" onclick="_showPuzzleQA=false;showPuzzleBrowser();">Back</button>
+            </div>
+          </div>
+          ${!results ? '<p class="text-slate-500 text-sm">Click "Run QA" to validate all puzzles and compare answers.</p>' : `
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs border-collapse">
+              <thead>
+                <tr class="text-slate-400 border-b border-slate-700">
+                  <th class="py-1 px-2 text-left">ID</th>
+                  <th class="py-1 px-2 text-left">Cat</th>
+                  <th class="py-1 px-2 text-center">Diff</th>
+                  <th class="py-1 px-2 text-center">Status</th>
+                  <th class="py-1 px-2 text-center">Correct</th>
+                  <th class="py-1 px-2 text-center">SmartAI</th>
+                  <th class="py-1 px-2 text-center">MC</th>
+                  <th class="py-1 px-2 text-left">Issues</th>
+                  <th class="py-1 px-2 text-center">Jump</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${results.map(r => {
+                  const statusColor = r.broken ? 'text-red-400' : r.issues.length > 0 ? 'text-amber-400' : 'text-emerald-400';
+                  const statusText = r.broken ? 'BROKEN' : r.issues.length > 0 ? 'WARN' : 'OK';
+                  const smartColor = r.agree ? 'text-emerald-400' : 'text-red-400';
+                  const mcColor = r.mcAgree ? 'text-emerald-400' : r.mcTop1 ? 'text-red-400' : 'text-slate-600';
+                  return `<tr class="border-b border-slate-800 hover:bg-slate-800/50">
+                    <td class="py-1 px-2 font-mono text-slate-300">${r.id}</td>
+                    <td class="py-1 px-2 text-slate-400">${r.category}</td>
+                    <td class="py-1 px-2 text-center text-amber-400">${'★'.repeat(r.difficulty)}</td>
+                    <td class="py-1 px-2 text-center ${statusColor} font-bold">${statusText}</td>
+                    <td class="py-1 px-2 text-center text-white font-mono">[${r.correctTile}] ${r.correctSide}</td>
+                    <td class="py-1 px-2 text-center font-mono ${smartColor}">${r.smartTop1 ? `[${r.smartTop1}] ${r.smartTop1Side}` : '-'}</td>
+                    <td class="py-1 px-2 text-center font-mono ${mcColor}">${r.mcTop1 ? `[${r.mcTop1}] ${r.mcTop1Side}` : '-'}</td>
+                    <td class="py-1 px-2 text-slate-500">${r.issues.length > 0 ? r.issues.join(', ') : '-'}</td>
+                    <td class="py-1 px-2 text-center">${!r.broken ? `<button class="text-blue-400 hover:text-blue-300 underline" onclick="_showPuzzleQA=false;startPuzzle('${r.id}')">Go</button>` : '<span class="text-slate-600">-</span>'}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          `}
         </div>
       </div>`;
     }
@@ -2872,6 +3146,11 @@
         const outcome = lines.find(l => l.type === 'outcome');
         if (!deal || !deal.hands) { alert('Invalid JSONL: missing deal data'); return; }
 
+        // Restore seed from export header
+        if (header && header.engineConfig && header.engineConfig.seed != null) {
+          applySeed(header.engineConfig.seed);
+        }
+
         // Reconstruct by replaying the game from the deal
         if (header && header.matchScore) matchScore = header.matchScore;
         if (header && header.dobrada) scoreMultiplier = header.dobrada;
@@ -2896,7 +3175,7 @@
         render();
         alert(`Imported game: ${decisions.length} decisions, outcome: ${outcome ? outcome.resultType : 'unknown'}`);
       } catch (e) {
-        alert('Import error: ' + e.message);
+        alert(`Import error: ${e.message}\n[${seedContext()}]`);
       }
     }
 
@@ -4129,7 +4408,7 @@
                 }
               }
             }
-          } catch(e) { /* solver failed, fall through to MC/ISMCTS */ }
+          } catch(e) { console.warn(`Endgame solver failed [${seedContext()}]:`, e); }
         }
         // MC/ISMCTS-assisted play: when player has ≤4 tiles and multiple options
         else if (decision && hands[cur].length <= 4 && allOptions.length > 1) {
@@ -4163,7 +4442,7 @@
                 }
               }
             }
-          } catch(e) { /* search failed, keep heuristic decision */ }
+          } catch(e) { console.warn(`MC/ISMCTS search failed [${seedContext()}]:`, e); }
         }
 
         if (decision) {
@@ -4766,6 +5045,7 @@
       showingPuzzleBrowser = false;
       showingOpeningQuiz = false;
       playShowingDiffPicker = false;
+      _showPuzzleQA = false;
       render();
     }
 
@@ -8650,6 +8930,10 @@
 
     function render() {
       const app = document.getElementById('app');
+      if (_showPuzzleQA) {
+        app.innerHTML = renderPuzzleQAPanel();
+        return;
+      }
       if (showingPuzzleBrowser) {
         app.innerHTML = renderPuzzleBrowser();
         return;
@@ -8701,6 +8985,7 @@
               <button class="btn btn-yellow text-sm" onclick="${gameMode === 'play' ? 'startPlayGame()' : 'newGame()'}">${scoreMultiplier > 1 ? `${_t('new_game')} (x${scoreMultiplier})` : _t('new_game')}</button>
               <button class="btn btn-gray text-xs" onclick="exportGame()" title="Export JSONL">${_t('export_btn')}</button>
               <label class="btn btn-gray text-xs cursor-pointer" title="Import JSONL">${_t('import_btn')}<input type="file" accept=".jsonl,.json" class="hidden" onchange="if(this.files[0]){const r=new FileReader();r.onload=e=>importGame(e.target.result);r.readAsText(this.files[0]);}"></label>
+              <button class="btn btn-gray text-xs" onclick="promptSeed()" title="${currentSeed != null ? 'Seed: '+currentSeed : 'Set seed'}">${_t('seed_label')}</button>
               ${!puzzleMode ? `<button class="btn text-xs" style="background:#d97706;color:white;" onclick="showPuzzleBrowser();">${_t('puzzles')}</button>` : ''}
               <button class="btn text-xs btn-gray" onclick="goHome()" title="Back to landing page">Home</button>
               <button class="btn text-xs btn-gray" onclick="setAppLang(appLang==='en'?'pt':'en')" style="min-width:40px">${appLang === 'en' ? '🇧🇷' : '🇺🇸'}</button>
@@ -8808,6 +9093,7 @@
                   ${gameMode === 'play' ? `<button class="px-2 py-0.5 rounded text-xs font-bold border" style="background:${coachEnabled ? '#312e81' : '#1e293b'};color:${coachEnabled ? '#a5b4fc' : '#64748b'};border-color:${coachEnabled ? '#6366f1' : '#334155'}" onclick="toggleCoach()">\u{1F9E0} ${_t('coach')} ${coachEnabled ? _t('on') : _t('off')}</button>` : `<span style="color:#60a5fa">&#9632;${_t('you')}</span><span style="color:#f87171">&#9632;OL</span><span style="color:#a78bfa">&#9632;Ptr</span><span style="color:#fbbf24">&#9632;OR</span>`}
                   <span class="text-slate-400">${_t('move')} <span class="text-white font-bold">${snap.move}</span>/${currentGame.snapshots[total-1].move}
                   (${currentStep+1}/${total})</span>
+                  ${currentSeed != null ? `<span class="text-slate-600 font-mono cursor-pointer" onclick="navigator.clipboard.writeText('${currentSeed}').then(()=>{})" title="Click to copy seed">#${currentSeed}</span>` : ''}
                 </div>
               </div>
 
@@ -12597,9 +12883,19 @@
             <div class="mt-4 flex items-center justify-center gap-3">
               <span class="text-xs text-slate-600">${_t('keyboard_help')}</span>
               <button class="text-xs text-slate-500 hover:text-slate-300 underline" onclick="runSanityTest()">Run Self-Test</button>
+              <button class="text-xs text-slate-500 hover:text-slate-300 underline" onclick="runBeliefCalibration(10,50);document.getElementById('belief-calib-output').style.display='block';">${_beliefCalibRunning ? 'Running...' : 'Belief Calibration'}</button>
             </div>
             <div id="selftest-output" style="display:none;max-height:200px;overflow-y:auto;text-align:left;font-family:monospace;font-size:11px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px;margin-top:8px"
               ></div>
+            <div id="belief-calib-output" style="display:none;max-height:200px;overflow-y:auto;text-align:left;font-family:monospace;font-size:11px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px;margin-top:8px">
+              ${_beliefCalibResults ? `<div style="color:#34d399">=== Belief Calibration ===</div>
+              <div style="color:#94a3b8">Games: ${_beliefCalibResults.games} | Checkpoints: ${_beliefCalibResults.checkpoints}</div>
+              <div style="color:#94a3b8">Total samples: ${_beliefCalibResults.totalSamples} | Contradictions: ${_beliefCalibResults.totalContradictions}</div>
+              <div style="color:${parseFloat(_beliefCalibResults.avgContradictionRate) > 50 ? '#ef4444' : parseFloat(_beliefCalibResults.avgContradictionRate) > 25 ? '#eab308' : '#22c55e'}">Contradiction rate: ${_beliefCalibResults.avgContradictionRate}%</div>
+              <div style="color:#38bdf8;margin-top:4px">Per-move contradiction rates:</div>
+              ${_beliefCalibResults.contradictionByMove.slice(0, 20).map(c => `<div style="color:#94a3b8">  Move ${c.move}: ${(c.rate * 100).toFixed(1)}%</div>`).join('')}
+              ` : '<div style="color:#94a3b8">Click "Belief Calibration" to run...</div>'}
+            </div>
             <script>
               document.addEventListener('click', e => {
                 if (e.target.textContent === 'Run Self-Test') {
@@ -13129,6 +13425,172 @@
       const delta = results[1].eloDiff - results[0].eloDiff;
       console.log(`%cModel B vs Model A: ${delta > 0 ? '+' : ''}${delta} Elo`, `font-weight:bold;color:${delta > 0 ? '#22c55e' : '#ef4444'}`);
       return results;
+    };
+
+    // ========== SPRT EVALUATION HARNESS ==========
+    // Sequential Probability Ratio Test for A/B engine comparison.
+    // Usage: runSPRT({ engineA: 'heuristic', engineB: 'mc', elo0: 0, elo1: 30, alpha: 0.05, beta: 0.05, maxGames: 2000 })
+    // Stops as soon as statistical significance is reached.
+    window.runSPRT = async function(opts = {}) {
+      const elo0 = opts.elo0 ?? 0;     // H0: engines differ by at most elo0 Elo
+      const elo1 = opts.elo1 ?? 30;    // H1: engines differ by at least elo1 Elo
+      const alpha = opts.alpha ?? 0.05; // type I error
+      const beta = opts.beta ?? 0.05;   // type II error
+      const maxGames = opts.maxGames ?? 2000;
+      const mcSimsA = opts.mcSimsA ?? 0;             // 0 = heuristic only
+      const mcSimsB = opts.mcSimsB ?? MC_SIMS_PLAY_EXPERT;
+
+      // SPRT boundaries
+      const lnA = Math.log(beta / (1 - alpha));
+      const lnB = Math.log((1 - beta) / alpha);
+
+      // Elo to win probability: p = 1/(1+10^(-elo/400))
+      const eloToP = e => 1 / (1 + Math.pow(10, -e / 400));
+      const p0 = eloToP(elo0);
+      const p1 = eloToP(elo1);
+
+      let wins = 0, losses = 0, draws = 0;
+      let llr = 0; // log-likelihood ratio
+      let result = 'inconclusive';
+
+      const savedSeed = currentSeed;
+      const savedRng = solverRng;
+      const savedBelief = belief;
+
+      console.log(`%cSPRT Engine Comparison`, 'font-size:14px;font-weight:bold');
+      console.log(`H0: Elo diff <= ${elo0} | H1: Elo diff >= ${elo1} | alpha=${alpha} beta=${beta}`);
+      console.log(`Engine A: ${mcSimsA === 0 ? 'Heuristic' : `MC(${mcSimsA})`} vs Engine B: ${mcSimsB === 0 ? 'Heuristic' : `MC(${mcSimsB})`}`);
+      console.log(`Boundaries: accept H0 if LLR <= ${lnA.toFixed(3)}, accept H1 if LLR >= ${lnB.toFixed(3)}`);
+
+      function playOneSPRTGame(engineBTeam) {
+        currentSeed = Math.floor(Math.random() * 0xFFFFFFFF);
+        solverRng = new SplitMix64(currentSeed);
+        belief = new BeliefModel();
+
+        const deck = shuffleDeck([...ALL_TILES]);
+        const hands = [[], [], [], []];
+        for (let i = 0; i < 24; i++) hands[i % 4].push(deck[i]);
+
+        let hp = -1, ht = null, hd = -1;
+        for (let p = 0; p < 4; p++)
+          for (const t of hands[p])
+            if (t.left === t.right && t.left > hd) { hd = t.left; hp = p; ht = t; }
+        if (!ht) return null;
+
+        hands[hp] = hands[hp].filter(t => t.id !== ht.id);
+        let lE = ht.left, rE = ht.right, bLen = 1;
+        const knowledge = new Knowledge();
+        knowledge.recordPlay(hp, ht);
+        belief.recordPlay(ht.id);
+
+        let cur = (hp + 1) % 4, passCount = 0;
+        for (let move = 0; move < 200; move++) {
+          const isEngineB = (cur % 2) === engineBTeam;
+          const mcSims = isEngineB ? mcSimsB : mcSimsA;
+          const allOpts = smartAI(hands[cur], lE, rE, bLen, cur, knowledge, true);
+          let decision = allOpts.length > 0 ? allOpts[0] : null;
+
+          if (mcSims > 0 && decision && allOpts.length > 1) {
+            try {
+              const handSizes = hands.map(h => h.length);
+              computeBeliefs(knowledge, handSizes, hands[cur], cur, 80);
+              const snap = { hands, leftEnd: lE, rightEnd: rE, board: new Array(bLen), knowledge };
+              const mcRes = monteCarloEval(snap, cur, mcSims);
+              if (mcRes.length > 0) {
+                const best = mcRes[0];
+                const matched = allOpts.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                             || allOpts.find(o => o.tile.id === best.tile.id);
+                if (matched) decision = matched;
+              }
+            } catch (e) { /* keep heuristic */ }
+          }
+
+          if (decision) {
+            passCount = 0;
+            const { tile, side: prefSide } = decision;
+            let side = prefSide;
+            if (bLen > 0 && !side) side = (tile.left === lE || tile.right === lE) ? 'left' : 'right';
+            hands[cur] = hands[cur].filter(t => t.id !== tile.id);
+            knowledge.recordPlay(cur, tile);
+            belief.recordPlay(tile.id);
+            if (bLen === 0) { lE = tile.left; rE = tile.right; }
+            else if (side === 'left') { lE = tile.left === lE ? tile.right : tile.left; }
+            else { rE = tile.right === rE ? tile.left : tile.right; }
+            bLen++;
+            if (hands[cur].length === 0) {
+              return { winnerTeam: cur % 2, type: 'domino' };
+            }
+            cur = (cur + 1) % 4;
+          } else {
+            passCount++;
+            knowledge.recordPass(cur, lE, rE);
+            if (passCount >= 4) {
+              const b = resolveBlock(hands);
+              return { winnerTeam: b.type === 'tie' ? -1 : b.team, type: b.type };
+            }
+            cur = (cur + 1) % 4;
+          }
+        }
+        return { winnerTeam: -1, type: 'tie' };
+      }
+
+      const t0 = performance.now();
+      let played = 0;
+
+      for (let g = 0; g < maxGames; g++) {
+        // Alternate sides to eliminate positional bias
+        const engineBTeam = g % 2;
+        const r = playOneSPRTGame(engineBTeam);
+        if (!r) continue;
+        played++;
+
+        if (r.winnerTeam === engineBTeam) wins++;
+        else if (r.winnerTeam >= 0) losses++;
+        else draws++;
+
+        // Update LLR (Wald's SPRT for Bernoulli outcomes, draws counted as 0.5)
+        const n = wins + losses + draws;
+        const score = (wins + draws * 0.5) / n;
+        if (score > 0 && score < 1) {
+          llr = n * (score * Math.log(score / p0) + (1 - score) * Math.log((1 - score) / (1 - p0)))
+              - n * (score * Math.log(score / p1) + (1 - score) * Math.log((1 - score) / (1 - p1)));
+          // Flip sign: positive LLR favors H1
+          llr = -llr;
+        }
+
+        // Check stopping conditions
+        if (llr <= lnA) { result = 'H0'; break; }
+        if (llr >= lnB) { result = 'H1'; break; }
+
+        // Progress report
+        if (played % 50 === 0) {
+          const wr = n > 0 ? (wins + draws * 0.5) / n : 0.5;
+          const elo = wr > 0 && wr < 1 ? Math.round(400 * Math.log10(wr / (1 - wr))) : 0;
+          console.log(`  Game ${played}: B wins ${wins}/${n} (${(wr*100).toFixed(1)}%), LLR=${llr.toFixed(3)} [${lnA.toFixed(2)}, ${lnB.toFixed(2)}], ~${elo > 0 ? '+' : ''}${elo} Elo`);
+        }
+
+        // Yield to UI every 10 games
+        if (g % 10 === 9) await new Promise(r => setTimeout(r, 0));
+      }
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const n = wins + losses + draws;
+      const wr = n > 0 ? (wins + draws * 0.5) / n : 0.5;
+      const elo = wr > 0 && wr < 1 ? Math.round(400 * Math.log10(wr / (1 - wr))) : 0;
+
+      console.log(`\n%cSPRT Result: ${result} after ${played} games (${elapsed}s)`, 'font-size:13px;font-weight:bold;color:#22c55e');
+      console.log(`Engine B: ${wins}W / ${losses}L / ${draws}D = ${(wr*100).toFixed(1)}% (~${elo > 0 ? '+' : ''}${elo} Elo)`);
+      console.log(`Final LLR: ${llr.toFixed(3)} | Boundaries: [${lnA.toFixed(2)}, ${lnB.toFixed(2)}]`);
+      if (result === 'H0') console.log(`%cConclusion: No significant difference (Elo diff < ${elo1})`, 'color:#eab308');
+      else if (result === 'H1') console.log(`%cConclusion: Engine B is significantly stronger (Elo diff >= ${elo1})`, 'color:#22c55e');
+      else console.log(`%cInconclusive after ${maxGames} games — increase maxGames or relax thresholds`, 'color:#ef4444');
+
+      // Restore state
+      currentSeed = savedSeed;
+      solverRng = savedRng;
+      belief = savedBelief;
+
+      return { result, played, wins, losses, draws, winRate: wr, elo, llr, elapsed };
     };
 
     // ========== F1 DIAGNOSTIC: ROLLOUT BIAS ISOLATION ==========
