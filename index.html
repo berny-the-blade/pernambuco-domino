@@ -3933,7 +3933,8 @@
                       if (isVLayout) {
                         // === VERTICAL SNAKE: columns flow top→bottom, then bottom→top ===
                         const containerH = boardBox.h || 300;
-                        const maxH = Math.max(120, containerH - 40);
+                        // Use ~half container height per column so chain wraps into 2-3 readable columns
+                        const maxH = Math.max(120, Math.floor(containerH * 0.48));
 
                         // Build columns by height — non-doubles vertical (height=HW), doubles horizontal (height=VW)
                         const cols = [];
@@ -3969,7 +3970,7 @@
                         }
 
                         return (
-                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'stretch', position:'relative' }}>
+                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'center', position:'relative' }}>
                             {cols.map((colIdxs, cIdx) => {
                               const isOdd = (cIdx % 2) === 1;
                               let flexDir = 'column';
@@ -3978,6 +3979,9 @@
                                 justify = (board.length < 6) ? 'center' : 'flex-end';
                               } else if (isOdd) {
                                 flexDir = 'column-reverse';
+                                justify = 'flex-start';
+                              } else {
+                                flexDir = 'column';
                                 justify = 'flex-start';
                               }
 
