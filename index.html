@@ -3174,7 +3174,7 @@
         return () => clearTimeout(timeout);
       }, [gameState?.currentPlayer, gameState?.gameStarted]);
 
-      // Move timer: 15 second countdown for human player, auto-play random valid tile on timeout
+      // Move timer: 30 second countdown for human player, auto-play random valid tile on timeout
       useEffect(() => {
         playingRef.current = false;  // reset double-click guard on turn change
         if (!gameState || !gameState.gameStarted || gameState.gameEnded) return;
@@ -3183,7 +3183,7 @@
         const hasValid = gameState.hands[playerSlot].some(t => canPlayTile(t));
         if (!hasValid) { setMoveTimer(null); return; } // auto-pass handles this
         playSound('turn');
-        setMoveTimer(15);
+        setMoveTimer(30);
         const iv = setInterval(() => {
           setMoveTimer(prev => {
             if (prev <= 1) {
@@ -4016,11 +4016,12 @@
                                   const orient = isD ? 'vertical' : 'horizontal';
                                   const flip = isOdd && orient === 'horizontal';
 
+                                  const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
                                   return (
                                     <div
                                       key={t.id + '-' + tileIndex}
                                       ref={(el) => { if (el) tileElRef.current.set(t.id + '-' + tileIndex, el); }}
-                                      style={{ display:'inline-block' }}
+                                      style={{ display:'inline-block', boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none', borderRadius: 4, position: 'relative', zIndex: isLastPlayed ? 3 : 'auto' }}
                                     >
                                       <BoardTile
                                         tile={t}
