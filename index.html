@@ -3908,32 +3908,8 @@
                     {(!gameState.board || gameState.board.length === 0) ? null : (() => {
                       const board = gameState.board;
                       const HW = bDims.hw, VW = bDims.vw;
-
-                      // Use locked boardBox width
-                      const containerW = boardBox.w || 300;
-                      const maxW = Math.max(160, containerW - 28);
                       const GAP = 1;
-
-                      // Build rows by width
-                      const rows = [];
-                      let cur = [];
-                      let w = 0;
-                      for (let i = 0; i < board.length; i++) {
-                        const t = board[i];
-                        const isD = t.left === t.right;
-                        const tw = (tileLayout === 'V' || isD) ? VW : HW;
-                        const need = cur.length > 0 ? (tw + GAP) : tw;
-
-                        if (w + need > maxW && cur.length > 0) {
-                          rows.push(cur);
-                          cur = [i];
-                          w = tw;
-                        } else {
-                          cur.push(i);
-                          w += need;
-                        }
-                      }
-                      if (cur.length) rows.push(cur);
+                      const isVLayout = tileLayout === 'V';
 
                       // End badge (green number)
                       const EndBadgeInline = ({ num }) => (
@@ -3954,21 +3930,147 @@
                         }}>{num}</div>
                       );
 
+                      if (isVLayout) {
+                        // === VERTICAL SNAKE: columns flow top→bottom, then bottom→top ===
+                        const containerH = boardBox.h || 300;
+                        const maxH = Math.max(120, containerH - 40);
+
+                        // Build columns by height — tiles are horizontal, stacked vertically
+                        const cols = [];
+                        let cur = [];
+                        let h = 0;
+                        for (let i = 0; i < board.length; i++) {
+                          const t = board[i];
+                          const isD = t.left === t.right;
+                          // In V layout: horizontal tiles have height=VW, doubles have height=HW (rendered vertical)
+                          const th = isD ? HW : VW;
+                          const need = cur.length > 0 ? (th + GAP) : th;
+                          if (h + need > maxH && cur.length > 0) {
+                            cols.push(cur);
+                            cur = [i];
+                            h = th;
+                          } else {
+                            cur.push(i);
+                            h += need;
+                          }
+                        }
+                        if (cur.length) cols.push(cur);
+
+                        // Compute column joints for connector dots
+                        const joints = [];
+                        for (let c = 0; c < cols.length - 1; c++) {
+                          const colA = cols[c];
+                          const colB = cols[c + 1];
+                          if (!colA.length || !colB.length) continue;
+                          const oddA = (c % 2) === 1;
+                          const oddB = ((c + 1) % 2) === 1;
+                          const endA = oddA ? colA[0] : colA[colA.length - 1];
+                          const startB = oddB ? colB[colB.length - 1] : colB[0];
+                          joints.push({ endA, startB, c });
+                        }
+
+                        return (
+                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'stretch', position:'relative' }}>
+                            {cols.map((colIdxs, cIdx) => {
+                              const isOdd = (cIdx % 2) === 1;
+                              let flexDir = 'column';
+                              let justify = 'flex-start';
+                              if (cIdx === 0) {
+                                justify = (board.length < 6) ? 'center' : 'flex-end';
+                              } else if (isOdd) {
+                                flexDir = 'column-reverse';
+                                justify = 'flex-start';
+                              }
+
+                              return (
+                                <div
+                                  key={'col'+cIdx}
+                                  style={{
+                                    display:'flex',
+                                    flexDirection:flexDir,
+                                    justifyContent:justify,
+                                    alignItems:'center',
+                                    gap:GAP,
+                                    marginRight: cIdx < cols.length - 1 ? GAP : 0
+                                  }}
+                                >
+                                  {cIdx === 0 && <EndBadgeInline num={gameState.leftEnd} />}
+
+                                  {colIdxs.map((tileIndex) => {
+                                    const t = board[tileIndex];
+                                    const isD = t.left === t.right;
+                                    const orient = isD ? 'vertical' : 'horizontal';
+                                    const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
+                                    return (
+                                      <div
+                                        key={t.id + '-' + tileIndex}
+                                        ref={(el) => { if (el) tileElRef.current.set(t.id + '-' + tileIndex, el); }}
+                                        style={{ display:'inline-block', boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none', borderRadius: 4, position: 'relative', zIndex: isLastPlayed ? 3 : 'auto' }}
+                                      >
+                                        <BoardTile tile={t} orientation={orient} flipped={isOdd} />
+                                      </div>
+                                    );
+                                  })}
+
+                                  {cIdx === cols.length - 1 && <EndBadgeInline num={gameState.rightEnd} />}
+                                </div>
+                              );
+                            })}
+                            {/* SVG connector dots between columns */}
+                            <svg style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:2 }} width="100%" height="100%">
+                              {joints.map((j, idx) => {
+                                const keyA = board[j.endA].id + '-' + j.endA;
+                                const keyB = board[j.startB].id + '-' + j.startB;
+                                const elA = tileElRef.current.get(keyA);
+                                const elB = tileElRef.current.get(keyB);
+                                if (!elA || !elB || !boardRef.current) return null;
+                                const ra = elA.getBoundingClientRect();
+                                const r0 = boardRef.current.getBoundingClientRect();
+                                const oddC = (j.c % 2) === 1;
+                                const x1 = ra.right - r0.left;
+                                const y1 = (oddC ? ra.top : ra.bottom) - r0.top;
+                                return <circle key={idx} cx={x1 + 2} cy={y1} r="3" fill="rgba(245,240,225,0.35)" />;
+                              })}
+                            </svg>
+                          </div>
+                        );
+                      }
+
+                      // === HORIZONTAL SNAKE (default H mode) ===
+                      const containerW = boardBox.w || 300;
+                      const maxW = Math.max(160, containerW - 28);
+
+                      // Build rows by width
+                      const rows = [];
+                      let cur = [];
+                      let w = 0;
+                      for (let i = 0; i < board.length; i++) {
+                        const t = board[i];
+                        const isD = t.left === t.right;
+                        const tw = isD ? VW : HW;
+                        const need = cur.length > 0 ? (tw + GAP) : tw;
+
+                        if (w + need > maxW && cur.length > 0) {
+                          rows.push(cur);
+                          cur = [i];
+                          w = tw;
+                        } else {
+                          cur.push(i);
+                          w += need;
+                        }
+                      }
+                      if (cur.length) rows.push(cur);
+
                       // Compute row joints for connector lines (direction-aware)
                       const joints = [];
                       for (let r = 0; r < rows.length - 1; r++) {
                         const rowA = rows[r];
                         const rowB = rows[r + 1];
                         if (!rowA.length || !rowB.length) continue;
-
                         const oddA = (r % 2) === 1;
                         const oddB = ((r + 1) % 2) === 1;
-
-                        // Visual end of rowA depends on flex direction
                         const endA = oddA ? rowA[0] : rowA[rowA.length - 1];
-                        // Visual start of rowB depends on flex direction
                         const startB = oddB ? rowB[rowB.length - 1] : rowB[0];
-
                         joints.push({ endA, startB, r });
                       }
 
@@ -3980,7 +4082,6 @@
                             let flexDir = 'row';
                             let justify = 'flex-start';
 
-                            // Center row 0 when short (early game), right-align when wrapping starts
                             if (rIdx === 0) {
                               justify = (board.length < 8) ? 'center' : 'flex-end';
                             } else if (isOdd) {
@@ -4008,7 +4109,7 @@
                                 {rowIdxs.map((tileIndex) => {
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
-                                  const orient = (tileLayout === 'V' || isD) ? 'vertical' : 'horizontal';
+                                  const orient = isD ? 'vertical' : 'horizontal';
                                   const flip = isOdd && orient === 'horizontal';
 
                                   const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
@@ -4048,7 +4149,6 @@
                               const rb = elB.getBoundingClientRect();
                               const r0 = boardRef.current.getBoundingClientRect();
 
-                              // Connect from correct edge based on row direction
                               const oddA = (j.r % 2) === 1;
                               const x1 = (oddA ? ra.left : ra.right) - r0.left;
                               const y1 = ra.bottom - r0.top;
