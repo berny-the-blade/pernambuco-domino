@@ -585,7 +585,8 @@
       const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
-      const [tileLayout, setTileLayoutRaw] = useState(localStorage.getItem('domino_tile_layout') || 'spiral');
+      const _storedLayout = localStorage.getItem('domino_tile_layout');
+      const [tileLayout, setTileLayoutRaw] = useState((_storedLayout === 'spiral' || _storedLayout === 'snake') ? _storedLayout : 'spiral');
       const setTileLayout = (v) => { setTileLayoutRaw(v); localStorage.setItem('domino_tile_layout', v); };
       const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 48, vw: 24 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
