@@ -3984,7 +3984,7 @@
                         // Visual start of rowB depends on flex direction
                         const startB = oddB ? rowB[rowB.length - 1] : rowB[0];
 
-                        joints.push({ endA, startB });
+                        joints.push({ endA, startB, r });
                       }
 
                       return (
@@ -4024,7 +4024,7 @@
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
                                   const orient = isD ? 'vertical' : 'horizontal';
-                                  const flip = isOdd && orient === 'horizontal';
+                                  const flip = false;
 
                                   const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
                                   return (
@@ -4063,19 +4063,18 @@
                               const rb = elB.getBoundingClientRect();
                               const r0 = boardRef.current.getBoundingClientRect();
 
-                              const x1 = (ra.left + ra.right) / 2 - r0.left;
+                              // Connect from correct edge based on row direction
+                              const oddA = (j.r % 2) === 1;
+                              const x1 = (oddA ? ra.left : ra.right) - r0.left;
                               const y1 = ra.bottom - r0.top;
-                              const x2 = (rb.left + rb.right) / 2 - r0.left;
-                              const y2 = rb.top - r0.top;
 
                               return (
-                                <path
+                                <circle
                                   key={idx}
-                                  d={`M ${x1} ${y1} L ${x1} ${(y1+y2)/2} L ${x2} ${(y1+y2)/2} L ${x2} ${y2}`}
-                                  stroke="rgba(245,240,225,0.18)"
-                                  strokeWidth="3"
-                                  fill="none"
-                                  strokeLinecap="round"
+                                  cx={x1}
+                                  cy={y1 + 2}
+                                  r="3"
+                                  fill="rgba(245,240,225,0.35)"
                                 />
                               );
                             })}
