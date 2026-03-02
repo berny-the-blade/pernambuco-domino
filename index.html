@@ -491,18 +491,19 @@
         return { name: player.name, avatarType: player.avatar.type, avatarSrc: player.avatar.src, initials: player.avatar.initials, bgGradient: player.avatar.bgGradient, color: player.avatar.color };
       };
 
-      const Avatar = ({ profile, size = 32 }) => {
+      const Avatar = ({ profile, size = 32, noBorder = false }) => {
         if (!profile) return <div style={{ width: size, height: size, borderRadius: '50%', background: '#374151', flexShrink: 0 }} />;
         const fs = Math.max(10, Math.round(size * 0.4));
+        const bdr = noBorder ? 'none' : '2px solid rgba(255,255,255,0.3)';
         if (profile.avatarType === 'image') {
           return (
-            <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.3)', boxShadow: '0 2px 6px rgba(0,0,0,0.3)', flexShrink: 0, background: profile.color || '#666' }}>
+            <div style={{ width: size, height: size, borderRadius: '50%', overflow: 'hidden', border: bdr, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', flexShrink: 0, background: profile.color || '#666' }}>
               <img src={profile.avatarSrc} alt={profile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; }} />
             </div>
           );
         }
         return (
-          <div style={{ width: size, height: size, borderRadius: '50%', background: profile.bgGradient || '#666', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: fs, fontWeight: 800, color: 'white', border: '2px solid rgba(255,255,255,0.3)', boxShadow: '0 2px 6px rgba(0,0,0,0.3)', flexShrink: 0, textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+          <div style={{ width: size, height: size, borderRadius: '50%', background: profile.bgGradient || '#666', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: fs, fontWeight: 800, color: 'white', border: bdr, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', flexShrink: 0, textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
             {profile.initials || '?'}
           </div>
         );
@@ -3831,7 +3832,7 @@
                 {/* Partner (top) — same team = blue */}
                 <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 flex-wrap ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')}>
                   <div style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', padding: 2, background: 'rgba(59,130,246,0.7)', boxShadow: '0 0 6px rgba(59,130,246,0.4)' }}>
-                    <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={38} />
+                    <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={38} noBorder />
                     {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[topSlot] || []).length}</span>
                     </div>}
@@ -3871,7 +3872,7 @@
                   {/* Left opponent — opposing team = red */}
                   <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[leftSlot] || []).length > 0 ? 64 : 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={38} />
+                      <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={38} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
                       </div>}
@@ -4121,7 +4122,7 @@
                   {/* Right opponent — opposing team = red */}
                   <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[rightSlot] || []).length > 0 ? 64 : 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={38} />
+                      <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={38} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
                       </div>}
@@ -4246,7 +4247,7 @@
                 <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ marginTop: 4 }}>
                   <div className="flex items-center justify-center gap-1.5" style={{ marginBottom: 2 }}>
                     <div style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', padding: 2, background: 'rgba(59,130,246,0.7)', boxShadow: '0 0 6px rgba(59,130,246,0.4)' }}>
-                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={38} />
+                      <Avatar profile={profileFromPlayer(gameState.players?.[playerSlot])} size={38} noBorder />
                       <div style={{ position: 'absolute', bottom: -2, right: -2, width: 14, height: 14, borderRadius: '50%', background: '#16a34a', border: '1.5px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
                       </div>
