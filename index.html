@@ -4080,21 +4080,59 @@
                                 </div>
                               );
                             })}
-                            {/* Left end badge */}
-                            {first && (
-                              <div style={{ position:'absolute', left: Math.max(0, first.x - 28), top: first.y + 2, zIndex: 20 }}>
-                                <EndBadge num={gameState.leftEnd} />
-                              </div>
-                            )}
-                            {/* Right end badge */}
-                            {last && board.length > 1 && (
-                              <div style={{ position:'absolute',
-                                left: last.x + (last.orient === 'horizontal' ? HW : VW) + 4,
-                                top: last.y + 2, zIndex: 20
-                              }}>
-                                <EndBadge num={gameState.rightEnd} />
-                              </div>
-                            )}
+                            {/* Left end badge — positioned BEFORE the first tile based on chain direction */}
+                            {first && (() => {
+                              // First tile's flip tells us the chain enters from the opposite side
+                              const isH = first.orient === 'horizontal';
+                              const tw = isH ? HW : VW;
+                              const th = isH ? VW : HW;
+                              // The chain starts going R from the first tile, so badge goes to the left
+                              // Unless first tile is flipped (L/U), badge goes to the exit side
+                              let bx, by;
+                              if (first.flip && isH) {
+                                // Going L: badge to the right
+                                bx = first.x + tw + 4; by = first.y + (th - 26) / 2;
+                              } else if (first.flip && !isH) {
+                                // Going U: badge below
+                                bx = first.x + (tw - 26) / 2; by = first.y + th + 4;
+                              } else if (!first.flip && !isH) {
+                                // Going D: badge above
+                                bx = first.x + (tw - 26) / 2; by = first.y - 30;
+                              } else {
+                                // Going R: badge to the left
+                                bx = first.x - 30; by = first.y + (th - 26) / 2;
+                              }
+                              return (
+                                <div style={{ position:'absolute', left: Math.max(0, bx), top: Math.max(0, by), zIndex: 20 }}>
+                                  <EndBadge num={gameState.leftEnd} />
+                                </div>
+                              );
+                            })()}
+                            {/* Right end badge — positioned AFTER the last tile based on chain direction */}
+                            {last && board.length > 1 && (() => {
+                              const isH = last.orient === 'horizontal';
+                              const tw = isH ? HW : VW;
+                              const th = isH ? VW : HW;
+                              let bx, by;
+                              if (last.flip && isH) {
+                                // Was going L: chain exits left
+                                bx = last.x - 30; by = last.y + (th - 26) / 2;
+                              } else if (last.flip && !isH) {
+                                // Was going U: chain exits upward
+                                bx = last.x + (tw - 26) / 2; by = last.y - 30;
+                              } else if (!last.flip && !isH) {
+                                // Was going D: chain exits downward
+                                bx = last.x + (tw - 26) / 2; by = last.y + th + 4;
+                              } else {
+                                // Was going R: chain exits right
+                                bx = last.x + tw + 4; by = last.y + (th - 26) / 2;
+                              }
+                              return (
+                                <div style={{ position:'absolute', left: Math.max(0, bx), top: Math.max(0, by), zIndex: 20 }}>
+                                  <EndBadge num={gameState.rightEnd} />
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       }
