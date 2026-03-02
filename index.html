@@ -439,115 +439,113 @@
     };
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
-    // Spiral layout: connected chain starting from board CENTER, spiraling
-    // outward clockwise. Each tile connects to the previous one.
-    // avoidTL / avoidBR: corner pixel size for score dials.
+    // Spiral layout: connected chain from board center, spiraling outward.
+    // Uses collision detection against ALL placed tiles — no boundary shrinking.
+    // Tries multiple turn directions so tiles are never lost.
     function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
+      const n = board.length;
+      if (n === 0) return { tiles: [] };
       gap = gap || 2;
-      const p = typeof pads === 'number' ? { top: pads, right: pads, bottom: pads, left: pads }
-        : Object.assign({ top: 6, right: 6, bottom: 6, left: 6 }, pads || {});
+      pads = typeof pads === 'number'
+        ? { top: pads, right: pads, bottom: pads, left: pads }
+        : Object.assign({ top: 6, right: 6, bottom: 20, left: 6 }, pads || {});
+      avoidTL = avoidTL || 0;
+      avoidBR = avoidBR || 0;
 
-      let bLeft = p.left, bTop = p.top, bRight = W - p.right, bBottom = H - p.bottom;
-      const tiles = [];
-      const dirs = ['R','D','L','U'];
-      let d = 0;
+      // Direction constants: 0=R, 1=D, 2=L, 3=U
+      const R = 0, D = 1, L = 2, U = 3;
+      const nextCW = d => (d + 1) % 4;
 
-      const tlSafe = avoidTL || 0;
-      const brSafe = avoidBR || 0;
+      const dimOf = d => (d === R || d === L)
+        ? { w: HW, h: VW } : { w: VW, h: HW };
+      const orientOf = d => (d === R || d === L) ? 'horizontal' : 'vertical';
+      const flipOf = d => (d === L || d === U);
 
-      // Helper: would a tile overlap a dial corner?
-      const hitsBR = (x, y, w, h) =>
-        brSafe > 0 && (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
-      const hitsTL = (x, y, w, h) =>
-        tlSafe > 0 && (x < bLeft + tlSafe) && (y < bTop + tlSafe);
-      const hitsCorner = (x, y, w, h) => hitsBR(x, y, w, h) || hitsTL(x, y, w, h);
+      const inBounds = (x, y, w, h) =>
+        x >= pads.left && y >= pads.top &&
+        x + w <= W - pads.right && y + h <= H - pads.bottom;
 
-      // Start CENTERED — first tile in the middle of the board
-      let tx = Math.floor((bLeft + bRight - HW) / 2);
-      let ty = Math.floor((bTop + bBottom - VW) / 2);
+      const hitsDial = (x, y, w, h) =>
+        (avoidTL > 0 && x < avoidTL && y < avoidTL) ||
+        (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
-      for (let i = 0; i < board.length; i++) {
-        if (bRight - bLeft < gap || bBottom - bTop < gap) break;
+      const placed = []; // collision rects: {x, y, w, h}
+      const overlaps = (x, y, w, h) => {
+        for (const p of placed) {
+          if (x < p.x + p.w && x + w > p.x &&
+              y < p.y + p.h && y + h > p.y) return true;
+        }
+        return false;
+      };
 
-        let dir = dirs[d];
-        let horiz = (dir === 'R' || dir === 'L');
-        let tw = horiz ? HW : VW;
-        let th = horiz ? VW : HW;
+      const ok = (x, y, w, h) =>
+        inBounds(x, y, w, h) && !hitsDial(x, y, w, h) && !overlaps(x, y, w, h);
 
-        // Check if tile fits at current position
-        const oob =
-          tx + tw > bRight || tx < bLeft ||
-          ty + th > bBottom || ty < bTop ||
-          hitsCorner(tx, ty, tw, th);
+      // Continue straight in same direction
+      const straight = (prev, dir) => {
+        const { w, h } = dimOf(dir);
+        if (dir === R) return { x: prev.x + prev.w + gap, y: prev.y, w, h };
+        if (dir === D) return { x: prev.x, y: prev.y + prev.h + gap, w, h };
+        if (dir === L) return { x: prev.x - w - gap, y: prev.y, w, h };
+        return { x: prev.x, y: prev.y - h - gap, w, h }; // U
+      };
 
-        if (oob && i === 0) {
-          // First tile doesn't fit at center — nudge it
-          tx = Math.max(bLeft, Math.min(tx, bRight - tw));
-          ty = Math.max(bTop, Math.min(ty, bBottom - th));
+      // Turn position: connect new direction to prev tile's exit edge
+      const turn = (prev, oldDir, newDir) => {
+        const { w, h } = dimOf(newDir);
+        // Standard clockwise turns
+        if (oldDir === R && newDir === D) return { x: prev.x + prev.w - w, y: prev.y + prev.h + gap, w, h };
+        if (oldDir === D && newDir === L) return { x: prev.x - w - gap, y: prev.y + prev.h - h, w, h };
+        if (oldDir === L && newDir === U) return { x: prev.x, y: prev.y - h - gap, w, h };
+        if (oldDir === U && newDir === R) return { x: prev.x + prev.w + gap, y: prev.y, w, h };
+        // Non-standard turns (fallback: try connecting at prev's exit)
+        if (newDir === R) return { x: prev.x + prev.w + gap, y: prev.y + prev.h - h, w, h };
+        if (newDir === D) return { x: prev.x + prev.w - w, y: prev.y + prev.h + gap, w, h };
+        if (newDir === L) return { x: prev.x - w - gap, y: prev.y, w, h };
+        return { x: prev.x, y: prev.y - h - gap, w, h }; // U
+      };
+
+      // --- Place first tile centered ---
+      const d0 = dimOf(R);
+      const sx = Math.round((W - d0.w) / 2);
+      const sy = Math.round((H - d0.h) / 2);
+      placed.push({ x: sx, y: sy, w: d0.w, h: d0.h });
+      const result = [{ i: 0, x: sx, y: sy, orient: 'horizontal', flip: false }];
+      let dir = R;
+
+      // --- Place remaining tiles ---
+      for (let i = 1; i < n; i++) {
+        const prev = placed[i - 1];
+        let done = false;
+
+        // 1. Try continuing straight
+        const s = straight(prev, dir);
+        if (ok(s.x, s.y, s.w, s.h)) {
+          placed.push({ x: s.x, y: s.y, w: s.w, h: s.h });
+          result.push({ i, x: s.x, y: s.y, orient: orientOf(dir), flip: flipOf(dir) });
+          done = true;
+          continue;
         }
 
-        if (oob && i > 0) {
-          const prev = tiles[i - 1];
-          const pH = prev.orient === 'horizontal';
-          const pw = pH ? HW : VW;
-          const ph = pH ? VW : HW;
-
-          // Shrink boundary to exclude the row/column we just filled
-          if (dir === 'R')      bTop    = prev.y + ph + gap;
-          else if (dir === 'D') bRight  = prev.x;
-          else if (dir === 'L') bBottom = prev.y;
-          else if (dir === 'U') bLeft   = prev.x + pw + gap;
-
-          // Turn clockwise
-          d = (d + 1) % 4;
-          dir = dirs[d];
-          horiz = (dir === 'R' || dir === 'L');
-          tw = horiz ? HW : VW;
-          th = horiz ? VW : HW;
-
-          // Position new tile CONNECTED to the previous tile's end
-          if (dir === 'D') {
-            tx = prev.x + pw - VW;     // right-aligned with prev
-            ty = prev.y + ph + gap;     // below prev
-          } else if (dir === 'L') {
-            tx = prev.x - HW - gap;    // left of prev
-            ty = prev.y + ph - VW;     // bottom-aligned with prev
-          } else if (dir === 'U') {
-            tx = prev.x;               // left-aligned with prev
-            ty = prev.y - HW - gap;    // above prev
-          } else if (dir === 'R') {
-            tx = prev.x + pw + gap;    // right of prev
-            ty = prev.y;               // top-aligned with prev
+        // 2. Try clockwise turns (up to 3)
+        let tryDir = dir;
+        for (let t = 0; t < 3; t++) {
+          const nd = nextCW(tryDir);
+          const tp = turn(prev, dir, nd);
+          if (ok(tp.x, tp.y, tp.w, tp.h)) {
+            placed.push({ x: tp.x, y: tp.y, w: tp.w, h: tp.h });
+            result.push({ i, x: tp.x, y: tp.y, orient: orientOf(nd), flip: flipOf(nd) });
+            dir = nd;
+            done = true;
+            break;
           }
-
-          // If turn position hits a dial corner, nudge away from it
-          if (hitsTL(tx, ty, tw, th)) {
-            if (dir === 'R') tx = Math.max(tx, bLeft + tlSafe);
-            if (dir === 'D') ty = Math.max(ty, bTop + tlSafe);
-          }
-          if (hitsBR(tx, ty, tw, th)) {
-            if (dir === 'L') tx = Math.min(tx, bRight - brSafe - tw);
-            if (dir === 'U') ty = Math.min(ty, bBottom - brSafe - th);
-          }
-
-          // If still out of bounds after nudging, stop
-          if (tx + tw > bRight || tx < bLeft || ty + th > bBottom || ty < bTop) break;
+          tryDir = nd;
         }
 
-        tiles.push({
-          i, x: Math.round(tx), y: Math.round(ty),
-          orient: horiz ? 'horizontal' : 'vertical',
-          flip: (dir === 'L' || dir === 'U')
-        });
-
-        // Advance cursor
-        if (dir === 'R') tx += HW + gap;
-        else if (dir === 'D') ty += HW + gap;
-        else if (dir === 'L') tx -= HW + gap;
-        else ty -= HW + gap;
+        if (!done) break; // board truly full
       }
 
-      return { tiles };
+      return { tiles: result };
     }
 
     function App() {
@@ -4032,13 +4030,15 @@
                       const GAP = 1;
 
                       // End badge (green number)
+                      const BADGE_SZ = 30;
                       const EndBadge = ({ num }) => (
                         <div style={{
                           display:'inline-flex', alignItems:'center', justifyContent:'center',
-                          width: 26, height: 26, borderRadius: 13,
-                          background:'#10b981', border:'2px solid #064e3b',
-                          boxShadow:'0 0 10px rgba(16,185,129,0.6)',
-                          color:'#fff', fontWeight:900, fontSize:12, flexShrink:0
+                          width: BADGE_SZ, height: BADGE_SZ, borderRadius: BADGE_SZ / 2,
+                          background:'#10b981', border:'2.5px solid #064e3b',
+                          boxShadow:'0 0 14px rgba(16,185,129,0.7), 0 0 4px rgba(0,0,0,0.4)',
+                          color:'#fff', fontWeight:900, fontSize:15, flexShrink:0,
+                          zIndex: 25
                         }}>{num}</div>
                       );
 
@@ -4048,12 +4048,12 @@
                         const containerH = (boardBox.h || 300);
 
                         // Use the full board area; layoutSpiral avoids dial corners
-                        const DIAL_CORNER = 95; // score dial 74px + generous margin for turn tiles
+                        const DIAL_CORNER = 80;
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
 
                         const out = layoutSpiral(board, W, H, HW, VW, 2,
-                          { top: 6, right: 20, bottom: 14, left: 6 },
+                          { top: 6, right: 16, bottom: 10, left: 6 },
                           DIAL_CORNER, DIAL_CORNER);
                         const tilesOut = out.tiles;
                         const first = tilesOut[0];
@@ -4089,59 +4089,47 @@
                                 </div>
                               );
                             })}
-                            {/* Left end badge — positioned BEFORE the first tile based on chain direction */}
-                            {first && (() => {
-                              // First tile's flip tells us the chain enters from the opposite side
-                              const isH = first.orient === 'horizontal';
+                            {/* End badges — positioned at chain ends based on direction */}
+                            {[
+                              { tile: first, num: gameState.leftEnd, isFirst: true },
+                              board.length > 1 ? { tile: last, num: gameState.rightEnd, isFirst: false } : null
+                            ].filter(Boolean).map((badge, idx) => {
+                              const t = badge.tile;
+                              if (!t) return null;
+                              const isH = t.orient === 'horizontal';
                               const tw = isH ? HW : VW;
                               const th = isH ? VW : HW;
-                              // The chain starts going R from the first tile, so badge goes to the left
-                              // Unless first tile is flipped (L/U), badge goes to the exit side
+                              const B = BADGE_SZ;
                               let bx, by;
-                              if (first.flip && isH) {
-                                // Going L: badge to the right
-                                bx = first.x + tw + 4; by = first.y + (th - 26) / 2;
-                              } else if (first.flip && !isH) {
-                                // Going U: badge below
-                                bx = first.x + (tw - 26) / 2; by = first.y + th + 4;
-                              } else if (!first.flip && !isH) {
-                                // Going D: badge above
-                                bx = first.x + (tw - 26) / 2; by = first.y - 30;
+                              // For first tile: badge on entry side (opposite of direction)
+                              // For last tile: badge on exit side (same as direction)
+                              const goingL = t.flip && isH;
+                              const goingU = t.flip && !isH;
+                              const goingD = !t.flip && !isH;
+                              const goingR = !t.flip && isH;
+
+                              if (badge.isFirst) {
+                                // Badge on ENTRY side (opposite of travel)
+                                if (goingR) { bx = t.x - B - 4; by = t.y + (th - B) / 2; }
+                                else if (goingL) { bx = t.x + tw + 4; by = t.y + (th - B) / 2; }
+                                else if (goingD) { bx = t.x + (tw - B) / 2; by = t.y - B - 4; }
+                                else { bx = t.x + (tw - B) / 2; by = t.y + th + 4; }
                               } else {
-                                // Going R: badge to the left
-                                bx = first.x - 30; by = first.y + (th - 26) / 2;
+                                // Badge on EXIT side (direction of travel)
+                                if (goingR) { bx = t.x + tw + 4; by = t.y + (th - B) / 2; }
+                                else if (goingL) { bx = t.x - B - 4; by = t.y + (th - B) / 2; }
+                                else if (goingD) { bx = t.x + (tw - B) / 2; by = t.y + th + 4; }
+                                else { bx = t.x + (tw - B) / 2; by = t.y - B - 4; }
                               }
+                              // Clamp to board
+                              bx = Math.max(2, Math.min(bx, containerW - B - 2));
+                              by = Math.max(2, Math.min(by, containerH - B - 2));
                               return (
-                                <div style={{ position:'absolute', left: Math.max(0, bx), top: Math.max(0, by), zIndex: 20 }}>
-                                  <EndBadge num={gameState.leftEnd} />
+                                <div key={idx} style={{ position:'absolute', left: bx, top: by, zIndex: 25 }}>
+                                  <EndBadge num={badge.num} />
                                 </div>
                               );
-                            })()}
-                            {/* Right end badge — positioned AFTER the last tile based on chain direction */}
-                            {last && board.length > 1 && (() => {
-                              const isH = last.orient === 'horizontal';
-                              const tw = isH ? HW : VW;
-                              const th = isH ? VW : HW;
-                              let bx, by;
-                              if (last.flip && isH) {
-                                // Was going L: chain exits left
-                                bx = last.x - 30; by = last.y + (th - 26) / 2;
-                              } else if (last.flip && !isH) {
-                                // Was going U: chain exits upward
-                                bx = last.x + (tw - 26) / 2; by = last.y - 30;
-                              } else if (!last.flip && !isH) {
-                                // Was going D: chain exits downward
-                                bx = last.x + (tw - 26) / 2; by = last.y + th + 4;
-                              } else {
-                                // Was going R: chain exits right
-                                bx = last.x + tw + 4; by = last.y + (th - 26) / 2;
-                              }
-                              return (
-                                <div style={{ position:'absolute', left: Math.max(0, bx), top: Math.max(0, by), zIndex: 20 }}>
-                                  <EndBadge num={gameState.rightEnd} />
-                                </div>
-                              );
-                            })()}
+                            })}
                           </div>
                         );
                       }
