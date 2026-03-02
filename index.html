@@ -447,7 +447,9 @@
       const dirs = ['R','D','L','U'];
       let d = 0;
       let left = p.left, top = p.top, right = W - p.right, bottom = H - p.bottom;
-      let x = left, y = top;
+      // Start in the center of the safe rect, not the corner
+      let x = Math.floor(left + (right - left - HW) / 2);
+      let y = Math.floor(top + (bottom - top - VW) / 2);
       const tiles = [];
 
       const sizeForDir = (dir) => {
@@ -4000,12 +4002,13 @@
 
                       // === SPIRAL / RECTANGULAR LAYOUT (default) ===
                       if (tileLayout === 'spiral') {
-                        const containerW = (boardBox.w || 300) - 16;
-                        const containerH = (boardBox.h || 300) - 16;
+                        const containerW = (boardBox.w || 300);
+                        const containerH = (boardBox.h || 300);
 
                         // Safe insets: keep tiles out of corner dial zones
-                        const DIAL = 80;   // dial ~74px + margin
-                        const SPAD = 8;    // inner padding inside safe rect
+                        // Dial is 74px, scales to 1.5x (~111px) on pulse. 128 covers it.
+                        const DIAL = 128;
+                        const SPAD = 12;   // inner padding inside safe rect
                         const x0 = DIAL;
                         const y0 = DIAL;
                         const x1 = containerW - DIAL;
