@@ -4024,7 +4024,7 @@
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
                                   const orient = isD ? 'vertical' : 'horizontal';
-                                  const flip = false;
+                                  const flip = isOdd && orient === 'horizontal';
 
                                   const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
                                   return (
