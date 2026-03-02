@@ -3875,7 +3875,7 @@
                       ))}
                       {gameState.blockedReveal && (() => {
                         const p = gameState.blockedReveal.players?.find(x => x.slot === topSlot);
-                        return p ? <span className="text-[9px] font-bold text-white/50 ml-1">({p.pips})</span> : null;
+                        return p ? <span className="text-[14px] font-extrabold text-yellow-300/90 ml-1">({p.pips})</span> : null;
                       })()}
                     </div>
                   ) : (
@@ -3910,7 +3910,7 @@
                         ))}
                         {gameState.blockedReveal && (() => {
                           const p = gameState.blockedReveal.players?.find(x => x.slot === leftSlot);
-                          return p ? <div className="text-[8px] font-bold text-white/50 w-full text-center">({p.pips})</div> : null;
+                          return p ? <div className="text-[14px] font-extrabold text-yellow-300/90 w-full text-center">({p.pips})</div> : null;
                         })()}
                       </div>
                     ) : (
@@ -4146,7 +4146,7 @@
                         ))}
                         {gameState.blockedReveal && (() => {
                           const p = gameState.blockedReveal.players?.find(x => x.slot === rightSlot);
-                          return p ? <div className="text-[8px] font-bold text-white/50 w-full text-center">({p.pips})</div> : null;
+                          return p ? <div className="text-[14px] font-extrabold text-yellow-300/90 w-full text-center">({p.pips})</div> : null;
                         })()}
                       </div>
                     ) : (
@@ -4190,7 +4190,7 @@
                     {isMyTurn && <span className="text-[8px] px-1 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                     {gameState.currentPlayer === -1 && gameState.blockedReveal && (() => {
                       const p = gameState.blockedReveal.players?.find(x => x.slot === playerSlot);
-                      return p ? <span className="text-[9px] font-bold text-white/50">({p.pips} pts)</span> : null;
+                      return p ? <span className="text-[14px] font-extrabold text-yellow-300/90">({p.pips})</span> : null;
                     })()}
                   </div>
 
