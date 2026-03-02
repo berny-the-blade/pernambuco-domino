@@ -3807,12 +3807,7 @@
 
               {/* Round announcement — rendered below board in the layout flow */}
 
-              {/* Message toast — only for non-scoring messages (pass, blocked info) */}
-              {gameState.message && !roundAnnouncement && gameState.currentPlayer !== -1 && (
-                <div className="msg-toast px-2 py-1 mb-1 text-center text-xs font-semibold animate-slide-down">
-                  {gameState.message}
-                </div>
-              )}
+              {/* Message toast removed — turn info shown via SUA VEZ badge + avatar badges */}
 
               {/* Starter choice modal — moved to just above player hand */}
 
