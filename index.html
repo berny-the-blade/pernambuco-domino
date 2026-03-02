@@ -520,8 +520,9 @@
             ty = prev.y;               // top-aligned
           }
 
-          // Safety: if new position is out of bounds, stop
+          // Safety: if new position is out of bounds or hits a dial, stop
           if (tx < bLeft || ty < bTop || tx + tw > bRight || ty + th > bBottom) break;
+          if (hitsBR(tx, ty, tw, th) || hitsTL(tx, ty, tw, th)) break;
         }
 
         tiles.push({
@@ -4038,7 +4039,7 @@
                         const containerH = (boardBox.h || 300);
 
                         // Use the full board area; layoutSpiral avoids dial corners
-                        const DIAL_CORNER = 72; // score dial is 74px SVG
+                        const DIAL_CORNER = 82; // score dial 74px + margin for turn tiles
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
 
