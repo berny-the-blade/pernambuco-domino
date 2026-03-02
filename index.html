@@ -439,9 +439,9 @@
     };
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
-    // Spiral layout: places tiles as a CONNECTED chain that spirals
-    // clockwise when it hits a boundary. Each tile touches the previous one.
-    // avoidTL / avoidBR: corner pixel size to skip (score dials).
+    // Spiral layout: connected chain starting from board CENTER, spiraling
+    // outward clockwise. Each tile connects to the previous one.
+    // avoidTL / avoidBR: corner pixel size for score dials.
     function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
       gap = gap || 2;
       const p = typeof pads === 'number' ? { top: pads, right: pads, bottom: pads, left: pads }
@@ -455,32 +455,30 @@
       const tlSafe = avoidTL || 0;
       const brSafe = avoidBR || 0;
 
-      // Current tile position — start below TL dial so first row clears it
-      let tx = bLeft;
-      let ty = bTop + tlSafe;
-
       // Helper: would a tile overlap a dial corner?
-      const hitsBR = (x, y, w, h) => {
-        return brSafe > 0 && (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
-      };
-      const hitsTL = (x, y, w, h) => {
-        return tlSafe > 0 && (x < bLeft + tlSafe) && (y < bTop + tlSafe);
-      };
+      const hitsBR = (x, y, w, h) =>
+        brSafe > 0 && (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
+      const hitsTL = (x, y, w, h) =>
+        tlSafe > 0 && (x < bLeft + tlSafe) && (y < bTop + tlSafe);
+      const hitsCorner = (x, y, w, h) => hitsBR(x, y, w, h) || hitsTL(x, y, w, h);
+
+      // Start CENTERED — first tile in the middle of the board
+      let tx = Math.floor((bLeft + bRight - HW) / 2);
+      let ty = Math.floor((bTop + bBottom - VW) / 2);
 
       for (let i = 0; i < board.length; i++) {
         if (bRight - bLeft < VW + 2 || bBottom - bTop < VW + 2) break;
 
         let dir = dirs[d];
-        const horiz = (dir === 'R' || dir === 'L');
+        let horiz = (dir === 'R' || dir === 'L');
         let tw = horiz ? HW : VW;
         let th = horiz ? VW : HW;
 
-        // Check if tile fits; respect both dial corners
+        // Check if tile fits at current position
         const oob =
-          (dir === 'R' && (tx + tw > bRight || hitsBR(tx, ty, tw, th))) ||
-          (dir === 'D' && (ty + th > bBottom || hitsBR(tx, ty, tw, th))) ||
-          (dir === 'L' && (tx < bLeft || hitsTL(tx, ty, tw, th))) ||
-          (dir === 'U' && (ty < bTop || hitsTL(tx, ty, tw, th)));
+          tx + tw > bRight || tx < bLeft ||
+          ty + th > bBottom || ty < bTop ||
+          hitsCorner(tx, ty, tw, th);
 
         if (oob && i > 0) {
           const prev = tiles[i - 1];
@@ -488,7 +486,7 @@
           const pw = pH ? HW : VW;
           const ph = pH ? VW : HW;
 
-          // Shrink boundary based on the row/column we just filled
+          // Shrink boundary to exclude the row/column we just filled
           if (dir === 'R')      bTop    = prev.y + ph + gap;
           else if (dir === 'D') bRight  = prev.x;
           else if (dir === 'L') bBottom = prev.y;
@@ -497,41 +495,37 @@
           // Turn clockwise
           d = (d + 1) % 4;
           dir = dirs[d];
-          const nH = (dir === 'R' || dir === 'L');
-          tw = nH ? HW : VW;
-          th = nH ? VW : HW;
+          horiz = (dir === 'R' || dir === 'L');
+          tw = horiz ? HW : VW;
+          th = horiz ? VW : HW;
 
           // Position new tile CONNECTED to the previous tile's end
           if (dir === 'D') {
-            // Was going R → turn down. Attach below-right of last R tile.
-            tx = prev.x + pw - VW;     // right-aligned with last tile
-            ty = prev.y + ph + gap;     // just below
+            tx = prev.x + pw - VW;     // right-aligned with prev
+            ty = prev.y + ph + gap;     // below prev
           } else if (dir === 'L') {
-            // Was going D → turn left. Attach left of last D tile's bottom.
-            tx = prev.x - HW - gap;    // to the left
-            ty = prev.y + ph - VW;     // bottom-aligned
+            tx = prev.x - HW - gap;    // left of prev
+            ty = prev.y + ph - VW;     // bottom-aligned with prev
           } else if (dir === 'U') {
-            // Was going L → turn up. Attach above last L tile's left end.
-            tx = prev.x;               // left-aligned
-            ty = prev.y - HW - gap;    // above
+            tx = prev.x;               // left-aligned with prev
+            ty = prev.y - HW - gap;    // above prev
           } else if (dir === 'R') {
-            // Was going U → turn right. Attach right of last U tile's top.
-            tx = prev.x + pw + gap;    // to the right
-            ty = prev.y;               // top-aligned
+            tx = prev.x + pw + gap;    // right of prev
+            ty = prev.y;               // top-aligned with prev
           }
 
-          // Safety: if new position is out of bounds or hits a dial, stop
-          if (tx < bLeft || ty < bTop || tx + tw > bRight || ty + th > bBottom) break;
-          if (hitsBR(tx, ty, tw, th) || hitsTL(tx, ty, tw, th)) break;
+          // If turn position hits bounds or corners, stop
+          if (tx + tw > bRight || tx < bLeft || ty + th > bBottom || ty < bTop) break;
+          if (hitsCorner(tx, ty, tw, th)) break;
         }
 
         tiles.push({
           i, x: Math.round(tx), y: Math.round(ty),
-          orient: (dir === 'R' || dir === 'L') ? 'horizontal' : 'vertical',
+          orient: horiz ? 'horizontal' : 'vertical',
           flip: (dir === 'L' || dir === 'U')
         });
 
-        // Advance cursor along current direction
+        // Advance cursor
         if (dir === 'R') tx += HW + gap;
         else if (dir === 'D') ty += HW + gap;
         else if (dir === 'L') tx -= HW + gap;
