@@ -3967,16 +3967,31 @@
                         }
 
                         return (
-                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'center', gap: 4, position:'relative' }}>
+                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'stretch', gap: 4, position:'relative' }}>
                             {cols.map((colIdxs, cIdx) => {
                               const isOdd = (cIdx % 2) === 1;
-                              // Col 0: top→bottom (flex-end so it grows from bottom up to meet col 1)
-                              // Col 1: bottom→top (column-reverse)
-                              // Col 2: top→bottom, etc.
-                              let flexDir = isOdd ? 'column-reverse' : 'column';
-                              let justify = 'flex-start';
-                              if (cIdx === 0 && cols.length > 1) {
-                                justify = 'flex-end'; // align to bottom so it connects to col 1
+                              // Snake connection:
+                              // Col 0 (even): column + flex-end → tiles flow top→bottom, group anchored to BOTTOM
+                              // Col 1 (odd): column-reverse + flex-start → tiles flow bottom→top, anchored to BOTTOM
+                              //   (column-reverse start = bottom of container)
+                              // Col 2 (even): column + flex-start → tiles flow top→bottom, anchored to TOP
+                              //   (connects to col 1's end at top)
+                              // General: even cols anchor to where prev col ended, odd cols anchor to bottom/top alternating
+                              const endsAtBottom = (cIdx % 2) === 0; // even cols end at bottom, odd end at top
+                              // Even cols: column, push to bottom (flex-end) unless col starts at top (cIdx >= 2 and prev ended at top)
+                              // Odd cols: column-reverse, push to bottom (flex-start for column-reverse)
+                              let flexDir, justify;
+                              if (cols.length === 1) {
+                                flexDir = 'column'; justify = 'center';
+                              } else if (isOdd) {
+                                // Odd col: bottom→top. Anchor at bottom (where even col ended).
+                                flexDir = 'column-reverse'; justify = 'flex-start';
+                              } else if (cIdx === 0) {
+                                // First col: top→bottom, push to bottom.
+                                flexDir = 'column'; justify = 'flex-end';
+                              } else {
+                                // Even col > 0: top→bottom, anchor at TOP (where odd col ended).
+                                flexDir = 'column'; justify = 'flex-start';
                               }
 
                               return (
@@ -3984,8 +3999,8 @@
                                   key={'col'+cIdx}
                                   style={{
                                     display:'flex',
-                                    flexDirection:flexDir,
-                                    justifyContent: cols.length === 1 ? 'center' : justify,
+                                    flexDirection: flexDir,
+                                    justifyContent: justify,
                                     alignItems:'center',
                                     gap:GAP
                                   }}
@@ -4020,9 +4035,10 @@
                                 if (!elA || !elB || !boardRef.current) return null;
                                 const ra = elA.getBoundingClientRect();
                                 const r0 = boardRef.current.getBoundingClientRect();
-                                const oddC = (j.c % 2) === 1;
+                                // Even col ends at bottom, odd col ends at top
+                                const colEndsAtBottom = (j.c % 2) === 0;
                                 const x1 = ra.right - r0.left;
-                                const y1 = (oddC ? ra.top : ra.bottom) - r0.top;
+                                const y1 = (colEndsAtBottom ? ra.bottom : ra.top) - r0.top;
                                 return <circle key={idx} cx={x1 + 2} cy={y1} r="3" fill="rgba(245,240,225,0.35)" />;
                               })}
                             </svg>
