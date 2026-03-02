@@ -455,13 +455,16 @@
       const tlSafe = avoidTL || 0;
       const brSafe = avoidBR || 0;
 
-      // Current tile position
-      let tx = bLeft + tlSafe;
-      let ty = bTop;
+      // Current tile position — start below TL dial so first row clears it
+      let tx = bLeft;
+      let ty = bTop + tlSafe;
 
-      // Helper: would a tile at (x,y,w,h) overlap the BR dial corner?
+      // Helper: would a tile overlap a dial corner?
       const hitsBR = (x, y, w, h) => {
         return brSafe > 0 && (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
+      };
+      const hitsTL = (x, y, w, h) => {
+        return tlSafe > 0 && (x < bLeft + tlSafe) && (y < bTop + tlSafe);
       };
 
       for (let i = 0; i < board.length; i++) {
@@ -472,12 +475,12 @@
         let tw = horiz ? HW : VW;
         let th = horiz ? VW : HW;
 
-        // Check if tile fits; also respect BR dial corner
+        // Check if tile fits; respect both dial corners
         const oob =
           (dir === 'R' && (tx + tw > bRight || hitsBR(tx, ty, tw, th))) ||
           (dir === 'D' && (ty + th > bBottom || hitsBR(tx, ty, tw, th))) ||
-          (dir === 'L' && (tx < bLeft || hitsBR(tx, ty, tw, th))) ||
-          (dir === 'U' && ty < bTop);
+          (dir === 'L' && (tx < bLeft || hitsTL(tx, ty, tw, th))) ||
+          (dir === 'U' && (ty < bTop || hitsTL(tx, ty, tw, th)));
 
         if (oob && i > 0) {
           const prev = tiles[i - 1];
