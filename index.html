@@ -505,10 +505,12 @@
         return { x: prev.x, y: prev.y - h - gap, w, h }; // U
       };
 
-      // --- Place first tile centered ---
+      // --- Place first tile at top-left edge (below TL dial) ---
       const d0 = dimOf(R);
-      const sx = Math.round((W - d0.w) / 2);
-      const sy = Math.round((H - d0.h) / 2);
+      let sx = pads.left;
+      let sy = Math.max(pads.top, avoidTL);
+      // If starting position still hits TL dial, push right
+      if (avoidTL > 0 && sx < avoidTL && sy < avoidTL) sx = avoidTL;
       placed.push({ x: sx, y: sy, w: d0.w, h: d0.h });
       const result = [{ i: 0, x: sx, y: sy, orient: 'horizontal', flip: false }];
       let dir = R;
@@ -4048,7 +4050,7 @@
                         const containerH = (boardBox.h || 300);
 
                         // Use the full board area; layoutSpiral avoids dial corners
-                        const DIAL_CORNER = 80;
+                        const DIAL_CORNER = 78;
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
 
