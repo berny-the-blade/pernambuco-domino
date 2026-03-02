@@ -3131,7 +3131,7 @@
         const shouldCount = gameState && gameState.gameStarted && !gameState.gameEnded
           && gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && playerSlot === 0;
         if (!shouldCount) { setRoundCountdown(null); return; }
-        const delay = gameState.blockedReveal ? 8 : 7;
+        const delay = 20;
         setRoundCountdown(delay);
         const iv = setInterval(() => {
           setRoundCountdown(prev => {
