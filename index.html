@@ -4000,10 +4000,22 @@
 
                       // === SPIRAL / RECTANGULAR LAYOUT (default) ===
                       if (tileLayout === 'spiral') {
-                        const W = Math.max(200, (boardBox.w || 300) - 16);
-                        const H = Math.max(200, (boardBox.h || 300) - 16);
-                        const out = layoutSpiral(board, W, H, HW, VW, 2, { top: 12, right: 12, bottom: 80, left: 12 });
-                        const tilesOut = out.tiles;
+                        const containerW = (boardBox.w || 300) - 16;
+                        const containerH = (boardBox.h || 300) - 16;
+
+                        // Safe insets: keep tiles out of corner dial zones
+                        const DIAL = 80;   // dial ~74px + margin
+                        const SPAD = 8;    // inner padding inside safe rect
+                        const x0 = DIAL;
+                        const y0 = DIAL;
+                        const x1 = containerW - DIAL;
+                        const y1 = containerH - DIAL;
+                        const W = Math.max(120, x1 - x0);
+                        const H = Math.max(120, y1 - y0);
+
+                        const out = layoutSpiral(board, W, H, HW, VW, 2, SPAD);
+                        // Offset tiles into the safe play rect
+                        const tilesOut = out.tiles.map(p => ({ ...p, x: p.x + x0, y: p.y + y0 }));
                         const first = tilesOut[0];
                         const last = tilesOut[tilesOut.length - 1];
 
@@ -4024,7 +4036,7 @@
                                   style={{
                                     position:'absolute', left: p.x, top: p.y,
                                     width: tw, height: th, borderRadius: 4,
-                                    zIndex: isLastPlayed ? 5 : isEndTile ? 4 : 1,
+                                    zIndex: isLastPlayed ? 5 : isEndTile ? 4 : 3,
                                     boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none'
                                   }}
                                 >
