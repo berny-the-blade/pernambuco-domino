@@ -143,8 +143,6 @@
       throw new Error('ACCESS_GATE');
     })();
 
-    })();
-
     // ========== LANGUAGE / TRANSLATION ==========
     let appLang = (() => { try { return localStorage.getItem('pernambuco_lang') || 'pt'; } catch(e) { return 'pt'; } })();
 
