@@ -3931,77 +3931,106 @@
                       );
 
                       if (isVLayout) {
-                        // === RECTANGLE PERIMETER: tiles flow clockwise around edges ===
-                        const W = (boardBox.w || 300) - 16; // subtract padding
-                        const H = (boardBox.h || 300) - 16;
-                        const pad = VW + 4; // corner space
-                        const step = HW + GAP;
+                        // === RECTANGLE PERIMETER: tiles flow clockwise, proportionally distributed ===
+                        const M = 6; // inner margin so tiles don't touch board edges
+                        const W = (boardBox.w || 300) - 16 - 2 * M;
+                        const H = (boardBox.h || 300) - 16 - 2 * M;
+                        const RGAP = 2; // gap between tiles on the rectangle
 
-                        // Capacity per edge
-                        const topCap = Math.max(1, Math.floor((W - 2 * pad) / step));
-                        const sideCap = Math.max(1, Math.floor((H - 2 * pad) / step));
-                        const totalCap = topCap + sideCap + topCap + sideCap;
+                        // Usable space per edge (corners = VW×VW blocks at each corner)
+                        const hSpace = W - 2 * VW; // top/bottom usable width
+                        const vSpace = H - 2 * VW; // left/right usable height
+                        const hStep = HW + RGAP;
+                        const vStep = HW + RGAP;
 
-                        // Distribute tiles into 4 segments: top, right, bottom, left
+                        // Max tiles per edge
+                        const topCap = Math.max(1, Math.floor((hSpace + RGAP) / hStep));
+                        const sideCap = Math.max(1, Math.floor((vSpace + RGAP) / vStep));
+                        const totalCap = 2 * topCap + 2 * sideCap;
+
+                        // Proportional distribution (not greedy!) so tiles spread evenly
+                        const N = board.length;
+                        const caps = [topCap, sideCap, topCap, sideCap];
+                        const segCounts = caps.map(c => Math.floor(c / totalCap * N));
+                        let deficit = N - segCounts.reduce((a, b) => a + b, 0);
+                        const fracs = caps.map((c, i) => ({ i, f: (c / totalCap * N) - segCounts[i] }))
+                          .sort((a, b) => b.f - a.f);
+                        for (let k = 0; k < deficit; k++) segCounts[fracs[k].i]++;
+
+                        // Build segments from board
                         const segments = [];
                         let placed = 0;
-                        const counts = [topCap, sideCap, topCap, sideCap];
-                        for (let s = 0; s < 4 && placed < board.length; s++) {
-                          const take = Math.min(counts[s], board.length - placed);
-                          segments.push(board.slice(placed, placed + take));
-                          placed += take;
-                        }
-                        // If tiles remain (>1 loop), append to last segment
-                        if (placed < board.length) {
-                          segments[segments.length - 1] = segments[segments.length - 1].concat(board.slice(placed));
+                        for (let s = 0; s < 4; s++) {
+                          segments.push(board.slice(placed, placed + segCounts[s]));
+                          placed += segCounts[s];
                         }
 
-                        // Compute position + orientation for each tile
+                        // Position tiles absolutely, centered on each edge
                         const tiles = [];
                         let idx = 0;
 
-                        // Segment 0: TOP — horizontal tiles, left→right
-                        if (segments[0]) {
+                        // Seg 0: TOP — horizontal tiles, left→right, centered
+                        if (segments[0].length > 0) {
                           const n = segments[0].length;
-                          const startX = Math.floor((W - n * HW - (n - 1) * GAP) / 2);
+                          const totalW = n * HW + (n - 1) * RGAP;
+                          const startX = VW + Math.floor((hSpace - totalW) / 2);
                           segments[0].forEach((t, i) => {
-                            tiles.push({ t, x: startX + i * step, y: pad - VW, orient: 'horizontal', flip: false, idx: idx++ });
+                            tiles.push({ t, x: M + startX + i * hStep, y: M, orient: 'horizontal', flip: false, seg: 0, idx: idx++ });
                           });
                         }
 
-                        // Segment 1: RIGHT — vertical tiles, top→bottom
-                        if (segments[1]) {
+                        // Seg 1: RIGHT — vertical tiles, top→bottom, centered
+                        if (segments[1].length > 0) {
                           const n = segments[1].length;
-                          const startY = Math.floor((H - n * HW - (n - 1) * GAP) / 2);
+                          const totalH = n * HW + (n - 1) * RGAP;
+                          const startY = VW + Math.floor((vSpace - totalH) / 2);
                           segments[1].forEach((t, i) => {
-                            tiles.push({ t, x: W - pad, y: startY + i * step, orient: 'vertical', flip: false, idx: idx++ });
+                            tiles.push({ t, x: M + W - VW, y: M + startY + i * vStep, orient: 'vertical', flip: false, seg: 1, idx: idx++ });
                           });
                         }
 
-                        // Segment 2: BOTTOM — horizontal tiles, right→left
-                        if (segments[2]) {
+                        // Seg 2: BOTTOM — horizontal tiles, right→left (flipped), centered
+                        if (segments[2].length > 0) {
                           const n = segments[2].length;
-                          const startX = Math.floor((W - n * HW - (n - 1) * GAP) / 2);
+                          const totalW = n * HW + (n - 1) * RGAP;
+                          const startX = VW + Math.floor((hSpace - totalW) / 2);
                           segments[2].forEach((t, i) => {
-                            tiles.push({ t, x: startX + (n - 1 - i) * step, y: H - pad, orient: 'horizontal', flip: true, idx: idx++ });
+                            tiles.push({ t, x: M + startX + (n - 1 - i) * hStep, y: M + H - VW, orient: 'horizontal', flip: true, seg: 2, idx: idx++ });
                           });
                         }
 
-                        // Segment 3: LEFT — vertical tiles, bottom→top
-                        if (segments[3]) {
+                        // Seg 3: LEFT — vertical tiles, bottom→top (flipped), centered
+                        if (segments[3].length > 0) {
                           const n = segments[3].length;
-                          const startY = Math.floor((H - n * HW - (n - 1) * GAP) / 2);
+                          const totalH = n * HW + (n - 1) * RGAP;
+                          const startY = VW + Math.floor((vSpace - totalH) / 2);
                           segments[3].forEach((t, i) => {
-                            tiles.push({ t, x: pad - VW, y: startY + (n - 1 - i) * step, orient: 'vertical', flip: true, idx: idx++ });
+                            tiles.push({ t, x: M, y: M + startY + (n - 1 - i) * vStep, orient: 'vertical', flip: true, seg: 3, idx: idx++ });
                           });
                         }
 
-                        // Find first and last tile positions for end badges
+                        // End badge positioning based on segment
                         const firstTile = tiles[0];
                         const lastTile = tiles[tiles.length - 1];
+                        const badgeOffset = (seg, tile, before) => {
+                          const tw = tile.orient === 'horizontal' ? HW : VW;
+                          const th = tile.orient === 'horizontal' ? VW : HW;
+                          if (seg === 0) return before
+                            ? { left: tile.x - 24, top: tile.y + (th - 22) / 2 }
+                            : { left: tile.x + tw + 2, top: tile.y + (th - 22) / 2 };
+                          if (seg === 1) return before
+                            ? { left: tile.x + (tw - 22) / 2, top: tile.y - 24 }
+                            : { left: tile.x + (tw - 22) / 2, top: tile.y + th + 2 };
+                          if (seg === 2) return before
+                            ? { left: tile.x + tw + 2, top: tile.y + (th - 22) / 2 }
+                            : { left: tile.x - 24, top: tile.y + (th - 22) / 2 };
+                          /* seg 3 */ return before
+                            ? { left: tile.x + (tw - 22) / 2, top: tile.y + th + 2 }
+                            : { left: tile.x + (tw - 22) / 2, top: tile.y - 24 };
+                        };
 
                         return (
-                          <div style={{ width:'100%', height:'100%', position:'relative' }}>
+                          <div style={{ width:'100%', height:'100%', position:'relative', overflow:'hidden' }}>
                             {tiles.map((item) => {
                               const isLastPlayed = item.idx === board.length - 1 && board.length > 1;
                               const tw = item.orient === 'horizontal' ? HW : VW;
@@ -4025,18 +4054,14 @@
                                 </div>
                               );
                             })}
-                            {/* Left end badge */}
-                            {firstTile && (
-                              <div style={{ position:'absolute', left: firstTile.x - 26, top: firstTile.y + (firstTile.orient === 'horizontal' ? (VW - 22) / 2 : (HW - 22) / 2), zIndex: 5 }}>
-                                <EndBadgeInline num={gameState.leftEnd} />
-                              </div>
-                            )}
-                            {/* Right end badge */}
-                            {lastTile && (
-                              <div style={{ position:'absolute', left: lastTile.x + (lastTile.orient === 'horizontal' ? HW : VW) + 4, top: lastTile.y + (lastTile.orient === 'horizontal' ? (VW - 22) / 2 : (HW - 22) / 2), zIndex: 5 }}>
-                                <EndBadgeInline num={gameState.rightEnd} />
-                              </div>
-                            )}
+                            {firstTile && (() => {
+                              const pos = badgeOffset(firstTile.seg, firstTile, true);
+                              return <div style={{ position:'absolute', left: Math.max(0, pos.left), top: Math.max(0, pos.top), zIndex: 5 }}><EndBadgeInline num={gameState.leftEnd} /></div>;
+                            })()}
+                            {lastTile && board.length > 1 && (() => {
+                              const pos = badgeOffset(lastTile.seg, lastTile, false);
+                              return <div style={{ position:'absolute', left: Math.max(0, pos.left), top: Math.max(0, pos.top), zIndex: 5 }}><EndBadgeInline num={gameState.rightEnd} /></div>;
+                            })()}
                           </div>
                         );
                       }
