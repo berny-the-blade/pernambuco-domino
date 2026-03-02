@@ -439,70 +439,46 @@
     };
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
-    // Spiral layout: places tiles edge-to-edge in a rectangular spiral
-    // starting from the TOP-RIGHT corner, spiraling inward clockwise.
-    // avoidTL / avoidBR: square pixel size to skip at those corners (for score dials).
+    // Spiral layout: places tiles in a rectangular spiral from top-left,
+    // spiraling clockwise inward. No tile overlap guaranteed.
+    // avoidTL / avoidBR: corner pixel size to skip (score dials).
     function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
       gap = gap || 2;
       const p = typeof pads === 'number' ? { top: pads, right: pads, bottom: pads, left: pads }
         : Object.assign({ top: 6, right: 6, bottom: 6, left: 6 }, pads || {});
 
-      // Outer bounds
       let bLeft = p.left, bTop = p.top, bRight = W - p.right, bBottom = H - p.bottom;
-
       const tiles = [];
       const dirs = ['R','D','L','U'];
-      let d = 0; // start going Right
+      let d = 0;
 
       const sizeForDir = (dir) => {
         if (dir === 'R' || dir === 'L') return { w: HW, h: VW, orient: 'horizontal' };
         return { w: VW, h: HW, orient: 'vertical' };
       };
 
-      // Start at top-left (offset past the TL dial if needed)
       const tlSafe = avoidTL || 0;
-      let x = bLeft + tlSafe;
+      let x = bLeft + tlSafe; // start past TL dial
       let y = bTop;
 
+      const step = HW + gap;
+
       for (let i = 0; i < board.length; i++) {
-        const dir = dirs[d];
-        const { w, h, orient } = sizeForDir(dir);
+        // Stop if remaining area is too small
+        if (bRight - bLeft < VW + 2 || bBottom - bTop < VW + 2) break;
 
-        // Clamp into current bounds
-        x = Math.max(bLeft, Math.min(x, bRight - w));
-        y = Math.max(bTop, Math.min(y, bBottom - h));
+        let dir = dirs[d];
+        let { w, h, orient } = sizeForDir(dir);
 
-        // Skip tile positions that overlap the TL or BR dial safe zones
-        const brSafe = avoidBR || 0;
-        const inTL = (x < bLeft + tlSafe + p.left) && (y < bTop + tlSafe + p.top);
-        const inBR = (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
-
-        // If overlapping a dial corner, nudge past it
-        if (inTL && dir === 'R' && i === 0) {
-          x = bLeft + tlSafe;
-        }
-
-        tiles.push({
-          i, x: Math.round(x), y: Math.round(y), orient,
-          flip: (dir === 'L' || dir === 'U')
-        });
-
-        // Step in current direction
-        const step = HW + gap;
-        if (dir === 'R') x += step;
-        else if (dir === 'D') y += step;
-        else if (dir === 'L') x -= step;
-        else y -= step;
-
-        // Would the NEXT tile go out of bounds?
-        const ns = sizeForDir(dirs[d]);
-        const wouldHit =
-          (dir === 'R' && x + ns.w > bRight) ||
-          (dir === 'D' && y + ns.h > bBottom) ||
+        // CHECK BEFORE PLACING: would this tile be out of bounds?
+        // If so, turn first, then place at the new direction's start.
+        const outOfBounds =
+          (dir === 'R' && x + w > bRight) ||
+          (dir === 'D' && y + h > bBottom) ||
           (dir === 'L' && x < bLeft) ||
           (dir === 'U' && y < bTop);
 
-        if (wouldHit) {
+        if (outOfBounds && i > 0) {
           // Shrink the boundary on the side we just filled
           const lane = VW + gap;
           if (dir === 'R')      bTop    += lane;
@@ -512,17 +488,32 @@
 
           // Turn clockwise
           d = (d + 1) % 4;
-          const ndir = dirs[d];
-          const nns = sizeForDir(ndir);
+          dir = dirs[d];
+          const ns = sizeForDir(dir);
+          w = ns.w; h = ns.h; orient = ns.orient;
+
           // Position at the start of the new edge
-          if (ndir === 'R')      { x = bLeft;            y = bTop; }
-          else if (ndir === 'D') { x = bRight - nns.w;   y = bTop; }
-          else if (ndir === 'L') { x = bRight - nns.w;   y = bBottom - nns.h; }
-          else if (ndir === 'U') { x = bLeft;            y = bBottom - nns.h; }
+          if (dir === 'R')      { x = bLeft;          y = bTop; }
+          else if (dir === 'D') { x = bRight - ns.w;  y = bTop; }
+          else if (dir === 'L') { x = bRight - ns.w;  y = bBottom - ns.h; }
+          else if (dir === 'U') { x = bLeft;          y = bBottom - ns.h; }
+
+          // If still out of bounds after turning, stop
+          if (bRight - bLeft < VW + 2 || bBottom - bTop < VW + 2) break;
+          if (x + w > bRight || y + h > bBottom || x < bLeft || y < bTop) break;
         }
 
-        // Stop if remaining area is too small for any tile
-        if (bRight - bLeft < VW + 2 || bBottom - bTop < VW + 2) break;
+        // Place tile (no clamping — position is guaranteed valid)
+        tiles.push({
+          i, x: Math.round(x), y: Math.round(y), orient,
+          flip: (dir === 'L' || dir === 'U')
+        });
+
+        // Step to next position in current direction
+        if (dir === 'R') x += step;
+        else if (dir === 'D') y += step;
+        else if (dir === 'L') x -= step;
+        else y -= step;
       }
 
       return { tiles };
