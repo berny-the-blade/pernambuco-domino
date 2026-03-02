@@ -447,9 +447,9 @@
       const dirs = ['R','D','L','U'];
       let d = 0;
       let left = p.left, top = p.top, right = W - p.right, bottom = H - p.bottom;
-      // Start in the center of the safe rect, not the corner
-      let x = Math.floor(left + (right - left - HW) / 2);
-      let y = Math.floor(top + (bottom - top - VW) / 2);
+      // Start slightly up-left of center so early shape uses more vertical space
+      let x = Math.floor(left + (right - left - HW) / 2) - Math.floor(HW * 0.35);
+      let y = Math.floor(top + (bottom - top - VW) / 2) - Math.floor(HW * 0.25);
       const tiles = [];
 
       const sizeForDir = (dir) => {
@@ -488,11 +488,14 @@
           if (dir === 'U') y = top;
 
           d = (d + 1) % 4;
-          const lane = VW + gap;
-          if (dir === 'R') top += lane;
-          if (dir === 'D') right -= lane;
-          if (dir === 'L') bottom -= lane;
-          if (dir === 'U') left += lane;
+          // Shrink only after completing a full lap (after U turn)
+          if (dir === 'U') {
+            const lane = VW + gap;
+            top += lane;
+            right -= lane;
+            bottom -= lane;
+            left += lane;
+          }
 
           const ndir = dirs[d];
           const ns = sizeForDir(ndir);
@@ -4005,20 +4008,30 @@
                         const containerW = (boardBox.w || 300);
                         const containerH = (boardBox.h || 300);
 
-                        // Safe insets: keep tiles out of corner dial zones
-                        // Dial is 74px, scales to 1.5x (~111px) on pulse. 128 covers it.
-                        const DIAL = 128;
-                        const SPAD = 12;   // inner padding inside safe rect
-                        const x0 = DIAL;
-                        const y0 = DIAL;
-                        const x1 = containerW - DIAL;
-                        const y1 = containerH - DIAL;
-                        const W = Math.max(120, x1 - x0);
-                        const H = Math.max(120, y1 - y0);
+                        // Corner dial is 74px, pulses to 1.5x => ~111px. Safe box = 118px.
+                        const DIAL_SAFE = 118;
+                        const PAD = 10;
 
-                        const out = layoutSpiral(board, W, H, HW, VW, 2, SPAD);
+                        // Asymmetric safe rect: big insets at TL + BR (dials), smaller at TR + BL
+                        const x0 = DIAL_SAFE + PAD;
+                        const y0 = DIAL_SAFE + PAD;
+                        const x1 = containerW - (DIAL_SAFE + PAD);
+                        const y1 = containerH - (DIAL_SAFE + PAD);
+
+                        // Expand into TR and BL corners (no dials there)
+                        const extraTR = 52;
+                        const extraBL = 52;
+                        const rx0 = Math.max(0, x0 - extraBL);
+                        const ry0 = Math.max(0, y0 - 20);
+                        const rx1 = Math.min(containerW, x1 + extraTR);
+                        const ry1 = Math.min(containerH, y1 + extraBL);
+
+                        const W = Math.max(120, rx1 - rx0);
+                        const H = Math.max(120, ry1 - ry0);
+
+                        const out = layoutSpiral(board, W, H, HW, VW, 2, { top: 8, right: 8, bottom: 8, left: 8 });
                         // Offset tiles into the safe play rect
-                        const tilesOut = out.tiles.map(p => ({ ...p, x: p.x + x0, y: p.y + y0 }));
+                        const tilesOut = out.tiles.map(p => ({ ...p, x: p.x + rx0, y: p.y + ry0 }));
                         const first = tilesOut[0];
                         const last = tilesOut[tilesOut.length - 1];
 
