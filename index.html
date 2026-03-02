@@ -3935,15 +3935,14 @@
                         const containerH = boardBox.h || 300;
                         const maxH = Math.max(120, containerH - 40);
 
-                        // Build columns by height — tiles are horizontal, stacked vertically
+                        // Build columns by height — non-doubles vertical (height=HW), doubles horizontal (height=VW)
                         const cols = [];
                         let cur = [];
                         let h = 0;
                         for (let i = 0; i < board.length; i++) {
                           const t = board[i];
                           const isD = t.left === t.right;
-                          // In V layout: horizontal tiles have height=VW, doubles have height=HW (rendered vertical)
-                          const th = isD ? HW : VW;
+                          const th = isD ? VW : HW;
                           const need = cur.length > 0 ? (th + GAP) : th;
                           if (h + need > maxH && cur.length > 0) {
                             cols.push(cur);
@@ -3999,7 +3998,7 @@
                                   {colIdxs.map((tileIndex) => {
                                     const t = board[tileIndex];
                                     const isD = t.left === t.right;
-                                    const orient = isD ? 'vertical' : 'horizontal';
+                                    const orient = isD ? 'horizontal' : 'vertical';
                                     const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
                                     return (
                                       <div
