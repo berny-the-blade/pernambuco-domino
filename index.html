@@ -3871,7 +3871,7 @@
                 <div className="flex items-stretch mb-1 gap-1" style={{ flex: 1, minHeight: 0 }}>
 
                   {/* Left opponent — opposing team = red */}
-                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[leftSlot] || []).length > 0 ? 64 : 48 }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-start ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[leftSlot] || []).length > 0 ? 64 : 48, paddingTop: 12 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={38} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3931,117 +3931,112 @@
                       );
 
                       if (isVLayout) {
-                        // === VERTICAL SNAKE: all tiles vertical, stacked in columns ===
-                        const containerH = boardBox.h || 300;
-                        const maxH = Math.max(120, Math.floor(containerH * 0.85));
-                        const tileH = HW; // all tiles vertical: height = HW
+                        // === RECTANGLE PERIMETER: tiles flow clockwise around edges ===
+                        const W = (boardBox.w || 300) - 16; // subtract padding
+                        const H = (boardBox.h || 300) - 16;
+                        const pad = VW + 4; // corner space
+                        const step = HW + GAP;
 
-                        // Build columns — every tile has the same height (HW)
-                        const cols = [];
-                        let cur = [];
-                        let h = 0;
-                        for (let i = 0; i < board.length; i++) {
-                          const need = cur.length > 0 ? (tileH + GAP) : tileH;
-                          if (h + need > maxH && cur.length > 0) {
-                            cols.push(cur);
-                            cur = [i];
-                            h = tileH;
-                          } else {
-                            cur.push(i);
-                            h += need;
-                          }
-                        }
-                        if (cur.length) cols.push(cur);
+                        // Capacity per edge
+                        const topCap = Math.max(1, Math.floor((W - 2 * pad) / step));
+                        const sideCap = Math.max(1, Math.floor((H - 2 * pad) / step));
+                        const totalCap = topCap + sideCap + topCap + sideCap;
 
-                        // Joints between columns for connector dots
-                        const joints = [];
-                        for (let c = 0; c < cols.length - 1; c++) {
-                          const colA = cols[c];
-                          const colB = cols[c + 1];
-                          if (!colA.length || !colB.length) continue;
-                          const oddA = (c % 2) === 1;
-                          const endA = oddA ? colA[0] : colA[colA.length - 1];
-                          const oddB = ((c + 1) % 2) === 1;
-                          const startB = oddB ? colB[colB.length - 1] : colB[0];
-                          joints.push({ endA, startB, c });
+                        // Distribute tiles into 4 segments: top, right, bottom, left
+                        const segments = [];
+                        let placed = 0;
+                        const counts = [topCap, sideCap, topCap, sideCap];
+                        for (let s = 0; s < 4 && placed < board.length; s++) {
+                          const take = Math.min(counts[s], board.length - placed);
+                          segments.push(board.slice(placed, placed + take));
+                          placed += take;
                         }
+                        // If tiles remain (>1 loop), append to last segment
+                        if (placed < board.length) {
+                          segments[segments.length - 1] = segments[segments.length - 1].concat(board.slice(placed));
+                        }
+
+                        // Compute position + orientation for each tile
+                        const tiles = [];
+                        let idx = 0;
+
+                        // Segment 0: TOP — horizontal tiles, left→right
+                        if (segments[0]) {
+                          const n = segments[0].length;
+                          const startX = Math.floor((W - n * HW - (n - 1) * GAP) / 2);
+                          segments[0].forEach((t, i) => {
+                            tiles.push({ t, x: startX + i * step, y: pad - VW, orient: 'horizontal', flip: false, idx: idx++ });
+                          });
+                        }
+
+                        // Segment 1: RIGHT — vertical tiles, top→bottom
+                        if (segments[1]) {
+                          const n = segments[1].length;
+                          const startY = Math.floor((H - n * HW - (n - 1) * GAP) / 2);
+                          segments[1].forEach((t, i) => {
+                            tiles.push({ t, x: W - pad, y: startY + i * step, orient: 'vertical', flip: false, idx: idx++ });
+                          });
+                        }
+
+                        // Segment 2: BOTTOM — horizontal tiles, right→left
+                        if (segments[2]) {
+                          const n = segments[2].length;
+                          const startX = Math.floor((W - n * HW - (n - 1) * GAP) / 2);
+                          segments[2].forEach((t, i) => {
+                            tiles.push({ t, x: startX + (n - 1 - i) * step, y: H - pad, orient: 'horizontal', flip: true, idx: idx++ });
+                          });
+                        }
+
+                        // Segment 3: LEFT — vertical tiles, bottom→top
+                        if (segments[3]) {
+                          const n = segments[3].length;
+                          const startY = Math.floor((H - n * HW - (n - 1) * GAP) / 2);
+                          segments[3].forEach((t, i) => {
+                            tiles.push({ t, x: pad - VW, y: startY + (n - 1 - i) * step, orient: 'vertical', flip: true, idx: idx++ });
+                          });
+                        }
+
+                        // Find first and last tile positions for end badges
+                        const firstTile = tiles[0];
+                        const lastTile = tiles[tiles.length - 1];
 
                         return (
-                          <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', justifyContent:'center', alignItems:'stretch', gap: 4, position:'relative' }}>
-                            {cols.map((colIdxs, cIdx) => {
-                              const isOdd = (cIdx % 2) === 1;
-                              // Snake connection:
-                              // Col 0 (even): column + flex-end → tiles flow top→bottom, group anchored to BOTTOM
-                              // Col 1 (odd): column-reverse + flex-start → tiles flow bottom→top, anchored to BOTTOM
-                              //   (column-reverse start = bottom of container)
-                              // Col 2 (even): column + flex-start → tiles flow top→bottom, anchored to TOP
-                              //   (connects to col 1's end at top)
-                              // General: even cols anchor to where prev col ended, odd cols anchor to bottom/top alternating
-                              const endsAtBottom = (cIdx % 2) === 0; // even cols end at bottom, odd end at top
-                              // Even cols: column, push to bottom (flex-end) unless col starts at top (cIdx >= 2 and prev ended at top)
-                              // Odd cols: column-reverse, push to bottom (flex-start for column-reverse)
-                              let flexDir, justify;
-                              if (cols.length === 1) {
-                                flexDir = 'column'; justify = 'center';
-                              } else if (isOdd) {
-                                // Odd col: bottom→top. Anchor at bottom (where even col ended).
-                                flexDir = 'column-reverse'; justify = 'flex-start';
-                              } else if (cIdx === 0) {
-                                // First col: top→bottom, push to bottom.
-                                flexDir = 'column'; justify = 'flex-end';
-                              } else {
-                                // Even col > 0: top→bottom, anchor at TOP (where odd col ended).
-                                flexDir = 'column'; justify = 'flex-start';
-                              }
-
+                          <div style={{ width:'100%', height:'100%', position:'relative' }}>
+                            {tiles.map((item) => {
+                              const isLastPlayed = item.idx === board.length - 1 && board.length > 1;
+                              const tw = item.orient === 'horizontal' ? HW : VW;
+                              const th = item.orient === 'horizontal' ? VW : HW;
                               return (
                                 <div
-                                  key={'col'+cIdx}
+                                  key={item.t.id + '-' + item.idx}
+                                  ref={(el) => { if (el) tileElRef.current.set(item.t.id + '-' + item.idx, el); }}
                                   style={{
-                                    display:'flex',
-                                    flexDirection: flexDir,
-                                    justifyContent: justify,
-                                    alignItems:'center',
-                                    gap:GAP
+                                    position:'absolute',
+                                    left: item.x,
+                                    top: item.y,
+                                    width: tw,
+                                    height: th,
+                                    boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none',
+                                    borderRadius: 4,
+                                    zIndex: isLastPlayed ? 3 : 1
                                   }}
                                 >
-                                  {cIdx === 0 && <EndBadgeInline num={gameState.leftEnd} />}
-
-                                  {colIdxs.map((tileIndex) => {
-                                    const t = board[tileIndex];
-                                    const isLastPlayed = tileIndex === board.length - 1 && board.length > 1;
-                                    return (
-                                      <div
-                                        key={t.id + '-' + tileIndex}
-                                        ref={(el) => { if (el) tileElRef.current.set(t.id + '-' + tileIndex, el); }}
-                                        style={{ display:'inline-block', boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none', borderRadius: 4, position: 'relative', zIndex: isLastPlayed ? 3 : 'auto' }}
-                                      >
-                                        <BoardTile tile={t} orientation="vertical" flipped={false} />
-                                      </div>
-                                    );
-                                  })}
-
-                                  {cIdx === cols.length - 1 && <EndBadgeInline num={gameState.rightEnd} />}
+                                  <BoardTile tile={item.t} orientation={item.orient} flipped={item.flip} />
                                 </div>
                               );
                             })}
-                            {/* SVG connector dots between columns */}
-                            <svg style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:2 }} width="100%" height="100%">
-                              {joints.map((j, idx) => {
-                                const keyA = board[j.endA].id + '-' + j.endA;
-                                const keyB = board[j.startB].id + '-' + j.startB;
-                                const elA = tileElRef.current.get(keyA);
-                                const elB = tileElRef.current.get(keyB);
-                                if (!elA || !elB || !boardRef.current) return null;
-                                const ra = elA.getBoundingClientRect();
-                                const r0 = boardRef.current.getBoundingClientRect();
-                                // Even col ends at bottom, odd col ends at top
-                                const colEndsAtBottom = (j.c % 2) === 0;
-                                const x1 = ra.right - r0.left;
-                                const y1 = (colEndsAtBottom ? ra.bottom : ra.top) - r0.top;
-                                return <circle key={idx} cx={x1 + 2} cy={y1} r="3" fill="rgba(245,240,225,0.35)" />;
-                              })}
-                            </svg>
+                            {/* Left end badge */}
+                            {firstTile && (
+                              <div style={{ position:'absolute', left: firstTile.x - 26, top: firstTile.y + (firstTile.orient === 'horizontal' ? (VW - 22) / 2 : (HW - 22) / 2), zIndex: 5 }}>
+                                <EndBadgeInline num={gameState.leftEnd} />
+                              </div>
+                            )}
+                            {/* Right end badge */}
+                            {lastTile && (
+                              <div style={{ position:'absolute', left: lastTile.x + (lastTile.orient === 'horizontal' ? HW : VW) + 4, top: lastTile.y + (lastTile.orient === 'horizontal' ? (VW - 22) / 2 : (HW - 22) / 2), zIndex: 5 }}>
+                                <EndBadgeInline num={gameState.rightEnd} />
+                              </div>
+                            )}
                           </div>
                         );
                       }
@@ -4231,7 +4226,7 @@
                   </div>
 
                   {/* Right opponent — opposing team = red */}
-                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[rightSlot] || []).length > 0 ? 64 : 48 }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-end ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[rightSlot] || []).length > 0 ? 64 : 48, paddingBottom: 12 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={38} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -4487,33 +4482,33 @@
                 return (
                   <div className="animate-bounce-in rounded-xl mx-2 mt-1" style={{
                     background: 'rgba(30,40,60,0.95)', border: '2px solid ' + borderColor,
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.4)', padding: '10px 16px'
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.4)', padding: '5px 10px'
                   }}>
-                    <div className="flex items-center gap-3">
-                      <div className="text-3xl">{won ? (isBuchuda ? '\uD83D\uDCA5' : '\uD83C\uDFC6') : (isBuchuda ? '\uD83D\uDCA9' : '\uD83D\uDC80')}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xl">{won ? (isBuchuda ? '\uD83D\uDCA5' : '\uD83C\uDFC6') : (isBuchuda ? '\uD83D\uDCA9' : '\uD83D\uDC80')}</div>
                       <div className="flex-1">
                         {isBuchuda && (
-                          <div className="text-lg font-black" style={{ color: '#f59e0b', textShadow: '0 0 12px rgba(245,158,11,0.5)', letterSpacing: 2 }}>
+                          <div className="text-sm font-black" style={{ color: '#f59e0b', textShadow: '0 0 12px rgba(245,158,11,0.5)', letterSpacing: 2 }}>
                             {buchuWord}!
                           </div>
                         )}
-                        <div className={'text-base font-extrabold ' + (won ? 'text-yellow-400' : 'text-red-400')}>
+                        <div className={'text-sm font-extrabold ' + (won ? 'text-yellow-400' : 'text-red-400')}>
                           {won ? 'PARTIDA GANHA!' : 'PARTIDA PERDIDA!'}
                         </div>
-                        <div className="text-white/60 text-[11px]">
+                        <div className="text-white/60 text-[10px]">
                           {isBuchuda
                             ? (won ? 'Venceu sem deixar ponto!' : 'Perdeu sem marcar!')
                             : (won ? 'Seu time venceu!' : 'Adversarios venceram!')}
                         </div>
                       </div>
                       <div className="text-center">
-                        <div className="text-2xl font-extrabold text-white">{s0} - {s1}</div>
-                        <div className="text-[9px] text-white/40">a {gameState.matchTarget || 6} pts</div>
+                        <div className="text-lg font-extrabold text-white">{s0} - {s1}</div>
+                        <div className="text-[8px] text-white/40">a {gameState.matchTarget || 6} pts</div>
                       </div>
                     </div>
-                    <div className="flex gap-2 mt-2">
-                      <button onClick={startGame} className="btn-primary flex-1 py-2 text-sm font-bold">Nova Partida</button>
-                      <button onClick={() => { db.ref('rooms/' + roomCode).remove(); setGameState(null); setRoomCode(''); setScreen('menu'); }} className="flex-1 py-2 text-xs font-bold rounded-xl" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>Menu</button>
+                    <div className="flex gap-2 mt-1">
+                      <button onClick={startGame} className="btn-primary flex-1 py-1.5 text-xs font-bold">Nova Partida</button>
+                      <button onClick={() => { db.ref('rooms/' + roomCode).remove(); setGameState(null); setRoomCode(''); setScreen('menu'); }} className="flex-1 py-1.5 text-[10px] font-bold rounded-xl" style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.15)' }}>Menu</button>
                     </div>
                   </div>
                 );
