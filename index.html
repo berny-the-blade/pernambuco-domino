@@ -3948,14 +3948,23 @@
                         const sideCap = Math.max(1, Math.floor((vSpace + RGAP) / vStep));
                         const totalCap = 2 * topCap + 2 * sideCap;
 
-                        // Proportional distribution (not greedy!) so tiles spread evenly
+                        // Sequential fill with proportional caps: tiles flow continuously
+                        // top→right→bottom→left, but each edge limited to its fair share
                         const N = board.length;
                         const caps = [topCap, sideCap, topCap, sideCap];
-                        const segCounts = caps.map(c => Math.floor(c / totalCap * N));
-                        let deficit = N - segCounts.reduce((a, b) => a + b, 0);
-                        const fracs = caps.map((c, i) => ({ i, f: (c / totalCap * N) - segCounts[i] }))
-                          .sort((a, b) => b.f - a.f);
-                        for (let k = 0; k < deficit; k++) segCounts[fracs[k].i]++;
+                        const propCaps = caps.map(c => Math.max(1, Math.ceil(c / totalCap * N)));
+                        const segCounts = [0, 0, 0, 0];
+                        let remaining = N;
+                        for (let s = 0; s < 4 && remaining > 0; s++) {
+                          segCounts[s] = Math.min(remaining, propCaps[s]);
+                          remaining -= segCounts[s];
+                        }
+                        // Handle rounding overflow — add to segments with room
+                        for (let s = 0; s < 4 && remaining > 0; s++) {
+                          const extra = Math.min(remaining, caps[s] - segCounts[s]);
+                          segCounts[s] += extra;
+                          remaining -= extra;
+                        }
 
                         // Build segments from board
                         const segments = [];
