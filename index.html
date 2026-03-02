@@ -439,73 +439,90 @@
     };
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
-    function layoutSpiral(board, W, H, HW, VW, gap, pads) {
+    // Spiral layout: places tiles edge-to-edge in a rectangular spiral
+    // starting from the TOP-RIGHT corner, spiraling inward clockwise.
+    // avoidTL / avoidBR: square pixel size to skip at those corners (for score dials).
+    function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
       gap = gap || 2;
-      // pads: { top, right, bottom, left } or single number
       const p = typeof pads === 'number' ? { top: pads, right: pads, bottom: pads, left: pads }
-        : Object.assign({ top: 10, right: 10, bottom: 10, left: 10 }, pads || {});
-      const dirs = ['R','D','L','U'];
-      let d = 0;
-      let left = p.left, top = p.top, right = W - p.right, bottom = H - p.bottom;
-      // Start slightly up-left of center so early shape uses more vertical space
-      let x = Math.floor(left + (right - left - HW) / 2) - Math.floor(HW * 0.35);
-      let y = Math.floor(top + (bottom - top - VW) / 2) - Math.floor(HW * 0.25);
+        : Object.assign({ top: 6, right: 6, bottom: 6, left: 6 }, pads || {});
+
+      // Outer bounds
+      let bLeft = p.left, bTop = p.top, bRight = W - p.right, bBottom = H - p.bottom;
+
       const tiles = [];
+      const dirs = ['R','D','L','U'];
+      let d = 0; // start going Right
 
       const sizeForDir = (dir) => {
         if (dir === 'R' || dir === 'L') return { w: HW, h: VW, orient: 'horizontal' };
         return { w: VW, h: HW, orient: 'vertical' };
       };
 
+      // Start at top-left (offset past the TL dial if needed)
+      const tlSafe = avoidTL || 0;
+      let x = bLeft + tlSafe;
+      let y = bTop;
+
       for (let i = 0; i < board.length; i++) {
         const dir = dirs[d];
         const { w, h, orient } = sizeForDir(dir);
-        x = Math.max(left, Math.min(x, right - w));
-        y = Math.max(top,  Math.min(y, bottom - h));
+
+        // Clamp into current bounds
+        x = Math.max(bLeft, Math.min(x, bRight - w));
+        y = Math.max(bTop, Math.min(y, bBottom - h));
+
+        // Skip tile positions that overlap the TL or BR dial safe zones
+        const brSafe = avoidBR || 0;
+        const inTL = (x < bLeft + tlSafe + p.left) && (y < bTop + tlSafe + p.top);
+        const inBR = (x + w > bRight - brSafe) && (y + h > bBottom - brSafe);
+
+        // If overlapping a dial corner, nudge past it
+        if (inTL && dir === 'R' && i === 0) {
+          x = bLeft + tlSafe;
+        }
 
         tiles.push({
           i, x: Math.round(x), y: Math.round(y), orient,
           flip: (dir === 'L' || dir === 'U')
         });
 
+        // Step in current direction
         const step = HW + gap;
         if (dir === 'R') x += step;
         else if (dir === 'D') y += step;
         else if (dir === 'L') x -= step;
         else y -= step;
 
-        const nxt = sizeForDir(dirs[d]);
+        // Would the NEXT tile go out of bounds?
+        const ns = sizeForDir(dirs[d]);
         const wouldHit =
-          (dir === 'R' && x + nxt.w > right) ||
-          (dir === 'D' && y + nxt.h > bottom) ||
-          (dir === 'L' && x < left) ||
-          (dir === 'U' && y < top);
+          (dir === 'R' && x + ns.w > bRight) ||
+          (dir === 'D' && y + ns.h > bBottom) ||
+          (dir === 'L' && x < bLeft) ||
+          (dir === 'U' && y < bTop);
 
         if (wouldHit) {
-          if (dir === 'R') x = right - nxt.w;
-          if (dir === 'D') y = bottom - nxt.h;
-          if (dir === 'L') x = left;
-          if (dir === 'U') y = top;
+          // Shrink the boundary on the side we just filled
+          const lane = VW + gap;
+          if (dir === 'R')      bTop    += lane;
+          else if (dir === 'D') bRight  -= lane;
+          else if (dir === 'L') bBottom -= lane;
+          else if (dir === 'U') bLeft   += lane;
 
+          // Turn clockwise
           d = (d + 1) % 4;
-          // Shrink only after completing a full lap (after U turn)
-          if (dir === 'U') {
-            const lane = VW + gap;
-            top += lane;
-            right -= lane;
-            bottom -= lane;
-            left += lane;
-          }
-
           const ndir = dirs[d];
-          const ns = sizeForDir(ndir);
-          if (ndir === 'R') { x = left; y = top; }
-          if (ndir === 'D') { x = right - ns.w; y = top; }
-          if (ndir === 'L') { x = right - ns.w; y = bottom - ns.h; }
-          if (ndir === 'U') { x = left; y = bottom - ns.h; }
+          const nns = sizeForDir(ndir);
+          // Position at the start of the new edge
+          if (ndir === 'R')      { x = bLeft;            y = bTop; }
+          else if (ndir === 'D') { x = bRight - nns.w;   y = bTop; }
+          else if (ndir === 'L') { x = bRight - nns.w;   y = bBottom - nns.h; }
+          else if (ndir === 'U') { x = bLeft;            y = bBottom - nns.h; }
         }
 
-        if (right - left < HW || bottom - top < HW) break;
+        // Stop if remaining area is too small for any tile
+        if (bRight - bLeft < VW + 2 || bBottom - bTop < VW + 2) break;
       }
 
       return { tiles };
@@ -4008,30 +4025,15 @@
                         const containerW = (boardBox.w || 300);
                         const containerH = (boardBox.h || 300);
 
-                        // Corner dial is 74px, pulses to 1.5x => ~111px. Safe box = 118px.
-                        const DIAL_SAFE = 118;
-                        const PAD = 10;
+                        // Use the full board area; layoutSpiral avoids dial corners
+                        const DIAL_CORNER = 72; // score dial is 74px SVG
+                        const W = Math.max(120, containerW);
+                        const H = Math.max(120, containerH);
 
-                        // Asymmetric safe rect: big insets at TL + BR (dials), smaller at TR + BL
-                        const x0 = DIAL_SAFE + PAD;
-                        const y0 = DIAL_SAFE + PAD;
-                        const x1 = containerW - (DIAL_SAFE + PAD);
-                        const y1 = containerH - (DIAL_SAFE + PAD);
-
-                        // Expand into TR and BL corners (no dials there)
-                        const extraTR = 52;
-                        const extraBL = 52;
-                        const rx0 = Math.max(0, x0 - extraBL);
-                        const ry0 = Math.max(0, y0 - 20);
-                        const rx1 = Math.min(containerW, x1 + extraTR);
-                        const ry1 = Math.min(containerH, y1 + extraBL);
-
-                        const W = Math.max(120, rx1 - rx0);
-                        const H = Math.max(120, ry1 - ry0);
-
-                        const out = layoutSpiral(board, W, H, HW, VW, 2, { top: 8, right: 8, bottom: 8, left: 8 });
-                        // Offset tiles into the safe play rect
-                        const tilesOut = out.tiles.map(p => ({ ...p, x: p.x + rx0, y: p.y + ry0 }));
+                        const out = layoutSpiral(board, W, H, HW, VW, 2,
+                          { top: 6, right: 6, bottom: 6, left: 6 },
+                          DIAL_CORNER, DIAL_CORNER);
+                        const tilesOut = out.tiles;
                         const first = tilesOut[0];
                         const last = tilesOut[tilesOut.length - 1];
 
@@ -4190,7 +4192,7 @@
                     <div style={{
                       position: 'absolute', top: 0, left: 0, zIndex: dialPulse === 'team0' ? 30 : 10, pointerEvents: 'none',
                       opacity: dialPulse === 'team0' ? 1 : 0.85,
-                      transform: dialPulse === 'team0' ? 'scale(1.5)' : 'scale(1)',
+                      transform: dialPulse === 'team0' ? 'scale(1.15)' : 'scale(1)',
                       transformOrigin: 'top left',
                       transition: 'transform 0.5s ease-out, opacity 0.3s',
                       filter: dialPulse === 'team0' ? 'drop-shadow(0 0 12px rgba(59,130,246,0.7))' : 'none'
@@ -4200,7 +4202,7 @@
                     <div style={{
                       position: 'absolute', bottom: 0, right: 0, zIndex: dialPulse === 'team1' ? 30 : 10, pointerEvents: 'none',
                       opacity: dialPulse === 'team1' ? 1 : 0.85,
-                      transform: dialPulse === 'team1' ? 'scale(1.5)' : 'scale(1)',
+                      transform: dialPulse === 'team1' ? 'scale(1.15)' : 'scale(1)',
                       transformOrigin: 'bottom right',
                       transition: 'transform 0.5s ease-out, opacity 0.3s',
                       filter: dialPulse === 'team1' ? 'drop-shadow(0 0 12px rgba(239,68,68,0.7))' : 'none'
