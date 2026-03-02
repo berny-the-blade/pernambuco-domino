@@ -4039,12 +4039,12 @@
                         const containerH = (boardBox.h || 300);
 
                         // Use the full board area; layoutSpiral avoids dial corners
-                        const DIAL_CORNER = 82; // score dial 74px + margin for turn tiles
+                        const DIAL_CORNER = 95; // score dial 74px + generous margin for turn tiles
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
 
                         const out = layoutSpiral(board, W, H, HW, VW, 2,
-                          { top: 6, right: 20, bottom: 6, left: 6 },
+                          { top: 6, right: 20, bottom: 14, left: 6 },
                           DIAL_CORNER, DIAL_CORNER);
                         const tilesOut = out.tiles;
                         const first = tilesOut[0];
