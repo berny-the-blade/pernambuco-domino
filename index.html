@@ -439,12 +439,14 @@
     };
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
-    function layoutSpiral(board, W, H, HW, VW, gap, pad) {
+    function layoutSpiral(board, W, H, HW, VW, gap, pads) {
       gap = gap || 2;
-      pad = pad || 10;
+      // pads: { top, right, bottom, left } or single number
+      const p = typeof pads === 'number' ? { top: pads, right: pads, bottom: pads, left: pads }
+        : Object.assign({ top: 10, right: 10, bottom: 10, left: 10 }, pads || {});
       const dirs = ['R','D','L','U'];
       let d = 0;
-      let left = pad, top = pad, right = W - pad, bottom = H - pad;
+      let left = p.left, top = p.top, right = W - p.right, bottom = H - p.bottom;
       let x = left, y = top;
       const tiles = [];
 
@@ -4000,7 +4002,7 @@
                       if (tileLayout === 'spiral') {
                         const W = Math.max(200, (boardBox.w || 300) - 16);
                         const H = Math.max(200, (boardBox.h || 300) - 16);
-                        const out = layoutSpiral(board, W, H, HW, VW, 2, 12);
+                        const out = layoutSpiral(board, W, H, HW, VW, 2, { top: 12, right: 12, bottom: 80, left: 12 });
                         const tilesOut = out.tiles;
                         const first = tilesOut[0];
                         const last = tilesOut[tilesOut.length - 1];
