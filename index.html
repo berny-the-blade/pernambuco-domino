@@ -461,6 +461,7 @@
       const prevScore0Ref = useRef(0);
       const prevScore1Ref = useRef(0);
       const [dialPulse, setDialPulse] = useState(null); // 'team0' | 'team1' | null
+      const [passedSlot, setPassedSlot] = useState(null); // slot number of player who just passed
       // === Player Profile System ===
       const HUMAN_PROFILES = [
         { key: 'ze', name: 'Zé', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
@@ -2831,7 +2832,8 @@
           rightEnd: newRightEnd,
           currentPlayer: nextPlayer,
           passCount: 0,
-          message: 'Vez de ' + gameState.players[nextPlayer].name + '!',
+          lastPass: null,
+          message: '',
           moveHistory: [...(gameState.moveHistory || []), {p: slot, t: 'play', tile: {left: tile.left, right: tile.right, id: tile.id}}]
         };
 
@@ -2928,7 +2930,8 @@
         await db.ref('rooms/' + roomCode).update({
           passCount: newPassCount,
           currentPlayer: nextPlayer,
-          message: gameState.players[playerSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!',
+          lastPass: playerSlot,
+          message: '',
           moveHistory: [...(gameState.moveHistory || []), {p: playerSlot, t: 'pass', lE: gameState.leftEnd, rE: gameState.rightEnd}]
         });
       };
@@ -2945,7 +2948,8 @@
         await db.ref('rooms/' + roomCode).update({
           passCount: newPassCount,
           currentPlayer: nextPlayer,
-          message: gameState.players[botSlot].name + ' passou. Vez de ' + gameState.players[nextPlayer].name + '!',
+          lastPass: botSlot,
+          message: '',
           moveHistory: [...(gameState.moveHistory || []), {p: botSlot, t: 'pass', lE: gameState.leftEnd, rE: gameState.rightEnd}]
         });
       };
@@ -3095,6 +3099,14 @@
           });
         }
       };
+
+      // Pass badge on avatar
+      useEffect(() => {
+        if (gameState?.lastPass == null) { return; }
+        setPassedSlot(gameState.lastPass);
+        const t = setTimeout(() => setPassedSlot(null), 2500);
+        return () => clearTimeout(t);
+      }, [gameState?.lastPass, gameState?.currentPlayer]);
 
       // Round result announcement overlay
       useEffect(() => {
@@ -3816,6 +3828,7 @@
                     {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span style={{ fontSize: 9, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[topSlot] || []).length}</span>
                     </div>}
+                    {passedSlot === topSlot && <div className="animate-bounce-in" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(239,68,68,0.5)' }}>Passou!</div>}
                   </div>
                   <span className="text-[11px] font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
                   {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && (isBot(topSlot)
@@ -3855,6 +3868,7 @@
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[leftSlot] || []).length}</span>
                       </div>}
+                      {passedSlot === leftSlot && <div className="animate-bounce-in" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(239,68,68,0.5)' }}>Passou!</div>}
                     </div>
                     <div className="text-[8px] text-white/60 mt-0.5 text-center truncate font-bold" style={{ maxWidth: 60 }}>{gameState.players?.[leftSlot]?.name}</div>
                     {gameState.currentPlayer === leftSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
@@ -4104,6 +4118,7 @@
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: '#fff' }}>{(gameState.hands?.[rightSlot] || []).length}</span>
                       </div>}
+                      {passedSlot === rightSlot && <div className="animate-bounce-in" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(239,68,68,0.5)' }}>Passou!</div>}
                     </div>
                     <div className="text-[8px] text-white/60 mt-0.5 text-center truncate font-bold" style={{ maxWidth: 60 }}>{gameState.players?.[rightSlot]?.name}</div>
                     {gameState.currentPlayer === rightSlot && <div className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold mt-0.5">VEZ</div>}
@@ -4228,6 +4243,7 @@
                       <div style={{ position: 'absolute', bottom: -2, right: -2, width: 14, height: 14, borderRadius: '50%', background: '#16a34a', border: '1.5px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <span style={{ fontSize: 8, fontWeight: 800, color: '#fff' }}>{myHand.length}</span>
                       </div>
+                      {passedSlot === playerSlot && <div className="animate-bounce-in" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(239,68,68,0.5)' }}>Passou!</div>}
                     </div>
                     <span className="text-[10px] font-bold text-white/80">Voce</span>
                     {isMyTurn && <span className="text-[8px] px-1 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
