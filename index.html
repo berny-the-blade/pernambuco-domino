@@ -3834,13 +3834,15 @@
 
               {/* Side choice modal — only when it's still my turn and tile still in hand */}
               {choosingTile && isMyTurn && myHand.some(t => t.id === choosingTile.id) && (
-                <div className="glass-card p-4 mb-2 text-center animate-bounce-in">
-                  <p className="font-bold mb-3 text-gray-800">Jogar {choosingTile.left}-{choosingTile.right} em qual lado?</p>
-                  <div className="flex gap-3 justify-center">
-                    <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="side-btn left">Esquerda ({gameState.leftEnd})</button>
-                    <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="side-btn right">Direita ({gameState.rightEnd})</button>
-                  </div>
-                  <button onClick={() => setChoosingTile(null)} className="mt-3 text-gray-400 text-xs hover:text-gray-600 transition-colors">Cancelar</button>
+                <div className="animate-bounce-in mb-1 mx-2" style={{
+                  background: 'rgba(0,0,0,0.5)', borderRadius: 10, padding: '6px 12px',
+                  backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.12)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+                }}>
+                  <span className="text-[11px] font-bold text-white/80">{choosingTile.left}-{choosingTile.right}:</span>
+                  <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="side-btn left" style={{ padding: '4px 10px', fontSize: 11 }}>Esq ({gameState.leftEnd})</button>
+                  <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="side-btn right" style={{ padding: '4px 10px', fontSize: 11 }}>Dir ({gameState.rightEnd})</button>
+                  <button onClick={() => setChoosingTile(null)} className="text-white/30 text-[10px] hover:text-white/60">✕</button>
                 </div>
               )}
 
