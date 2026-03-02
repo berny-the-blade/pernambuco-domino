@@ -4784,67 +4784,101 @@
     }
 
     function executeAIMove() {
-      if (!liveHands || currentGame.outcome) return;
-      const player = liveCurrentPlayer;
-      const hand = liveHands[player];
-      const allOptions = smartAI(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, true);
+      try {
+        if (!liveHands || currentGame.outcome) return;
+        const player = liveCurrentPlayer;
+        if (player === undefined || player === null || player < 0 || player > 3) {
+          console.error(`executeAIMove: invalid player ${player} [${seedContext()}]`);
+          return;
+        }
+        const hand = liveHands[player];
+        if (!hand || hand.length === 0) {
+          // No tiles — treat as pass
+          playLastMove = { player, tile: null, side: null, pass: true };
+          recordLivePass(player);
+          if (coachEnabled) generateCoachOnAIMove(player, null, null, [], true);
+          render();
+          scheduleNextMove();
+          return;
+        }
+        const allOptions = smartAI(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, true);
 
-      const difficulty = getDifficultyForPlayer(player);
-      let decision;
-      // Endgame solver: exact minimax when few tiles remain (Advanced+ difficulty)
-      const _egLiveTotal = liveHands[0].length + liveHands[1].length + liveHands[2].length + liveHands[3].length;
-      if (_egLiveTotal <= ENDGAME_THRESHOLD && allOptions.length > 1 && difficulty >= 0.7) {
-        const handSizes = liveHands.map(h => h.length);
-        computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
-        try {
-          const egRes = endgameSolve(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, handSizes);
-          if (egRes.length > 0) {
-            const best = egRes[0];
+        const difficulty = getDifficultyForPlayer(player);
+        let decision;
+        // Endgame solver: exact minimax when few tiles remain (Advanced+ difficulty)
+        const _egLiveTotal = liveHands[0].length + liveHands[1].length + liveHands[2].length + liveHands[3].length;
+        if (_egLiveTotal <= ENDGAME_THRESHOLD && allOptions.length > 1 && difficulty >= 0.7) {
+          const handSizes = liveHands.map(h => h.length);
+          computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
+          try {
+            const egRes = endgameSolve(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, handSizes);
+            if (egRes.length > 0) {
+              const best = egRes[0];
+              decision = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
+                      || allOptions.find(o => o.tile.id === best.tile.id)
+                      || allOptions[0];
+            } else {
+              decision = allOptions[0];
+            }
+          } catch(e) { decision = allOptions[0]; }
+        } else if (difficulty >= 1.0 && allOptions.length > 1) {
+          // Compute Bayesian beliefs before search — importance-weighted tile probabilities
+          const handSizes = liveHands.map(h => h.length);
+          computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
+          // Expert: use ISMCTS when mid-game, fall back to MC. Neural net blends if loaded.
+          let searchRes = null;
+          if (liveBoard.length >= 6 && hand.length >= 2) {
+            try { searchRes = ismctsEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, belief); } catch(e) {}
+          }
+          // NN blend REMOVED — NN must only affect play via leaf value eval (future)
+          // See ROADMAP_FREEZE v1 Commit 4
+          if (!searchRes || searchRes.length === 0) {
+            const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
+            searchRes = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
+          }
+          if (searchRes.length > 0) {
+            const best = searchRes[0];
             decision = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
                     || allOptions.find(o => o.tile.id === best.tile.id)
                     || allOptions[0];
           } else {
             decision = allOptions[0];
           }
-        } catch(e) { decision = allOptions[0]; }
-      } else if (difficulty >= 1.0 && allOptions.length > 1) {
-        // Compute Bayesian beliefs before search — importance-weighted tile probabilities
-        const handSizes = liveHands.map(h => h.length);
-        computeBeliefs(liveKnowledge, handSizes, hand, player, 200);
-        // Expert: use ISMCTS when mid-game, fall back to MC. Neural net blends if loaded.
-        let searchRes = null;
-        if (liveBoard.length >= 6 && hand.length >= 2) {
-          try { searchRes = ismctsEval(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge, belief); } catch(e) {}
-        }
-        // NN blend REMOVED — NN must only affect play via leaf value eval (future)
-        // See ROADMAP_FREEZE v1 Commit 4
-        if (!searchRes || searchRes.length === 0) {
-          const snap = { hands: liveHands, leftEnd: liveLeftEnd, rightEnd: liveRightEnd, board: liveBoard, knowledge: liveKnowledge };
-          searchRes = monteCarloEval(snap, player, MC_SIMS_PLAY_EXPERT);
-        }
-        if (searchRes.length > 0) {
-          const best = searchRes[0];
-          decision = allOptions.find(o => o.tile.id === best.tile.id && o.side === best.side)
-                  || allOptions.find(o => o.tile.id === best.tile.id)
-                  || allOptions[0];
         } else {
-          decision = allOptions[0];
+          decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
         }
-      } else {
-        decision = allOptions.length > 0 ? selectMoveByDifficulty(allOptions, difficulty) : null;
-      }
 
-      if (decision) {
-        playLastMove = { player, tile: decision.tile, side: decision.side, pass: false };
-        recordLivePlay(player, decision.tile, decision.side, decision.reasons, decision.score, allOptions);
-      } else {
-        playLastMove = { player, tile: null, side: null, pass: true };
-        recordLivePass(player);
-      }
+        if (decision) {
+          playLastMove = { player, tile: decision.tile, side: decision.side, pass: false };
+          recordLivePlay(player, decision.tile, decision.side, decision.reasons, decision.score, allOptions);
+        } else {
+          playLastMove = { player, tile: null, side: null, pass: true };
+          recordLivePass(player);
+        }
 
-      if (coachEnabled) generateCoachOnAIMove(player, decision?.tile, decision?.side, allOptions, !decision);
-      render();
-      scheduleNextMove();
+        if (coachEnabled) generateCoachOnAIMove(player, decision?.tile, decision?.side, allOptions, !decision);
+        render();
+        scheduleNextMove();
+      } catch(e) {
+        console.error(`executeAIMove crashed [${seedContext()}]:`, e);
+        // Fallback: force heuristic play or pass to unstick the game
+        try {
+          const player = liveCurrentPlayer;
+          const hand = liveHands[player];
+          const fallback = hand ? smartAI(hand, liveLeftEnd, liveRightEnd, liveBoard.length, player, liveKnowledge) : null;
+          if (fallback) {
+            playLastMove = { player, tile: fallback.tile, side: fallback.side, pass: false };
+            recordLivePlay(player, fallback.tile, fallback.side, fallback.reasons, fallback.score, [fallback]);
+          } else {
+            playLastMove = { player, tile: null, side: null, pass: true };
+            recordLivePass(player);
+          }
+          render();
+          scheduleNextMove();
+        } catch(e2) {
+          console.error('executeAIMove fallback also failed:', e2);
+        }
+      }
     }
 
     function recordLivePlay(player, tile, prefSide, reasons, score, allOptions) {
