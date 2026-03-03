@@ -564,7 +564,7 @@
       const [showStarterChoice, setShowStarterChoice] = useState(false);
       const [roundAnnouncement, setRoundAnnouncement] = useState(null);
       const [handVisible, setHandVisible] = useState(true);
-      const [humanCount, setHumanCount] = useState(2);
+      const [humanCount, setHumanCount] = useState(1);
       const [aiDifficulty, setAiDifficulty] = useState(localStorage.getItem('domino_ai_difficulty') || 'hard');
       const setAiDiff = (v) => { setAiDifficulty(v); localStorage.setItem('domino_ai_difficulty', v); };
       const [botSpeed, setBotSpeed] = useState(localStorage.getItem('domino_bot_speed') || 'medium');
@@ -629,7 +629,8 @@
         );
       };
 
-      const [selectedProfile, setSelectedProfile] = useState(HUMAN_PROFILES.length === 1 ? HUMAN_PROFILES[0] : null);
+      const _berndProfile = HUMAN_PROFILES.find(p => p.key === 'bernd') || HUMAN_PROFILES[0];
+      const [selectedProfile, setSelectedProfile] = useState(_berndProfile);
       const [boardSize, setBoardSizeRaw] = useState(localStorage.getItem('domino_board_size') || 'M');
       const setBoardSize = (v) => { setBoardSizeRaw(v); localStorage.setItem('domino_board_size', v); };
       const _storedLayout = localStorage.getItem('domino_tile_layout');
