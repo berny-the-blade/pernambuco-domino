@@ -470,10 +470,11 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
+      const COL_MARGIN = 1; // extra px margin to prevent visual touching
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
-          if (x < p.x + p.w && x + w > p.x &&
-              y < p.y + p.h && y + h > p.y) return true;
+          if (x < p.x + p.w + COL_MARGIN && x + w + COL_MARGIN > p.x &&
+              y < p.y + p.h + COL_MARGIN && y + h + COL_MARGIN > p.y) return true;
         }
         return false;
       };
@@ -4062,8 +4063,8 @@
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
 
-                        const out = layoutSpiral(board, W, H, HW, VW, 2,
-                          { top: 4, right: 4, bottom: 4, left: 4 },
+                        const out = layoutSpiral(board, W, H, HW, VW, 3,
+                          { top: 4, right: 8, bottom: 6, left: 4 },
                           DIAL_CORNER, DIAL_CORNER);
                         const tilesOut = out.tiles;
                         const first = tilesOut[0];
@@ -4099,47 +4100,18 @@
                                 </div>
                               );
                             })}
-                            {/* End badges — optional, toggled by 🟢 button */}
-                            {showEndBadges && [
-                              { tile: first, num: gameState.leftEnd, isFirst: true },
-                              board.length > 1 ? { tile: last, num: gameState.rightEnd, isFirst: false } : null
-                            ].filter(Boolean).map((badge, idx) => {
-                              const t = badge.tile;
-                              if (!t) return null;
-                              const isH = t.orient === 'horizontal';
-                              const tw = isH ? HW : VW;
-                              const th = isH ? VW : HW;
-                              const B = BADGE_SZ;
-                              let bx, by;
-                              // For first tile: badge on entry side (opposite of direction)
-                              // For last tile: badge on exit side (same as direction)
-                              const goingL = t.flip && isH;
-                              const goingU = t.flip && !isH;
-                              const goingD = !t.flip && !isH;
-                              const goingR = !t.flip && isH;
-
-                              if (badge.isFirst) {
-                                // Badge on ENTRY side (opposite of travel)
-                                if (goingR) { bx = t.x - B - 4; by = t.y + (th - B) / 2; }
-                                else if (goingL) { bx = t.x + tw + 4; by = t.y + (th - B) / 2; }
-                                else if (goingD) { bx = t.x + (tw - B) / 2; by = t.y - B - 4; }
-                                else { bx = t.x + (tw - B) / 2; by = t.y + th + 4; }
-                              } else {
-                                // Badge on EXIT side (direction of travel)
-                                if (goingR) { bx = t.x + tw + 4; by = t.y + (th - B) / 2; }
-                                else if (goingL) { bx = t.x - B - 4; by = t.y + (th - B) / 2; }
-                                else if (goingD) { bx = t.x + (tw - B) / 2; by = t.y + th + 4; }
-                                else { bx = t.x + (tw - B) / 2; by = t.y - B - 4; }
-                              }
-                              // Clamp to board
-                              bx = Math.max(2, Math.min(bx, containerW - B - 2));
-                              by = Math.max(2, Math.min(by, containerH - B - 2));
-                              return (
-                                <div key={idx} style={{ position:'absolute', left: bx, top: by, zIndex: 25 }}>
-                                  <EndBadge num={badge.num} />
-                                </div>
-                              );
-                            })}
+                            {/* End badges — optional, fixed to bottom-center of board */}
+                            {showEndBadges && (
+                              <div style={{
+                                position:'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+                                display:'flex', gap: 12, alignItems:'center', zIndex: 25,
+                                background:'rgba(0,0,0,0.5)', borderRadius: 16, padding:'3px 10px'
+                              }}>
+                                <EndBadge num={gameState.leftEnd} />
+                                <span style={{color:'rgba(255,255,255,0.4)',fontSize:10}}>•••</span>
+                                <EndBadge num={gameState.rightEnd} />
+                              </div>
+                            )}
                           </div>
                         );
                       }
