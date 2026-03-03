@@ -3523,16 +3523,16 @@
         </div>
       );
 
-      const BoardTile = ({ tile, orientation, flipped, extraStyle }) => {
+      const BoardTile = ({ tile, orientation, flipped, extraStyle, hw: hwOverride, vw: vwOverride }) => {
         const isVertical = orientation === 'vertical';
         const val1 = (flipped && !isVertical) ? tile.right : tile.left;
         const val2 = (flipped && !isVertical) ? tile.left : tile.right;
         const dividerStyle = isVertical
           ? { borderBottom: '1px solid #b8a888', width: '100%' }
           : { borderRight: '1px solid #b8a888', height: '100%' };
-        const hw = bDims.hw, vw = bDims.vw;
-        const bDotPx = vw <= 22 ? 3 : vw <= 26 ? 4 : 5;
-        const bContPx = vw <= 22 ? 15 : vw <= 26 ? 18 : 22;
+        const hw = hwOverride || bDims.hw, vw = vwOverride || bDims.vw;
+        const bDotPx = vw <= 16 ? 2 : vw <= 22 ? 3 : vw <= 26 ? 4 : 5;
+        const bContPx = vw <= 16 ? 12 : vw <= 22 ? 15 : vw <= 26 ? 18 : 22;
         return (
           <div
             className="board-tile inline-flex"
@@ -4062,10 +4062,17 @@
                         const DIAL_CORNER = 78;
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
+                        const SPIRAL_PADS = { top: 4, right: 8, bottom: 6, left: 4 };
 
-                        const out = layoutSpiral(board, W, H, HW, VW, 3,
-                          { top: 4, right: 8, bottom: 6, left: 4 },
-                          DIAL_CORNER, DIAL_CORNER);
+                        // Auto-scale: try current size, shrink until all tiles fit
+                        let spiralHW = HW, spiralVW = VW, out;
+                        for (let attempt = 0; attempt < 8; attempt++) {
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 3,
+                            SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
+                          if (out.tiles.length >= board.length) break;
+                          spiralHW = Math.max(24, Math.round(spiralHW * 0.88));
+                          spiralVW = Math.max(12, Math.round(spiralVW * 0.88));
+                        }
                         const tilesOut = out.tiles;
                         const first = tilesOut[0];
                         const last = tilesOut[tilesOut.length - 1];
@@ -4078,8 +4085,8 @@
                               const isRightEnd = idx === tilesOut.length - 1;
                               const isEndTile = isLeftEnd || isRightEnd;
                               const isLastPlayed = p.i === board.length - 1 && board.length > 1;
-                              const tw = p.orient === 'horizontal' ? HW : VW;
-                              const th = p.orient === 'horizontal' ? VW : HW;
+                              const tw = p.orient === 'horizontal' ? spiralHW : spiralVW;
+                              const th = p.orient === 'horizontal' ? spiralVW : spiralHW;
                               return (
                                 <div
                                   key={t.id + '-' + p.i}
@@ -4092,6 +4099,7 @@
                                   }}
                                 >
                                   <BoardTile tile={t} orientation={p.orient} flipped={p.flip}
+                                    hw={spiralHW} vw={spiralVW}
                                     extraStyle={isEndTile ? {
                                       animation: 'pulse-glow 1.8s ease-in-out infinite',
                                       borderRadius: 4
