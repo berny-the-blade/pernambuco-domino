@@ -156,8 +156,15 @@ class DominoMCTS:
             action_visits[act] = child.visits
 
         if temperature < 0.01:
-            # Greedy: pick most-visited action
-            best = np.argmax(action_visits)
+            # Greedy: most-visited action, tie-break by Q-value
+            max_visits = action_visits.max()
+            candidates = np.where(action_visits == max_visits)[0]
+            if len(candidates) == 1:
+                best = candidates[0]
+            else:
+                best = max(candidates,
+                           key=lambda a: root.children[a].q_value
+                           if a in root.children else 0.0)
             pi = np.zeros(57, dtype=np.float32)
             pi[best] = 1.0
         else:
