@@ -634,6 +634,8 @@
       const _storedLayout = localStorage.getItem('domino_tile_layout');
       const [tileLayout, setTileLayoutRaw] = useState((_storedLayout === 'spiral' || _storedLayout === 'snake') ? _storedLayout : 'spiral');
       const setTileLayout = (v) => { setTileLayoutRaw(v); localStorage.setItem('domino_tile_layout', v); };
+      const [showEndBadges, setShowEndBadgesRaw] = useState(localStorage.getItem('domino_end_badges') === 'true');
+      const setShowEndBadges = (v) => { setShowEndBadgesRaw(v); localStorage.setItem('domino_end_badges', v ? 'true' : 'false'); };
       const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 48, vw: 24 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
@@ -3938,6 +3940,12 @@
                     </button>
                   ))}
                 </div>
+                <button onClick={() => setShowEndBadges(!showEndBadges)}
+                  className="px-1.5 py-0.5 text-[9px] font-bold rounded-md"
+                  style={{ border: '1px solid rgba(255,255,255,0.12)', background: showEndBadges ? 'rgba(16,185,129,0.3)' : 'transparent', color: showEndBadges ? '#10b981' : 'rgba(255,255,255,0.3)' }}
+                  title="Toggle end number badges">
+                  🟢
+                </button>
               </div>
 
               {/* Round announcement — rendered below board in the layout flow */}
@@ -4091,8 +4099,8 @@
                                 </div>
                               );
                             })}
-                            {/* End badges — positioned at chain ends based on direction */}
-                            {[
+                            {/* End badges — optional, toggled by 🟢 button */}
+                            {showEndBadges && [
                               { tile: first, num: gameState.leftEnd, isFirst: true },
                               board.length > 1 ? { tile: last, num: gameState.rightEnd, isFirst: false } : null
                             ].filter(Boolean).map((badge, idx) => {
@@ -4171,7 +4179,7 @@
                             else if (isOdd) { flexDir = 'row-reverse'; justify = 'flex-start'; }
                             return (
                               <div key={'row'+rIdx} style={{ display:'flex', flexDirection:flexDir, justifyContent:justify, alignItems:'center', gap:GAP, marginBottom: rIdx < rows.length - 1 ? GAP : 0 }}>
-                                {rIdx === 0 && <EndBadge num={gameState.leftEnd} />}
+                                {rIdx === 0 && showEndBadges && <EndBadge num={gameState.leftEnd} />}
                                 {rowIdxs.map((tileIndex) => {
                                   const t = board[tileIndex];
                                   const isD = t.left === t.right;
@@ -4186,7 +4194,7 @@
                                     </div>
                                   );
                                 })}
-                                {rIdx === rows.length - 1 && <EndBadge num={gameState.rightEnd} />}
+                                {rIdx === rows.length - 1 && showEndBadges && <EndBadge num={gameState.rightEnd} />}
                               </div>
                             );
                           })}
