@@ -332,7 +332,7 @@ class Orchestrator:
             # === PHASE 1: PARALLEL DATA GENERATION ===
             t0 = time.time()
             print(f"Spawning {self.num_workers} workers "
-                  f"({games_per_worker} games each)...")
+                  f"({games_per_worker} games each)...", flush=True)
 
             # Extract weights for CPU workers
             shared_weights = {
@@ -354,19 +354,28 @@ class Orchestrator:
                 p.start()
                 processes.append(p)
 
-            # Collect results
+            # Collect results — timeout scales with games and MCTS sims
+            # ~60s per MCTS game (50 sims), ~1s per no-MCTS game
+            per_game_s = 90 if self.use_mcts else 3  # generous estimate
+            worker_timeout = max(3600, games_per_worker * per_game_s)
             collected = 0
             total_samples = 0
             while collected < self.num_workers:
                 try:
-                    worker_data = result_queue.get(timeout=3600)
+                    worker_data = result_queue.get(timeout=worker_timeout)
                     self.replay_buffer.extend(worker_data)
                     total_samples += len(worker_data)
                     collected += 1
                     print(f"  Worker {collected}/{self.num_workers} done: "
-                          f"{len(worker_data)} samples")
+                          f"{len(worker_data)} samples", flush=True)
                 except Exception as e:
-                    print(f"  Worker collection error: {e}")
+                    alive = sum(1 for p in processes if p.is_alive())
+                    print(f"  Worker collection error: {type(e).__name__}: {e} "
+                          f"({alive} workers still alive)", flush=True)
+                    if alive == 0:
+                        print("  All workers dead, stopping collection.",
+                              flush=True)
+                        break
                     collected += 1
 
             for p in processes:
