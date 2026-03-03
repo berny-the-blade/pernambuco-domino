@@ -266,8 +266,18 @@ class Orchestrator:
     """
 
     ARENA_SEEDS_MIN = 100    # start with 100 seeds (200 matches)
-    ARENA_SEEDS_MAX = 400    # extend up to 400 seeds (800 matches)
+    ARENA_SEEDS_MAX = 600    # extend up to 600 seeds (1200 matches)
     ARENA_SEEDS_STEP = 100   # add 100 seeds per extension
+
+    # Graduated gating: after N consecutive rejections, relax the promote threshold.
+    # This prevents stalling when the model improves by small increments (52-53%).
+    # Format: (consecutive_rejections_threshold, min_win_rate_for_final_promote)
+    GATING_SCHEDULE = [
+        (0, 0.520),   # default: need 52% (CI lower > 50% still preferred)
+        (3, 0.515),   # after 3 rejections: accept 51.5%
+        (6, 0.510),   # after 6 rejections: accept 51.0%
+        (10, 0.505),  # after 10 rejections: accept 50.5%
+    ]
 
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=False,
                  mcts_sims=50, value_target='me',
@@ -294,6 +304,15 @@ class Orchestrator:
         self.replay_buffer = deque(maxlen=buffer_size)
         self.generation = 0
         self.rejections = 0  # count of failed arena challenges
+        self.consecutive_rejections = 0  # resets on promotion
+
+    def _get_promote_threshold(self):
+        """Get the current minimum win rate for promotion based on consecutive rejections."""
+        threshold = self.GATING_SCHEDULE[0][1]  # default
+        for min_rejections, min_wr in self.GATING_SCHEDULE:
+            if self.consecutive_rejections >= min_rejections:
+                threshold = min_wr
+        return threshold
 
     def run(self, total_generations=100, games_per_worker=250):
         """Run the full generational training loop."""
@@ -390,11 +409,13 @@ class Orchestrator:
 
                 if promoted:
                     self.champion_weights = challenger_weights
+                    self.consecutive_rejections = 0  # reset streak
                     ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
                     torch.save({
                         'generation': gen,
                         'model_state_dict': self.model.state_dict(),
                         'buffer_size': len(self.replay_buffer),
+                        'consecutive_rejections': 0,
                     }, ckpt_path)
                     print(f"Saved champion checkpoint: {ckpt_path}")
                 else:
@@ -404,8 +425,11 @@ class Orchestrator:
                     )
                     self.trainer = Trainer(self.model, lr=1e-3)
                     self.rejections += 1
+                    self.consecutive_rejections += 1
                     print(f"Reverted to champion. "
-                          f"Total rejections: {self.rejections}")
+                          f"Total rejections: {self.rejections}, "
+                          f"consecutive: {self.consecutive_rejections}, "
+                          f"next gate: {self._get_promote_threshold():.1%}")
             else:
                 print(f"Buffer too small ({len(self.replay_buffer)}/{min_buffer}). "
                       f"Gathering more data...")
@@ -450,14 +474,16 @@ class Orchestrator:
         return c_wins, ch_wins, total
 
     def _arena_evaluate(self, challenger_weights):
-        """Sequential SPRT-style arena: extend matches if result is inconclusive.
+        """Sequential SPRT-style arena with graduated gating.
 
         Protocol:
           1. Run 100 seeds (200 matches)
           2. If win_rate < 47% → early reject (clearly worse)
-          3. If win_rate > 55% → early promote (clearly better)
-          4. Otherwise → extend by 100 seeds, repeat up to ARENA_SEEDS_MAX
-          5. Final decision: lower 95% CI > 50% → promote
+          3. If win_rate > 55% AND CI lower > 50% → early promote
+          4. If CI lower > 50% → promote (strong statistical evidence)
+          5. Otherwise → extend by 100 seeds, repeat up to ARENA_SEEDS_MAX
+          6. Final decision: graduated threshold based on consecutive rejections
+             (relaxes from 52% → 51.5% → 51% → 50.5% as rejections accumulate)
         """
         t0 = time.time()
         challenger_wins = 0
@@ -465,8 +491,11 @@ class Orchestrator:
         matches_played = 0
         seeds_used = 0
 
+        promote_threshold = self._get_promote_threshold()
         print(f"Arena: sequential SPRT (min {self.ARENA_SEEDS_MIN}, "
-              f"max {self.ARENA_SEEDS_MAX} seeds, ×2 sides each)...")
+              f"max {self.ARENA_SEEDS_MAX} seeds, ×2 sides each, "
+              f"gate={promote_threshold:.1%} after {self.consecutive_rejections} "
+              f"consecutive rejections)...")
 
         while seeds_used < self.ARENA_SEEDS_MAX:
             batch_size = min(self.ARENA_SEEDS_STEP,
@@ -520,7 +549,7 @@ class Orchestrator:
             if seeds_used < self.ARENA_SEEDS_MAX:
                 print(f"  Inconclusive — extending arena...")
 
-        # Final decision after max seeds
+        # Final decision after max seeds — use graduated threshold
         elapsed = time.time() - t0
         if matches_played > 0:
             win_rate = challenger_wins / matches_played
@@ -530,13 +559,22 @@ class Orchestrator:
         else:
             win_rate, ci_lower = 0.5, 0.0
 
+        # Strong statistical evidence always promotes
         if ci_lower > 0.50:
             print(f"  PROMOTED (final: {win_rate:.1%}, "
                   f"CI lower {ci_lower:.1%} > 50%) in {elapsed:.1f}s")
             return True
+
+        # Graduated gate: accept modest improvements after repeated rejections
+        if win_rate >= promote_threshold and matches_played >= self.ARENA_SEEDS_MAX * 2 * 0.8:
+            print(f"  GRADUATED PROMOTE (final: {win_rate:.1%} >= "
+                  f"{promote_threshold:.1%} gate, {self.consecutive_rejections} "
+                  f"prior rejections) in {elapsed:.1f}s")
+            return True
         else:
             print(f"  REJECTED (final: {win_rate:.1%}, "
-                  f"CI lower {ci_lower:.1%} <= 50%) in {elapsed:.1f}s")
+                  f"CI lower {ci_lower:.1%}, gate {promote_threshold:.1%}) "
+                  f"in {elapsed:.1f}s")
             return False
 
     def load_checkpoint(self, path):
@@ -547,7 +585,10 @@ class Orchestrator:
             k: v.cpu().clone() for k, v in self.model.state_dict().items()
         }
         self.generation = ckpt.get('generation', 0)
-        print(f"Loaded checkpoint: {path} (gen {self.generation})")
+        self.consecutive_rejections = ckpt.get('consecutive_rejections', 0)
+        print(f"Loaded checkpoint: {path} (gen {self.generation}, "
+              f"consec_rej: {self.consecutive_rejections}, "
+              f"gate: {self._get_promote_threshold():.1%})")
 
 
 def main():

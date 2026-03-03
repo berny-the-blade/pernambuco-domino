@@ -588,6 +588,10 @@
       const prevScore1Ref = useRef(0);
       const [dialPulse, setDialPulse] = useState(null); // 'team0' | 'team1' | null
       const [passedSlot, setPassedSlot] = useState(null); // slot number of player who just passed
+      const [showStats, setShowStats] = useState(false);
+      const playerStatsRef = useRef({});
+      const lastTrackedRoundRef = useRef(null);
+      const lastTrackedMatchRef = useRef(null);
       // === Player Profile System ===
       const HUMAN_PROFILES = [
         { key: 'ze', name: 'Zé', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
@@ -3261,6 +3265,117 @@
         return () => clearTimeout(t);
       }, [gameState?.roundResult?.scoreName, gameState?.currentPlayer]);
 
+      // === Player Statistics Tracking ===
+      useEffect(() => {
+        if (!gameState || !gameState.players || !gameState.gameStarted) return;
+
+        const initPlayer = (name, team) => {
+          if (!playerStatsRef.current[name]) {
+            playerStatsRef.current[name] = {
+              name, team,
+              matchesWon: 0, matchesLost: 0,
+              roundsWon: 0, roundsLost: 0,
+              winTypes: { normal: 0, cruzada: 0, 'com carroca': 0, 'la e lo': 0, blocked: 0 },
+              buchudaGiven: 0, buchudaReceived: 0,
+              totalPoints: 0
+            };
+          }
+          playerStatsRef.current[name].team = team;
+        };
+
+        // Init all 4 players
+        for (let i = 0; i < 4; i++) {
+          if (gameState.players[i]) {
+            initPlayer(gameState.players[i].name, i % 2);
+          }
+        }
+
+        // Track round results (normal win via roundResult)
+        const rr = gameState.roundResult;
+        if (rr && rr.winningTeam != null) {
+          const roundKey = rr.playerName + '_' + rr.scoreName + '_' + rr.points + '_' + (gameState.teamScores?.[0]||0) + '_' + (gameState.teamScores?.[1]||0);
+          if (lastTrackedRoundRef.current !== roundKey) {
+            lastTrackedRoundRef.current = roundKey;
+            const wt = rr.winningTeam;
+            const lt = 1 - wt;
+            // Round won/lost for each player
+            for (let i = 0; i < 4; i++) {
+              const pName = gameState.players[i]?.name;
+              if (!pName || !playerStatsRef.current[pName]) continue;
+              if (i % 2 === wt) {
+                playerStatsRef.current[pName].roundsWon++;
+              } else {
+                playerStatsRef.current[pName].roundsLost++;
+              }
+            }
+            // Win type for winning team players
+            const sn = rr.scoreName || 'normal';
+            for (let i = 0; i < 4; i++) {
+              const pName = gameState.players[i]?.name;
+              if (!pName || !playerStatsRef.current[pName]) continue;
+              if (i % 2 === wt) {
+                playerStatsRef.current[pName].winTypes[sn] = (playerStatsRef.current[pName].winTypes[sn] || 0) + 1;
+                playerStatsRef.current[pName].totalPoints += (rr.points || 0);
+              }
+            }
+          }
+        }
+
+        // Track blocked game results (no roundResult, but blockedReveal with winningTeam)
+        const br = gameState.blockedReveal;
+        if (br && br.winningTeam != null && !br.isDobrada) {
+          const blockedKey = 'blocked_' + br.winnerSlot + '_' + (gameState.teamScores?.[0]||0) + '_' + (gameState.teamScores?.[1]||0);
+          if (lastTrackedRoundRef.current !== blockedKey) {
+            lastTrackedRoundRef.current = blockedKey;
+            const wt = br.winningTeam;
+            for (let i = 0; i < 4; i++) {
+              const pName = gameState.players[i]?.name;
+              if (!pName || !playerStatsRef.current[pName]) continue;
+              if (i % 2 === wt) {
+                playerStatsRef.current[pName].roundsWon++;
+                playerStatsRef.current[pName].winTypes.blocked = (playerStatsRef.current[pName].winTypes.blocked || 0) + 1;
+                playerStatsRef.current[pName].totalPoints += 1;
+              } else {
+                playerStatsRef.current[pName].roundsLost++;
+              }
+            }
+          }
+        }
+
+        // Track match end
+        if (gameState.gameEnded && gameState.teamScores) {
+          const s0 = gameState.teamScores[0] || 0;
+          const s1 = gameState.teamScores[1] || 0;
+          const matchKey = 'match_' + s0 + '_' + s1 + '_' + Date.now().toString(36).slice(0, 6);
+          // Use a stable key based on scores — but since scores reset on new match, we track via gameEnded flag
+          const stableMatchKey = 'match_' + s0 + '_' + s1;
+          if (lastTrackedMatchRef.current !== stableMatchKey) {
+            lastTrackedMatchRef.current = stableMatchKey;
+            const mt = gameState.matchTarget || 6;
+            const winTeam = s0 >= mt ? 0 : 1;
+            const loseTeam = 1 - winTeam;
+            const isBuchuda = (winTeam === 0 ? s1 : s0) === 0;
+
+            for (let i = 0; i < 4; i++) {
+              const pName = gameState.players[i]?.name;
+              if (!pName || !playerStatsRef.current[pName]) continue;
+              if (i % 2 === winTeam) {
+                playerStatsRef.current[pName].matchesWon++;
+                if (isBuchuda) playerStatsRef.current[pName].buchudaGiven++;
+              } else {
+                playerStatsRef.current[pName].matchesLost++;
+                if (isBuchuda) playerStatsRef.current[pName].buchudaReceived++;
+              }
+            }
+          }
+        }
+
+        // Reset match tracking when a new game starts (scores back to 0)
+        if (!gameState.gameEnded && gameState.teamScores && gameState.teamScores[0] === 0 && gameState.teamScores[1] === 0) {
+          lastTrackedMatchRef.current = null;
+        }
+      }, [gameState?.roundResult, gameState?.blockedReveal, gameState?.gameEnded, gameState?.teamScores]);
+
       // Animate score dial needle sweep — slow + pulse highlight
       useEffect(() => {
         const s0 = gameState?.teamScores?.[0] || 0;
@@ -3968,6 +4083,12 @@
                   title="Toggle end number badges">
                   🟢
                 </button>
+                <button onClick={() => setShowStats(true)}
+                  className="px-1.5 py-0.5 text-[9px] font-bold rounded-md"
+                  style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'rgba(255,255,255,0.3)' }}
+                  title="Estatísticas">
+                  📊
+                </button>
               </div>
 
               {/* Round announcement — rendered below board in the layout flow */}
@@ -4565,6 +4686,139 @@
                   {error}
                 </div>
               )}
+
+              {/* Statistics Modal */}
+              {showStats && (() => {
+                const stats = playerStatsRef.current;
+                const players = gameState.players || {};
+                const teamColors = ['#22c55e', '#f59e0b'];
+                const teamNames = ['Time 1', 'Time 2'];
+                const statEntries = [0, 1, 2, 3].map(i => {
+                  const p = players[i];
+                  if (!p) return null;
+                  return stats[p.name] || { name: p.name, team: i % 2, matchesWon: 0, matchesLost: 0, roundsWon: 0, roundsLost: 0, winTypes: { normal: 0, cruzada: 0, 'com carroca': 0, 'la e lo': 0, blocked: 0 }, buchudaGiven: 0, buchudaReceived: 0, totalPoints: 0 };
+                }).filter(Boolean);
+
+                return (
+                  <div onClick={() => setShowStats(false)} style={{
+                    position: 'fixed', inset: 0, zIndex: 9999,
+                    background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: 12, animation: 'fade-in 0.2s ease-out'
+                  }}>
+                    <div onClick={e => e.stopPropagation()} style={{
+                      background: 'linear-gradient(145deg, #1e293b, #0f172a)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 16, padding: 16, width: '100%', maxWidth: 420,
+                      maxHeight: '90vh', overflowY: 'auto',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.6)'
+                    }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span style={{ fontSize: 20 }}>📊</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Estatísticas</span>
+                        </div>
+                        <button onClick={() => setShowStats(false)} style={{
+                          background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8,
+                          color: '#fff', fontSize: 16, width: 32, height: 32, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}>✕</button>
+                      </div>
+
+                      {statEntries.map((s, idx) => {
+                        const teamColor = teamColors[s.team];
+                        const totalMatches = s.matchesWon + s.matchesLost;
+                        const totalRounds = s.roundsWon + s.roundsLost;
+                        const winRate = totalMatches > 0 ? Math.round((s.matchesWon / totalMatches) * 100) : 0;
+                        return (
+                          <div key={s.name} style={{
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid ' + teamColor + '33',
+                            borderRadius: 12, padding: 12, marginBottom: idx < statEntries.length - 1 ? 8 : 0
+                          }}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <Avatar profile={profileFromPlayer(players[[0,1,2,3].find(i => players[i]?.name === s.name)])} size={32} noBorder />
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{s.name}</div>
+                                <div style={{ fontSize: 9, fontWeight: 600, color: teamColor }}>{teamNames[s.team]}</div>
+                              </div>
+                              {totalMatches > 0 && (
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 18, fontWeight: 800, color: teamColor }}>{winRate}%</div>
+                                  <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>vitórias</div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: 10 }}>
+                              <div style={{ color: 'rgba(255,255,255,0.5)' }}>Partidas</div>
+                              <div style={{ color: '#fff', fontWeight: 600, textAlign: 'right' }}>
+                                <span style={{ color: '#22c55e' }}>{s.matchesWon}W</span>
+                                {' / '}
+                                <span style={{ color: '#ef4444' }}>{s.matchesLost}L</span>
+                              </div>
+                              <div style={{ color: 'rgba(255,255,255,0.5)' }}>Rodadas</div>
+                              <div style={{ color: '#fff', fontWeight: 600, textAlign: 'right' }}>
+                                <span style={{ color: '#22c55e' }}>{s.roundsWon}W</span>
+                                {' / '}
+                                <span style={{ color: '#ef4444' }}>{s.roundsLost}L</span>
+                              </div>
+                              <div style={{ color: 'rgba(255,255,255,0.5)' }}>Pontos</div>
+                              <div style={{ color: '#fff', fontWeight: 600, textAlign: 'right' }}>{s.totalPoints}</div>
+                            </div>
+
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Tipos de vitória</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {[
+                                  { key: 'normal', label: 'Batida', emoji: '✅', color: '#22c55e' },
+                                  { key: 'cruzada', label: 'Cruzada', emoji: '💥', color: '#f59e0b' },
+                                  { key: 'com carroca', label: 'Carroça', emoji: '🎯', color: '#3b82f6' },
+                                  { key: 'la e lo', label: 'Lá e Ló', emoji: '🔥', color: '#ef4444' },
+                                  { key: 'blocked', label: 'Travada', emoji: '🔒', color: '#8b5cf6' }
+                                ].map(wt => {
+                                  const count = s.winTypes[wt.key] || 0;
+                                  return (
+                                    <div key={wt.key} style={{
+                                      background: count > 0 ? wt.color + '20' : 'rgba(255,255,255,0.03)',
+                                      border: '1px solid ' + (count > 0 ? wt.color + '40' : 'rgba(255,255,255,0.06)'),
+                                      borderRadius: 6, padding: '2px 6px',
+                                      fontSize: 9, fontWeight: 600,
+                                      color: count > 0 ? wt.color : 'rgba(255,255,255,0.2)'
+                                    }}>
+                                      {wt.emoji} {wt.label} {count}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {(s.buchudaGiven > 0 || s.buchudaReceived > 0) && (
+                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                                <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Buchuda</div>
+                                <div style={{ display: 'flex', gap: 8, fontSize: 10 }}>
+                                  {s.buchudaGiven > 0 && (
+                                    <span style={{ color: '#f59e0b', fontWeight: 700 }}>💀 Deu: {s.buchudaGiven}</span>
+                                  )}
+                                  {s.buchudaReceived > 0 && (
+                                    <span style={{ color: '#ef4444', fontWeight: 700 }}>💩 Levou: {s.buchudaReceived}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {statEntries.every(s => s.matchesWon === 0 && s.matchesLost === 0 && s.roundsWon === 0 && s.roundsLost === 0) && (
+                        <div style={{ textAlign: 'center', padding: 20, color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                          Nenhuma estatística ainda. Jogue uma rodada!
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         );
