@@ -47,17 +47,22 @@
       transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
       cursor: default;
       position: relative;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      user-select: none;
     }
     .domino-tile.playable {
       border-color: #22c55e;
       box-shadow: 0 0 12px rgba(34,197,94,0.5), 0 2px 6px rgba(0,0,0,0.25), inset 0 1px 2px rgba(255,255,255,0.6);
       cursor: pointer;
-      touch-action: manipulation;
-      -webkit-tap-highlight-color: transparent;
     }
-    .domino-tile.playable:hover {
-      transform: translateY(-6px) scale(1.05);
-      box-shadow: 0 0 20px rgba(34,197,94,0.7), 0 8px 16px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.6);
+    /* Only apply hover transform on devices with real hover (mouse/trackpad) */
+    @media (hover: hover) and (pointer: fine) {
+      .domino-tile.playable:hover {
+        transform: translateY(-6px) scale(1.05);
+        box-shadow: 0 0 20px rgba(34,197,94,0.7), 0 8px 16px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.6);
+      }
     }
     .domino-tile.playable:active {
       transform: translateY(-2px) scale(1.02);
@@ -2967,6 +2972,8 @@
         };
 
         await db.ref('rooms/' + roomCode).update(updates);
+        // Reset guard immediately after successful write (don't wait for 2s timeout)
+        if (slot === playerSlot) playingRef.current = false;
       };
 
       const playTile = async (tile, side = null) => {
@@ -3462,9 +3469,8 @@
           if (cancelled) return;
           const el = boardRef.current;
           if (!el) return;
-          const cs = getComputedStyle(el);
-          const w = Math.floor(el.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0));
-          const h = Math.floor(el.clientHeight - (parseFloat(cs.paddingTop)||0) - (parseFloat(cs.paddingBottom)||0));
+          const w = Math.floor(el.clientWidth);
+          const h = Math.floor(el.clientHeight);
           if ((w < 50 || h < 50) && tries < 30) { tries++; requestAnimationFrame(measureAndLock); return; }
           setBoardBox(prev => (prev.w === w && prev.h === h) ? prev : { w, h });
         };
@@ -3511,9 +3517,20 @@
 
       /* Hand tiles same size as board tiles (vertical orientation: vw × hw) */
       const hDims = { w: bDims.vw, h: bDims.hw, dot: bDims.vw <= 22 ? 3 : bDims.vw <= 26 ? 4 : 5, cont: bDims.vw <= 22 ? 15 : bDims.vw <= 26 ? 18 : 22 };
-      const DominoTile = ({ tile, playable, onClick }) => (
+      const DominoTile = ({ tile, playable, onClick }) => {
+        const fired = React.useRef(false);
+        const handleTouch = (e) => {
+          if (!playable) return;
+          e.preventDefault();
+          if (fired.current) return;
+          fired.current = true;
+          onClick();
+          setTimeout(() => { fired.current = false; }, 300);
+        };
+        return (
         <div
-          onClick={onClick}
+          onClick={(e) => { if (!fired.current) onClick(); }}
+          onTouchEnd={handleTouch}
           className={'domino-tile inline-flex flex-col ' + (playable ? 'playable' : 'unplayable')}
           style={{ width: hDims.w, height: hDims.h }}
         >
@@ -3525,6 +3542,7 @@
           </div>
         </div>
       );
+      };
 
       const BoardTile = ({ tile, orientation, flipped, extraStyle, hw: hwOverride, vw: vwOverride }) => {
         const isVertical = orientation === 'vertical';
