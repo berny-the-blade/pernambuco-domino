@@ -4410,11 +4410,7 @@
                         playable={isMyTurn && canPlayTile(tile)}
                         onClick={() => {
                           if (!isMyTurn || !canPlayTile(tile)) return;
-                          if (canPlayOnBothEnds(tile)) {
-                            setChoosingTile(tile);
-                          } else {
-                            playTile(tile);
-                          }
+                          playTile(tile, canPlayOnBothEnds(tile) ? 'left' : null);
                         }}
                       />
                     ))}
