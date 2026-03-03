@@ -214,8 +214,8 @@
     /* === Board area === */
     .board-area {
       background: radial-gradient(ellipse at center, #0d2e15 0%, #091f0e 100%);
-      border: 3px solid #1a4a2a;
-      border-radius: 16px;
+      border: 2px solid #1a4a2a;
+      border-radius: 10px;
       box-shadow: inset 0 4px 20px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
       scrollbar-gutter: stable both-edges;
     }
@@ -4063,7 +4063,7 @@
                         const DIAL_CORNER = 78;
                         const W = Math.max(120, containerW);
                         const H = Math.max(120, containerH);
-                        const SPIRAL_PADS = { top: 4, right: 8, bottom: 6, left: 4 };
+                        const SPIRAL_PADS = { top: 4, right: 20, bottom: 12, left: 4 };
 
                         // Auto-scale: try current size, shrink until all tiles fit
                         let spiralHW = HW, spiralVW = VW, out;
@@ -4127,7 +4127,7 @@
 
                       // === HORIZONTAL SNAKE (fallback) ===
                       const containerW = boardBox.w || 300;
-                      const maxW = Math.max(160, containerW - 28);
+                      const maxW = Math.max(160, containerW - 48);
                       const rows = [];
                       let cur = [], w = 0;
                       for (let i = 0; i < board.length; i++) {
