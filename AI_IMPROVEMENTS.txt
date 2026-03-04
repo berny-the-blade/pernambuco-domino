@@ -1,0 +1,175 @@
+PERNAMBUCO DOMINO — AI IMPROVEMENTS CHANGELOG
+================================================
+Feb 2026 | berny-the-blade/pernambuco-domino
+
+Result: +43 Elo (MC-Expert over heuristic-only, 400-game benchmark)
+       221 wins (56.1%) vs 173 (43.9%)
+
+
+1. BITMASK ENDGAME SOLVER (commit afb779f)
+==========================================
+
+Rewrote endgame solver using bitmask representation. Raised threshold from 8 to 16 tiles.
+
+- Hands as 28-bit integers (one bit per tile)
+- Legal move generation: handBits & numberMask[end] — O(1)
+- Move iteration via lowest-set-bit extraction: x & (-x)
+- Zero array allocation during search — pure integer arithmetic
+
+Move Ordering (_egMoveScore):
+  1. Instant win: +10000 (last tile in hand)
+  2. TT best move: +5000 (from transposition table)
+  3. Double: +100
+  4. High pips: +pips
+  5. Both-ends coverage: +50
+
+Provides 3-10x speedup from earlier alpha-beta cutoffs.
+
+Zobrist hashing includes boardLength (was missing — caused TT collisions).
+Verified: endgameVerify(5000) — ALL PASS.
+
+Note: PVS (Principal Variation Search) was implemented and then removed (commit ec4b9c7)
+because null-window searches corrupted TT entries, causing 17/5000 verification failures.
+Move ordering alone provides the main pruning benefit.
+
+
+2. MONTE CARLO BUDGET INCREASE (commit d520704)
+================================================
+
+| Parameter           | Old  | New  |
+|---------------------|------|------|
+| MC_SIMS_PLAY_EXPERT | 500  | 800  |
+| ISMCTS MAX_ITERS    | 400  | 600  |
+| ISMCTS TIME_LIMIT   | 200ms| 300ms|
+
+Early stopping (90% CI, MIN_SIMS=40) means easy decisions still finish fast.
+Only hard decisions benefit from the higher ceiling.
+
+
+3. FAST AI ROLLOUT IMPROVEMENTS (commit d520704)
+=================================================
+
+fastAI() is called ~20 times per rollout x 800 rollouts = ~16,000 times per move.
+Four features ported from smartAI:
+
+a) Phase-dependent pip weighting:
+   deadMul = bLen <= 4 ? 0.4 : (bLen <= 14 ? 1.0 : 1.4)
+   Pip weight changed from constant x2 to x2 x deadMul.
+   Early game: prefer flexibility. Late game: prefer heavy tiles.
+
+b) Dead number detection (highest-impact smartAI feature):
+   After playing a tile, check if remainingWithNumber(newEnd) drops to 0.
+   - One end dead, other alive: -30 (game stalls on one side)
+   - Both ends dead, low pips: +20 (we win the block)
+   - Both ends dead, high pips: -25 (we lose the block)
+
+c) 3-tile closing check:
+   When hand.length === 3, check if remaining 2 tiles can both play.
+   - Both playable: +20
+   - Neither playable: -15
+
+d) Strand penalty strengthened: -20 -> -30 (matches smartAI).
+
+Performance impact: ~15% slower per fastAI call. Negligible vs 300ms ISMCTS budget.
+
+
+4. ISMCTS HEURISTIC UPGRADE (commit 592994e)
+=============================================
+
+Rewrote _ismctsHeuristic from 3 features to 10:
+
+| Feature                     | Weight        |
+|-----------------------------|---------------|
+| Suit control                | +0.04/tile    |
+| Double bonus                | +0.03         |
+| Block opp1 (both ends)      | +0.06         |
+| Block opp1 (one end)        | +0.04         |
+| Block opp2 (both ends)      | +0.05         |
+| Block opp2 (one end)        | +0.03         |
+| Partner void penalty         | -0.03         |
+| Dead number (single dead)   | -0.06         |
+| 2-tile closing check         | +0.12/-0.04   |
+| 3-tile closing check         | +0.04/-0.03   |
+| Phase-dependent pips         | x0.001-0.005  |
+
+
+5. NEURAL NET BROWSER INFERENCE (commit 592994e)
+=================================================
+
+Complete neural network forward pass in vanilla JS for the 4-block ResNet:
+
+  loadNeuralModel(url)     — fetches .bin file, parses header + float32 arrays
+  _nnForward(state, mask)  — full forward pass:
+    Input(185) -> Linear(256) + BN + ReLU
+    -> ResBlock(256) x 4
+    -> Policy: Linear(128) + BN + ReLU + Linear(57) + mask + softmax
+    -> Value: Linear(64) + BN + ReLU + Linear(1) + tanh
+
+  _nnEncodeState()         — 185-dim encoder matching Python DominoEncoder
+  _nnActionMask()          — 57-dim action mask
+  neuralEval()             — returns policy-ranked moves with value estimate
+
+Integration: 20% NN policy blend with ISMCTS/MC search scores when model loaded.
+
+Note: Neural net inference is ready but needs a strong model. Current checkpoints
+(gen 84 from 100-gen training) were too weak (97/100 arena rejections).
+
+
+6. MODEL EXPORT SCRIPT (commit 592994e)
+========================================
+
+training/export_model.py — converts PyTorch .pt checkpoint to browser formats:
+
+  Binary (.bin): 4-byte header length + JSON header + float32 arrays (~700KB)
+  ONNX (.onnx):  Standard ONNX format for ONNX Runtime Web
+  JSON (.json):  Human-readable weights (large, ~2MB)
+
+Usage: python export_model.py checkpoint.pt -o model.bin
+
+
+7. IN-PAGE CMA-ES WEIGHT OPTIMIZER (commit d520704)
+====================================================
+
+Console-callable optimizer for the 13 AI_WEIGHTS parameters:
+
+  optimizeWeights(generations=30, popSize=16, gamesPerEval=150)
+
+- Diagonal CMA-ES with step-size adaptation
+- Adversarial evaluation: candidate vs champion weights, both sides
+- Convergence: sigma < 0.5 or 5 stale generations
+- Runtime: ~2.5 minutes for default settings
+
+Lesson learned: CMA-ES optimized weights degraded MC-Expert performance from
++43 to +14 Elo because it optimizes heuristic-vs-heuristic play, which makes
+the heuristic opponent stronger rather than improving the MC-guided AI.
+Original hand-tuned weights remain in production.
+
+
+COMMIT HISTORY (this session)
+=============================
+
+afb779f  Move ordering + bitmask solver threshold 16
+ec4b9c7  Remove PVS (fix 17/5000 verification failures)
+d520704  Improve MC rollout + raise sim budget + CMA-ES optimizer
+592994e  Neural net inference engine + ISMCTS upgrade + model export
+d9b8dc8  CMA-ES optimized weights (reverted — degraded performance)
+2d428f2  Revert CMA-ES weights (back to +43 Elo)
+
+
+AI DECISION STACK (priority order)
+===================================
+
+1. Endgame solver  — exact minimax, bitmask, alpha-beta, ≤16 tiles
+2. ISMCTS           — 600 iters / 300ms, 10-feature heuristic, progressive bias
+3. Monte Carlo      — 800 sims, fastAI rollouts, adaptive early stopping
+4. Heuristic        — smartAI with 35+ weighted features (always-available fallback)
+5. Neural (optional) — 20% policy blend when model loaded
+
+
+FILES MODIFIED
+==============
+
+simulator.html          — all browser-side changes (~12,000 LOC total)
+training/export_model.py — NEW: model export script
+DOCUMENTATION.md        — updated with all improvements
+SOLVER_ARCHITECTURE.md  — updated with bitmask solver, ISMCTS, neural inference
