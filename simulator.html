@@ -9776,8 +9776,12 @@
         const t = snap.board[idx];
         const isD = t.left === t.right;
         const orient = (isD || forceVertical) ? 'v' : 'h';
-        // Only highlight the "just played" tile when reviewing a finished game, not during live play
-        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id && (gameMode !== 'play' || !!currentGame.outcome);
+        // In live play: always use the latest snapshot's tile to avoid showing a stale "previous" tile.
+        // In review mode (watch/quiz or finished-game review): use the current step's tile.
+        const _newSnap = (gameMode === 'play' && !currentGame.outcome)
+          ? currentGame.snapshots[currentGame.snapshots.length - 1]
+          : snap;
+        const isNew = _newSnap.action === 'play' && _newSnap.tile && _newSnap.tile.id === t.id;
         const tile = (flipped && orient === 'h') ? {left: t.right, right: t.left, id: t.id} : t;
         const player = showBorders ? tilePlayerMap[t.id] : undefined;
         const pCls = player !== undefined ? PLAYER_CLS[player] : '';
