@@ -5737,15 +5737,22 @@
       if (!tile) return;
       if (!canPlay(tile, liveLeftEnd, liveRightEnd, liveBoard.length)) return;
 
-      const canLeft = canPlayOnSide(tile, liveLeftEnd);
-      const canRight = canPlayOnSide(tile, liveRightEnd);
-
-      if (liveLeftEnd === liveRightEnd) {
+      // Empty board — first tile, no side choice needed
+      if (liveBoard.length === 0) {
         finishPlayPick(tile, 'left');
         return;
       }
 
+      const canLeft = canPlayOnSide(tile, liveLeftEnd);
+      const canRight = canPlayOnSide(tile, liveRightEnd);
+
       if (canLeft && canRight) {
+        // If tile already selected, cancel (allows double-click to deselect)
+        if (playSidePick && playSidePick.tile.id === tile.id) {
+          playSidePick = null;
+          render();
+          return;
+        }
         playSidePick = { tile, canLeft, canRight };
         render();
         return;
@@ -9141,7 +9148,7 @@
                   <div class="text-xs text-slate-400">${_t('right')}</div>
                   <div class="text-xl font-bold ${snap.rightEnd !== null ? 'text-emerald-400' : 'text-slate-600'}">${snap.rightEnd ?? '-'}</div>
                 </div>
-                ${snap.outcome ? `<div class="bg-emerald-900 rounded-lg px-3 py-1.5 text-center border border-emerald-500">
+                ${snap.outcome && (gameMode !== 'play' || !!currentGame.outcome) ? `<div class="bg-emerald-900 rounded-lg px-3 py-1.5 text-center border border-emerald-500">
                   <div class="text-xs text-emerald-300">${_t('result')}</div>
                   <div class="text-sm font-bold text-emerald-400">${snap.outcome.winType || snap.outcome.type.toUpperCase()} ${snap.outcome.points ? `(${snap.outcome.points}pt${snap.outcome.multiplier > 1 ? ' DOB' : ''})` : ''}</div>
                   ${snap.outcome.winner !== undefined ? `<div class="text-xs text-emerald-300">${pn(snap.outcome.winner)} (${pTeams[snap.outcome.winner]})</div>` : ''}
@@ -9211,26 +9218,6 @@
         </div>
       ` : '';
 
-      // Pip count breakdown for blocked games
-      let pipBreakdown = '';
-      if (o.type === 'blocked' || o.type === 'tie') {
-        const hv = [0,1,2,3].map(p => {
-          const h = snap.hands[p] || [];
-          return { player: p, pips: h.reduce((s, t) => s + t.left + t.right, 0), tiles: h.length };
-        });
-        const minPips = Math.min(...hv.map(v => v.pips));
-        const pColors = ['#60a5fa', '#f87171', '#a78bfa', '#fbbf24'];
-        pipBreakdown = `<div class="mt-2 text-xs">
-          <div class="flex justify-center gap-3 flex-wrap">
-            ${hv.map(v => {
-              const isMin = v.pips === minPips;
-              return `<span class="${isMin ? 'text-emerald-400 font-bold' : 'text-slate-400'}"><span style="color:${pColors[v.player]}">${pn(v.player)}</span> ${v.pips}p${isMin ? ' ★' : ''}</span>`;
-            }).join('')}
-          </div>
-          <div class="text-slate-500 mt-1">${_t('lowest_pips')}</div>
-        </div>`;
-      }
-
       return `<div class="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
         <div class="text-center">
           <div class="text-3xl font-bold ${isMyTeamWin ? 'text-emerald-400' : o.type === 'tie' ? 'text-yellow-400' : 'text-red-400'} mb-1">${gameMode === 'play' ? (isMyTeamWin ? _t('you_win') : o.type === 'tie' ? _t('tied') : _t('you_lose')) : (o.winType || o.type.toUpperCase())}</div>
@@ -9238,7 +9225,6 @@
           ${o.winner !== undefined ?
             `<div class="text-lg text-white">${pn(o.winner)} (${pTeams[o.winner]}) ${_t('wins')} ${o.points}pt${mult > 1 ? ` <span class="text-orange-400">(${o.basePoints}x${mult})</span>` : ''}</div>${dobradaTag}` :
             `<div class="text-lg text-yellow-400">${_t('tied')}</div>${nextDobrada}`}
-          ${pipBreakdown}
           ${playButtons}
         </div>
       </div>`;
@@ -9367,7 +9353,8 @@
           if (canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) return 'tile-playable';
         }
         if (playWaiting && gameMode === 'play') {
-          if (canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length)) return 'tile-playable';
+          const _bLen = liveBoard ? liveBoard.length : snap.board.length;
+          if (_bLen === 0 || canPlay(t, liveLeftEnd, liveRightEnd, _bLen)) return 'tile-playable';
         }
         return '';
       };
@@ -9376,8 +9363,9 @@
         if (quizWaiting && canPlay(t, snap.leftEnd, snap.rightEnd, snap.board.length)) {
           return `quizPickTile('${t.id}')`;
         }
-        if (playWaiting && gameMode === 'play' && canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length)) {
-          return `playPickTile('${t.id}')`;
+        if (playWaiting && gameMode === 'play') {
+          const _bLen2 = liveBoard ? liveBoard.length : snap.board.length;
+          if (_bLen2 === 0 || canPlay(t, liveLeftEnd, liveRightEnd, _bLen2)) return `playPickTile('${t.id}')`;
         }
         return '';
       };
@@ -9402,7 +9390,9 @@
               : `<div class="text-center mt-1"><button class="btn btn-red text-sm px-6" onclick="quizPass()">${_t('pass')}</button><div class="text-xs text-red-400 mt-1">${_t('no_playable')}</div></div>`;
           })() : ''}
           ${playWaiting && gameMode === 'play' && !playSidePick ? (() => {
-            const hasPlayable = hand.some(t => canPlay(t, liveLeftEnd, liveRightEnd, liveBoard ? liveBoard.length : snap.board.length));
+            const bLen = liveBoard ? liveBoard.length : snap.board.length;
+            // When board is empty (liveLeftEnd null) all tiles are playable
+            const hasPlayable = bLen === 0 || hand.some(t => canPlay(t, liveLeftEnd, liveRightEnd, bLen));
             const hintBtn = `<button class="btn text-xs px-3 py-0.5 ml-2" style="background:#6366f1;color:#fff" onclick="showPlayHint()">${_t('hint')}</button>`;
             const hintDisplay = playHint ? `<div class="text-center mt-1 bg-indigo-950 rounded px-2 py-1 border border-indigo-500">
               <span class="text-xs text-indigo-300">${playHint.tileId ? `AI: <b>[${playHint.tileId}] ${playHint.side}</b>` : _t('pass')}</span>
@@ -9786,7 +9776,8 @@
         const t = snap.board[idx];
         const isD = t.left === t.right;
         const orient = (isD || forceVertical) ? 'v' : 'h';
-        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id;
+        // Only highlight the "just played" tile when reviewing a finished game, not during live play
+        const isNew = snap.action === 'play' && snap.tile && snap.tile.id === t.id && (gameMode !== 'play' || !!currentGame.outcome);
         const tile = (flipped && orient === 'h') ? {left: t.right, right: t.left, id: t.id} : t;
         const player = showBorders ? tilePlayerMap[t.id] : undefined;
         const pCls = player !== undefined ? PLAYER_CLS[player] : '';
