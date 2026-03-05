@@ -5731,7 +5731,12 @@
     // ========== PLAY MODE HUMAN INPUT ==========
 
     function playPickTile(tileId) {
-      if (!playWaiting || playSidePick) return;
+      if (!playWaiting) return;
+      // If side picker is showing, clicking the same tile again cancels it
+      if (playSidePick) {
+        if (playSidePick.tile.id === tileId) { playSidePick = null; render(); }
+        return;
+      }
       const hand = liveHands[0];
       const tile = hand.find(t => t.id === tileId);
       if (!tile) return;
@@ -5747,12 +5752,6 @@
       const canRight = canPlayOnSide(tile, liveRightEnd);
 
       if (canLeft && canRight) {
-        // If tile already selected, cancel (allows double-click to deselect)
-        if (playSidePick && playSidePick.tile.id === tile.id) {
-          playSidePick = null;
-          render();
-          return;
-        }
         playSidePick = { tile, canLeft, canRight };
         render();
         return;
@@ -8590,20 +8589,18 @@
       const tile = snap.hands[0].find(t => t.id === tileId);
       if (!tile) return;
 
+      // Empty board — first tile, no side choice needed
+      if (snap.board.length === 0) {
+        finishQuizPick(tile, 'left');
+        return;
+      }
+
       // Check if this tile can play on both sides
       const canLeft = canPlayOnSide(tile, snap.leftEnd);
       const canRight = canPlayOnSide(tile, snap.rightEnd);
 
-      if (snap.leftEnd === snap.rightEnd) {
-        // Both ends same number, only one effective side
-        if (canLeft) {
-          finishQuizPick(tile, 'left');
-        } else {
-          // tile can't play — user picked wrong
-          finishQuizPick(tile, null);
-        }
-      } else if (canLeft && canRight) {
-        // Tile can play both sides — ask which
+      if (canLeft && canRight) {
+        // Tile can play both sides — ask which (always show picker, even when ends are equal)
         quizSidePick = { tile, canLeft, canRight };
         render();
       } else if (canLeft) {
