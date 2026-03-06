@@ -1,2 +1,20 @@
 # Local Netlify folder
 .netlify
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Training checkpoints
+training/checkpoints/*.pt
+training/logs/
+training/*.log
+
+# Misc
+*.bak
+app_content.txt
