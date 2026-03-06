@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -363,7 +363,7 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // === Sound Effects (Web Audio API ÔÇö no external files) ===
+    // === Sound Effects (Web Audio API — no external files) ===
     let _audioCtx = null;
     function playSound(type) {
       try {
@@ -398,7 +398,7 @@
             osc.stop(now + i * 0.12 + 0.2);
           });
         } else if (type === 'turn') {
-          // Short soft knock ÔÇö two quick taps
+          // Short soft knock — two quick taps
           [880, 1046.5].forEach((freq, i) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -414,7 +414,7 @@
       } catch (e) { /* ignore audio errors */ }
     }
 
-    // === Neural Network Model (globals ÔÇö must be outside App for loadNeuralModel call) ===
+    // === Neural Network Model (globals — must be outside App for loadNeuralModel call) ===
     const NN_STATE_DIM = 185;
     const NN_NUM_ACTIONS = 57;
     let _nnModel = null;
@@ -446,7 +446,7 @@
 
     // === SPIRAL / RECTANGULAR BOARD LAYOUT ENGINE ===
     // Spiral layout: connected chain from board center, spiraling outward.
-    // Uses collision detection against ALL placed tiles ÔÇö no boundary shrinking.
+    // Uses collision detection against ALL placed tiles — no boundary shrinking.
     // Tries multiple turn directions so tiles are never lost.
     function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
       const n = board.length;
@@ -655,18 +655,18 @@
       const lastTrackedMatchRef = useRef(null);
       // === Player Profile System ===
       const HUMAN_PROFILES = [
-        { key: 'ze', name: 'Z├®', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
+        { key: 'ze', name: 'Zé', avatarType: 'image', avatarSrc: 'avatars/ze.png', color: '#f59e0b' },
         { key: 'alexandre', name: 'Alexandre', avatarType: 'image', avatarSrc: 'avatars/alexandre.png', color: '#3b82f6' },
         { key: 'carlinhos', name: 'Carlinhos', avatarType: 'image', avatarSrc: 'avatars/carlinhos.png', color: '#22c55e' },
         { key: 'bernd', name: 'Bernd', avatarType: 'image', avatarSrc: 'avatars/bernd.png', color: '#a855f7' },
       ];
       const BOT_PROFILES = [
         { key: 'dona-maria', name: 'Dona Maria', avatarType: 'initials', initials: 'DM', color: '#ef4444', bgGradient: 'linear-gradient(135deg, #ef4444, #b91c1c)' },
-        { key: 'seu-joao', name: 'Seu Jo├úo', avatarType: 'initials', initials: 'SJ', color: '#3b82f6', bgGradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' },
+        { key: 'seu-joao', name: 'Seu João', avatarType: 'initials', initials: 'SJ', color: '#3b82f6', bgGradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)' },
         { key: 'toninho', name: 'Toninho', avatarType: 'initials', initials: 'To', color: '#f59e0b', bgGradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
         { key: 'cida', name: 'Cida', avatarType: 'initials', initials: 'Ci', color: '#8b5cf6', bgGradient: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' },
         { key: 'bira', name: 'Bira', avatarType: 'initials', initials: 'Bi', color: '#10b981', bgGradient: 'linear-gradient(135deg, #10b981, #059669)' },
-        { key: 'nene', name: 'Nen├¬', avatarType: 'initials', initials: 'N├¬', color: '#f97316', bgGradient: 'linear-gradient(135deg, #f97316, #ea580c)' },
+        { key: 'nene', name: 'Nenê', avatarType: 'initials', initials: 'Nê', color: '#f97316', bgGradient: 'linear-gradient(135deg, #f97316, #ea580c)' },
       ];
 
       const assignBotProfiles = (count) => {
@@ -1015,7 +1015,7 @@
       // === 28 immutable tiles ===
       const ALL_TILES = createDeck();
 
-      // === Knowledge class ÔÇö full belief model ported from simulator ===
+      // === Knowledge class — full belief model ported from simulator ===
       class Knowledge {
         constructor() {
           this.cantHave = [new Set(), new Set(), new Set(), new Set()];
@@ -1136,7 +1136,7 @@
         return k;
       };
 
-      // === AI WEIGHTS ÔÇö tunable scoring parameters ===
+      // === AI WEIGHTS — tunable scoring parameters ===
       const AI_WEIGHTS = {
         deadEndPenalty: 34.7, lockFavorable: 42.5, lockUnfavorable: 62.8,
         chicoteSelf: 26.9, chicotePartner: 23.4, chicoteOpponent: 23.7, chicoteDorme: 16.9,
@@ -1154,7 +1154,7 @@
         return { pts: 1, type: 'NORMAL' };
       };
 
-      // === Full smartAI ÔÇö ported from simulator with all strategic features ===
+      // === Full smartAI — ported from simulator with all strategic features ===
       const smartAI = (hand, lE, rE, bLen, player, knowledge, matchScores, returnAll = false) => {
         const canPlay = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
         const playable = hand.filter(canPlay);
@@ -1210,7 +1210,7 @@
             }
             ss += myCount * 15;
 
-            // Blocking ÔÇö opp1 plays next (higher value), opp2 after partner (lower)
+            // Blocking — opp1 plays next (higher value), opp2 after partner (lower)
             if (knowledge.cantHave[opp1].has(newEnd) && knowledge.cantHave[opp1].has(otherEnd)) ss += 35;
             if (knowledge.cantHave[opp2].has(newEnd) && knowledge.cantHave[opp2].has(otherEnd)) ss += 25;
 
@@ -1269,7 +1269,7 @@
               else if (pTilesNew === 0 && !partnerVoidNew) ss -= 8;
             }
 
-            // Pip weight ÔÇö phase-dependent
+            // Pip weight — phase-dependent
             const tilePips = tile.left + tile.right;
             ss += Math.round(tilePips * 2 * deadMul);
 
@@ -1293,7 +1293,7 @@
             const oppCouldHaveNew = totalUnknown > 4 ? Math.round(unknownWithNew * (totalUnknown - 4) / totalUnknown) : 0;
             ss += (2 - oppCouldHaveNew) * AI_WEIGHTS.boardCountGradient;
 
-            // Dead number detection ÔÇö POST-PLAY remaining counts
+            // Dead number detection — POST-PLAY remaining counts
             const remNewAfterPlay = knowledge.remainingWithNumber(newEnd) - 1;
             const tileHasOtherEnd = (tile.left === otherEnd || tile.right === otherEnd) ? 1 : 0;
             const remOtherAfterPlay = knowledge.remainingWithNumber(otherEnd) - tileHasOtherEnd;
@@ -1431,7 +1431,7 @@
               }
             }
 
-            // Information hiding ÔÇö opening only
+            // Information hiding — opening only
             if (bLen >= 1 && bLen <= 6 && hand.length >= 4) {
               const maxSC = Math.max(...suitCount);
               if (suitCount[newEnd] >= 3 && suitCount[newEnd] === maxSC) ss -= 8;
@@ -1556,7 +1556,7 @@
 
       // === Monte Carlo Rollout System ===
 
-      // Fast rollout AI ÔÇö lightweight scoring for MC simulations (with dead number detection)
+      // Fast rollout AI — lightweight scoring for MC simulations (with dead number detection)
       const fastAI = (hand, lE, rE, bLen, player, knowledge) => {
         const playable = hand.filter(t => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE);
         if (playable.length === 0) return null;
@@ -1636,7 +1636,7 @@
         return bestTile ? { tile: bestTile, side: bestSide } : { tile: playable[0], side: null };
       };
 
-      // Resolve a blocked game ÔÇö returns { team, points, type }
+      // Resolve a blocked game — returns { team, points, type }
       const resolveBlock = (hands) => {
         const vals = hands.map((h, i) => ({ p: i, pts: h.reduce((s, t) => s + t.left + t.right, 0) }));
         const min = Math.min(...vals.map(v => v.pts));
@@ -1838,7 +1838,7 @@
         return hands;
       };
 
-      // Monte Carlo evaluation ÔÇö run N simulations per move, pick best
+      // Monte Carlo evaluation — run N simulations per move, pick best
       const MC_SIMS = 80;
       const monteCarloEval = (hand, lE, rE, bLen, player, knowledge) => {
         const canPlayMC = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
@@ -2894,7 +2894,7 @@
         return finalResults.length > 0 ? finalResults[0] : null;
       };
 
-      // === Expert AI router: endgame solver ÔåÆ ISMCTS ÔåÆ MC ÔåÆ smartAI ===
+      // === Expert AI router: endgame solver → ISMCTS → MC → smartAI ===
       const expertAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         if (bLen === 0) {
           return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
@@ -2937,7 +2937,7 @@
         return playable.length > 0 ? playable[Math.floor(Math.random() * playable.length)] : null;
       };
 
-      // === Bot AI router ÔÇö picks AI based on difficulty setting ===
+      // === Bot AI router — picks AI based on difficulty setting ===
       const botAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         const diff = gameState?.config?.aiDifficulty || aiDifficulty;
         if (diff === 'easy') return randomAI(hand, lE, rE, bLen);
@@ -2963,7 +2963,7 @@
             actualSide = 'right';
           }
         }
-        // null means first tile (board empty) ÔÇö will center
+        // null means first tile (board empty) — will center
 
         // Trigger fly animation before updating state (if enabled)
         if (animations) {
@@ -3079,8 +3079,8 @@
 
         const extraMsg = (gameState.scoreMultiplier || 1) > 1 ? ' (' + basePoints + ' x' + (gameState.scoreMultiplier || 1) + ' dobrada)' : '';
         
-        const displayName = { 'cruzada': 'CRUZADA!', 'com carroca': 'CARRO├çA!', 'la e lo': 'L├ü E L├ô!', 'normal': 'BATEU!' };
-        const displayEmoji = { 'cruzada': '­ƒÆÑ', 'com carroca': '­ƒÄ»', 'la e lo': '­ƒöÑ', 'normal': 'Ô£à' };
+        const displayName = { 'cruzada': 'CRUZADA!', 'com carroca': 'CARROÇA!', 'la e lo': 'LÁ E LÓ!', 'normal': 'BATEU!' };
+        const displayEmoji = { 'cruzada': '💥', 'com carroca': '🎯', 'la e lo': '🔥', 'normal': '✅' };
 
         const updates = {
           hands: hands,
@@ -3165,7 +3165,7 @@
         const winners = handValues.filter(h => h.points === minValue);
         const handSummary = handValues.map(h => gameState.players[h.player].name + ': ' + h.points).join(' | ');
 
-        // Build blockedReveal data ÔÇö all players' hands face-up with pip counts
+        // Build blockedReveal data — all players' hands face-up with pip counts
         const blockedReveal = {
           players: handValues.map(h => ({
             slot: h.player,
@@ -3278,7 +3278,7 @@
             message: 'Time ' + (winTeam + 1) + ' venceu! Veja suas pecas e escolha quem comeca (30s)!'
           });
         } else {
-          // Bot winning team ÔÇö pick best opener from winning team only
+          // Bot winning team — pick best opener from winning team only
           let bestSlot = winTeamSlots[0], bestScore = -1;
           for (const s of winTeamSlots) {
             const sc = [0,0,0,0,0,0,0];
@@ -3313,11 +3313,11 @@
       useEffect(() => {
         if (!gameState?.roundResult) { setRoundAnnouncement(null); return; }
         const r = gameState.roundResult;
-        const labels = { 'cruzada': 'CRUZADA!', 'com carroca': 'CARRO├çA!', 'la e lo': 'L├ü E L├ô!', 'normal': 'BATEU!' };
-        const emojis = { 'cruzada': '­ƒÆÑ', 'com carroca': '­ƒÄ»', 'la e lo': '­ƒöÑ', 'normal': 'Ô£à' };
+        const labels = { 'cruzada': 'CRUZADA!', 'com carroca': 'CARROÇA!', 'la e lo': 'LÁ E LÓ!', 'normal': 'BATEU!' };
+        const emojis = { 'cruzada': '💥', 'com carroca': '🎯', 'la e lo': '🔥', 'normal': '✅' };
         setRoundAnnouncement({
           label: labels[r.scoreName] || 'BATEU!',
-          emoji: emojis[r.scoreName] || 'Ô£à',
+          emoji: emojis[r.scoreName] || '✅',
           points: r.points,
           playerName: r.playerName,
           scoreName: r.scoreName
@@ -3408,7 +3408,7 @@
           const s0 = gameState.teamScores[0] || 0;
           const s1 = gameState.teamScores[1] || 0;
           const matchKey = 'match_' + s0 + '_' + s1 + '_' + Date.now().toString(36).slice(0, 6);
-          // Use a stable key based on scores ÔÇö but since scores reset on new match, we track via gameEnded flag
+          // Use a stable key based on scores — but since scores reset on new match, we track via gameEnded flag
           const stableMatchKey = 'match_' + s0 + '_' + s1;
           if (lastTrackedMatchRef.current !== stableMatchKey) {
             lastTrackedMatchRef.current = stableMatchKey;
@@ -3437,7 +3437,7 @@
         }
       }, [gameState?.roundResult, gameState?.blockedReveal, gameState?.gameEnded, gameState?.teamScores]);
 
-      // Animate score dial needle sweep ÔÇö slow + pulse highlight
+      // Animate score dial needle sweep — slow + pulse highlight
       useEffect(() => {
         const s0 = gameState?.teamScores?.[0] || 0;
         const s1 = gameState?.teamScores?.[1] || 0;
@@ -3461,7 +3461,7 @@
         }
       }, [gameState?.teamScores?.[0], gameState?.teamScores?.[1]]);
 
-      // Auto-start next round ÔÇö 20s countdown, show button over board after 10s
+      // Auto-start next round — 20s countdown, show button over board after 10s
       useEffect(() => {
         const shouldCount = gameState && gameState.gameStarted && !gameState.gameEnded
           && gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && playerSlot === 0;
@@ -3604,21 +3604,21 @@
         const winTeam = gameState.lastWinningTeam;
         const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
         const humanSlots = winSlots.filter(s => gameState.players?.[s]?.isHuman);
-        if (humanSlots.length < 2) return; // solo human ÔÇö direct pick, no voting needed
+        if (humanSlots.length < 2) return; // solo human — direct pick, no voting needed
         const v0 = votes[humanSlots[0]], v1 = votes[humanSlots[1]];
         if (v0 === undefined || v1 === undefined) return; // waiting for both
         if (v0 === v1) {
           // Both agree on the same player
           startGameWithStarter(v0);
         } else {
-          // Conflict ÔÇö tiebreak: fewer pips starts
+          // Conflict — tiebreak: fewer pips starts
           const pips0 = handPipCount(gameState.hands?.[humanSlots[0]] || []);
           const pips1 = handPipCount(gameState.hands?.[humanSlots[1]] || []);
           startGameWithStarter(pips0 <= pips1 ? humanSlots[0] : humanSlots[1]);
         }
       }, [gameState?.starterVotes, gameState?.waitingForStarterChoice]);
 
-      // Auto-pick starter after timer expires (host only) ÔÇö pip tiebreak, no randomness
+      // Auto-pick starter after timer expires (host only) — pip tiebreak, no randomness
       useEffect(() => {
         if (!gameState?.waitingForStarterChoice || !gameState?.starterChoiceDeadline) return;
         if (playerSlot !== 0) return;
@@ -3655,7 +3655,7 @@
       }, [screen]);
 
       // Domino dots pattern
-      /* Hand tiles same size as board tiles (vertical orientation: vw ├ù hw) */
+      /* Hand tiles same size as board tiles (vertical orientation: vw × hw) */
       const hDims = { w: bDims.vw, h: bDims.hw, dot: bDims.vw <= 22 ? 3 : bDims.vw <= 26 ? 4 : 5, cont: bDims.vw <= 22 ? 15 : bDims.vw <= 26 ? 18 : 22 };
 
       const BoardTile = ({ tile, orientation, flipped, extraStyle, hw: hwOverride, vw: vwOverride }) => {
@@ -3711,7 +3711,7 @@
               {/* Logo/title area */}
               <div className="text-center mb-6">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3" style={{ background: 'linear-gradient(135deg, #166534, #15803d)' }}>
-                  <span className="text-3xl">­ƒüú</span>
+                  <span className="text-3xl">🁣</span>
                 </div>
                 <h1 className="text-2xl font-extrabold text-gray-800">Domino Pernambucano</h1>
                 <p className="text-gray-500 text-sm mt-1">Jogo de domino 2v2</p>
@@ -3772,7 +3772,7 @@
               <div className="mb-5">
                 <label className="block text-sm font-semibold text-gray-600 mb-2">Forca da IA (bots)</label>
                 <div className="flex gap-2">
-                  {[{k:'easy',label:'Facil',emoji:'­ƒÿè'},{k:'medium',label:'Medio',emoji:'­ƒñö'},{k:'hard',label:'Dificil',emoji:'­ƒöÑ'}].map(d => (
+                  {[{k:'easy',label:'Facil',emoji:'😊'},{k:'medium',label:'Medio',emoji:'🤔'},{k:'hard',label:'Dificil',emoji:'🔥'}].map(d => (
                     <button
                       key={d.k}
                       onClick={() => setAiDiff(d.k)}
@@ -3797,7 +3797,7 @@
               <div className="mb-5">
                 <label className="block text-sm font-semibold text-gray-600 mb-2">Velocidade dos Bots</label>
                 <div className="flex gap-2">
-                  {[{k:'slow',label:'Lento',emoji:'­ƒÉó'},{k:'medium',label:'Medio',emoji:'ÔÜí'},{k:'fast',label:'Rapido',emoji:'­ƒÜÇ'},{k:'instant',label:'Teste',emoji:'ÔÅ®'}].map(d => (
+                  {[{k:'slow',label:'Lento',emoji:'🐢'},{k:'medium',label:'Medio',emoji:'⚡'},{k:'fast',label:'Rapido',emoji:'🚀'},{k:'instant',label:'Teste',emoji:'⏩'}].map(d => (
                     <button
                       key={d.k}
                       onClick={() => setBotSpd(d.k)}
@@ -3820,7 +3820,7 @@
               )}
 
               <div className="mb-5 flex items-center justify-between">
-                <label className="text-sm font-semibold text-gray-600">Anima├º├Áes</label>
+                <label className="text-sm font-semibold text-gray-600">Animações</label>
                 <button
                   onClick={() => setAnim(!animations)}
                   className="relative w-12 h-7 rounded-full transition-all duration-200"
@@ -4021,7 +4021,7 @@
           </div>
         );
 
-        // Compact SVG scoring dial ÔÇö semicircular arc with both teams
+        // Compact SVG scoring dial — semicircular arc with both teams
         // Quarter-circle corner dial with needle (like real domino table)
         const CornerDial = ({ score, animScore, total, corner, color, lightColor }) => {
           const S = 74, R = 50, steps = total || 6;
@@ -4080,28 +4080,28 @@
                   className="px-1.5 py-0.5 text-[9px] font-bold rounded-md"
                   style={{ border: '1px solid rgba(255,255,255,0.12)', background: showEndBadges ? 'rgba(16,185,129,0.3)' : 'transparent', color: showEndBadges ? '#10b981' : 'rgba(255,255,255,0.3)' }}
                   title="Toggle end number badges">
-                  ­ƒƒó
+                  🟢
                 </button>
                 <button onClick={() => setShowStats(true)}
                   className="px-1.5 py-0.5 text-[9px] font-bold rounded-md"
                   style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'transparent', color: 'rgba(255,255,255,0.3)' }}
-                  title="Estat├¡sticas">
-                  ­ƒôè
+                  title="Estatísticas">
+                  📊
                 </button>
               </div>
 
-              {/* Round announcement ÔÇö rendered below board in the layout flow */}
+              {/* Round announcement — rendered below board in the layout flow */}
 
-              {/* Message toast removed ÔÇö turn info shown via SUA VEZ badge + avatar badges */}
+              {/* Message toast removed — turn info shown via SUA VEZ badge + avatar badges */}
 
-              {/* Starter choice modal ÔÇö moved to just above player hand */}
+              {/* Starter choice modal — moved to just above player hand */}
 
               {/* Side choice modal moved to just above player hand */}
 
               {/* Game Table */}
               <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
-                {/* Partner (top) ÔÇö same team = blue */}
+                {/* Partner (top) — same team = blue */}
                 <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 flex-wrap ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')}>
                   <div style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', padding: 2, background: 'rgba(59,130,246,0.7)', boxShadow: '0 0 6px rgba(59,130,246,0.4)' }}>
                     <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={38} noBorder />
@@ -4140,7 +4140,7 @@
                 {/* Middle row */}
                 <div className="flex items-stretch mb-1 gap-1" style={{ flex: 1, minHeight: 0 }}>
 
-                  {/* Left opponent ÔÇö opposing team = red */}
+                  {/* Left opponent — opposing team = red */}
                   <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[leftSlot] || []).length > 0 ? 64 : 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={38} noBorder />
@@ -4224,10 +4224,8 @@
                               const isRightEnd = idx === tilesOut.length - 1;
                               const isEndTile = isLeftEnd || isRightEnd;
                               const isLastPlayed = p.i === board.length - 1 && board.length > 1;
-                              const isDouble = t.left === t.right;
-                              const effectiveOrient = isDouble ? 'horizontal' : p.orient;
-                              const tw = effectiveOrient === 'horizontal' ? spiralHW : spiralVW;
-                              const th = effectiveOrient === 'horizontal' ? spiralVW : spiralHW;
+                              const tw = p.orient === 'horizontal' ? spiralHW : spiralVW;
+                              const th = p.orient === 'horizontal' ? spiralVW : spiralHW;
                               return (
                                 <div
                                   key={t.id + '-' + p.i}
@@ -4239,7 +4237,7 @@
                                     boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none'
                                   }}
                                 >
-                                  <BoardTile tile={t} orientation={effectiveOrient} flipped={p.flip}
+                                  <BoardTile tile={t} orientation={p.orient} flipped={p.flip}
                                     hw={spiralHW} vw={spiralVW}
                                     extraStyle={isEndTile ? {
                                       animation: 'pulse-glow 1.8s ease-in-out infinite',
@@ -4249,7 +4247,7 @@
                                 </div>
                               );
                             })}
-                            {/* End badges ÔÇö optional, fixed to bottom-center of board */}
+                            {/* End badges — optional, fixed to bottom-center of board */}
                             {showEndBadges && (
                               <div style={{
                                 position:'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
@@ -4257,7 +4255,7 @@
                                 background:'rgba(0,0,0,0.5)', borderRadius: 16, padding:'3px 10px'
                               }}>
                                 <EndBadge num={gameState.leftEnd} />
-                                <span style={{color:'rgba(255,255,255,0.4)',fontSize:10}}>ÔÇóÔÇóÔÇó</span>
+                                <span style={{color:'rgba(255,255,255,0.4)',fontSize:10}}>•••</span>
                                 <EndBadge num={gameState.rightEnd} />
                               </div>
                             )}
@@ -4337,12 +4335,13 @@
                         </div>
                       );
                     })()}
-                    {/* Dormidas badge ÔÇö tiny corner indicator */}
+                    {/* Dormidas badge — tiny corner indicator */}
                     {gameState.dormidas && gameState.currentPlayer !== -1 && (
                       <div style={{ position: 'absolute', bottom: 4, left: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.4 }}>
+                        <span style={{ fontSize: 9, color: '#fff', fontWeight: 700 }}>Dorme</span>
                         <div style={{ display: 'flex', gap: 2 }}>
                           {[0,1,2,3].map(i => (
-                            <div key={i} style={{ width: bDims.vw, height: bDims.hw, borderRadius: 2, background: '#5a4a3a', border: '1px solid rgba(255,255,255,0.15)' }} />
+                            <div key={i} style={{ width: 6, height: 10, borderRadius: 1, background: '#5a4a3a', border: '1px solid rgba(255,255,255,0.15)' }} />
                           ))}
                         </div>
                       </div>
@@ -4366,7 +4365,7 @@
                         </div>
                       );
                     })()}
-                    {/* Corner score dials ÔÇö overlaid on board */}
+                    {/* Corner score dials — overlaid on board */}
                     <div style={{
                       position: 'absolute', top: 0, left: 0, zIndex: dialPulse === 'team0' ? 30 : 10, pointerEvents: 'none',
                       opacity: dialPulse === 'team0' ? 1 : 0.85,
@@ -4387,7 +4386,7 @@
                     }}>
                       <CornerDial score={score1} animScore={animScore1} total={mt} corner="br" color="#ef4444" lightColor="#fca5a5" />
                     </div>
-                    {/* Proxima Rodada ÔÇö overlays on board after 10s */}
+                    {/* Proxima Rodada — overlays on board after 10s */}
                     {showNextBtn && gameState.currentPlayer === -1 && !gameState.gameEnded && !gameState.waitingForStarterChoice && playerSlot === 0 && (
                       <div style={{ position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 40 }}>
                         <button onClick={() => { setRoundCountdown(null); setShowNextBtn(false); newRound(); }}
@@ -4399,7 +4398,7 @@
                     )}
                   </div>
 
-                  {/* Right opponent ÔÇö opposing team = red */}
+                  {/* Right opponent — opposing team = red */}
                   <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[rightSlot] || []).length > 0 ? 64 : 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={38} noBorder />
@@ -4432,9 +4431,9 @@
                   </div>
                 </div>
 
-                {/* Score dials removed from here ÔÇö now overlaid on board corners */}
+                {/* Score dials removed from here — now overlaid on board corners */}
 
-                {/* Round announcement banner ÔÇö below board, above hand */}
+                {/* Round announcement banner — below board, above hand */}
                 {roundAnnouncement && (
                   <div className="animate-bounce-in" style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -4448,13 +4447,13 @@
                         {roundAnnouncement.label}
                       </div>
                       <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
-                        {roundAnnouncement.playerName} ÔÇö +{roundAnnouncement.points} ponto{roundAnnouncement.points > 1 ? 's' : ''}
+                        {roundAnnouncement.playerName} — +{roundAnnouncement.points} ponto{roundAnnouncement.points > 1 ? 's' : ''}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Starter choice ÔÇö just above player hand */}
+                {/* Starter choice — just above player hand */}
                 {showStarterChoice && (() => {
                   const winTeam = gameState.lastWinningTeam;
                   const winSlots = winTeam === 0 ? [0, 2] : [1, 3];
@@ -4508,7 +4507,7 @@
                   );
                 })()}
 
-                {/* Side choice modal ÔÇö just above player hand */}
+                {/* Side choice modal — just above player hand */}
                 {choosingTile && isMyTurn && myHand.some(t => t.id === choosingTile.id) && (
                   <div className="animate-bounce-in mx-2" style={{
                     background: 'rgba(0,0,0,0.5)', borderRadius: 10, padding: '6px 12px', marginBottom: 4,
@@ -4518,11 +4517,11 @@
                     <span className="text-[11px] font-bold text-white/80">{choosingTile.left}-{choosingTile.right}:</span>
                     <button onClick={() => { playTile(choosingTile, 'left'); setChoosingTile(null); }} className="side-btn left" style={{ padding: '4px 10px', fontSize: 11 }}>Esq ({gameState.leftEnd})</button>
                     <button onClick={() => { playTile(choosingTile, 'right'); setChoosingTile(null); }} className="side-btn right" style={{ padding: '4px 10px', fontSize: 11 }}>Dir ({gameState.rightEnd})</button>
-                    <button onClick={() => setChoosingTile(null)} className="text-white/30 text-[10px] hover:text-white/60">Ô£ò</button>
+                    <button onClick={() => setChoosingTile(null)} className="text-white/30 text-[10px] hover:text-white/60">✕</button>
                   </div>
                 )}
 
-                {/* My Hand ÔÇö my team = blue */}
+                {/* My Hand — my team = blue */}
                 <div className={'my-hand px-1.5 py-1 mx-2 ' + (isMyTurn ? 'my-turn' : '')} style={{ marginTop: 4 }}>
                   <div className="flex items-center justify-center gap-1.5" style={{ marginBottom: 2 }}>
                     <div style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', padding: 2, background: 'rgba(59,130,246,0.7)', boxShadow: '0 0 6px rgba(59,130,246,0.4)' }}>
@@ -4556,7 +4555,7 @@
                   </div>
                   {isMyTurn && !myHand.some(t => canPlayTile(t)) && (
                     <div className="text-center text-[10px] font-bold text-yellow-300/80 animate-slide-down">
-                      Sem peca ÔÇö passando...
+                      Sem peca — passando...
                     </div>
                   )}
                   {isMyTurn && moveTimer !== null && myHand.some(t => canPlayTile(t)) && (
@@ -4569,12 +4568,12 @@
                 </div>
               </div>
 
-              {/* Dormidas indicator ÔÇö subtle inline during play */}
+              {/* Dormidas indicator — subtle inline during play */}
 
               {/* Dormidas revealed after round ends */}
               {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.dormidas && gameState.dormidas.length > 0 && (
                 <div className="px-2 py-1.5 rounded-lg mb-1" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
-
+                  <div className="text-[9px] text-white/40 font-bold text-center mb-0.5">Dormidas</div>
                   <div className="flex gap-1 justify-center flex-wrap">
                     {gameState.dormidas.map(tile => (
                       <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
@@ -4583,7 +4582,7 @@
                 </div>
               )}
 
-              {/* Blocked game reveal ÔÇö show all players' remaining tiles face-up */}
+              {/* Blocked game reveal — show all players' remaining tiles face-up */}
               {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.blockedReveal && (
                 <div className="rounded-xl mb-1 animate-bounce-in" style={{
                   background: 'rgba(0,0,0,0.35)',
@@ -4597,7 +4596,7 @@
                       Jogo Trancado!
                     </div>
                     {gameState.blockedReveal.isDobrada ? (
-                      <div className="text-[10px] text-white/60 font-bold">Empate ÔÇö dobrada!</div>
+                      <div className="text-[10px] text-white/60 font-bold">Empate — dobrada!</div>
                     ) : (
                       <div className="text-[10px] text-white/60 font-bold">
                         {gameState.players[gameState.blockedReveal.winnerSlot]?.name} venceu com menos pontos
@@ -4605,7 +4604,7 @@
                     )}
                   </div>
 
-                  {/* Individual player summaries ÔÇö jogo trancado is won by the player with fewest pips */}
+                  {/* Individual player summaries — jogo trancado is won by the player with fewest pips */}
                   <div className="grid grid-cols-2 gap-1 mb-2">
                     {gameState.blockedReveal.players?.slice().sort((a, b) => a.pips - b.pips).map(p => {
                       const isWinner = !gameState.blockedReveal.isDobrada && gameState.blockedReveal.winnerSlot === p.slot;
@@ -4633,7 +4632,7 @@
                 </div>
               )}
 
-              {/* Action button removed from here ÔÇö now overlays on board after 10s */}
+              {/* Action button removed from here — now overlays on board after 10s */}
 
               {gameState.gameEnded && (() => {
                 const myTeam = playerSlot % 2;
@@ -4712,14 +4711,14 @@
                     }}>
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
-                          <span style={{ fontSize: 20 }}>­ƒôè</span>
-                          <span style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Estat├¡sticas</span>
+                          <span style={{ fontSize: 20 }}>📊</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>Estatísticas</span>
                         </div>
                         <button onClick={() => setShowStats(false)} style={{
                           background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8,
                           color: '#fff', fontSize: 16, width: 32, height: 32, cursor: 'pointer',
                           display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}>Ô£ò</button>
+                        }}>✕</button>
                       </div>
 
                       {statEntries.map((s, idx) => {
@@ -4742,7 +4741,7 @@
                               {totalMatches > 0 && (
                                 <div style={{ textAlign: 'center' }}>
                                   <div style={{ fontSize: 18, fontWeight: 800, color: teamColor }}>{winRate}%</div>
-                                  <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>vit├│rias</div>
+                                  <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>vitórias</div>
                                 </div>
                               )}
                             </div>
@@ -4765,14 +4764,14 @@
                             </div>
 
                             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Tipos de vit├│ria</div>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Tipos de vitória</div>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                                 {[
-                                  { key: 'normal', label: 'Batida', emoji: 'Ô£à', color: '#22c55e' },
-                                  { key: 'cruzada', label: 'Cruzada', emoji: '­ƒÆÑ', color: '#f59e0b' },
-                                  { key: 'com carroca', label: 'Carro├ºa', emoji: '­ƒÄ»', color: '#3b82f6' },
-                                  { key: 'la e lo', label: 'L├í e L├│', emoji: '­ƒöÑ', color: '#ef4444' },
-                                  { key: 'blocked', label: 'Travada', emoji: '­ƒöÆ', color: '#8b5cf6' }
+                                  { key: 'normal', label: 'Batida', emoji: '✅', color: '#22c55e' },
+                                  { key: 'cruzada', label: 'Cruzada', emoji: '💥', color: '#f59e0b' },
+                                  { key: 'com carroca', label: 'Carroça', emoji: '🎯', color: '#3b82f6' },
+                                  { key: 'la e lo', label: 'Lá e Ló', emoji: '🔥', color: '#ef4444' },
+                                  { key: 'blocked', label: 'Travada', emoji: '🔒', color: '#8b5cf6' }
                                 ].map(wt => {
                                   const count = s.winTypes[wt.key] || 0;
                                   return (
@@ -4795,10 +4794,10 @@
                                 <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Buchuda</div>
                                 <div style={{ display: 'flex', gap: 8, fontSize: 10 }}>
                                   {s.buchudaGiven > 0 && (
-                                    <span style={{ color: '#f59e0b', fontWeight: 700 }}>­ƒÆÇ Deu: {s.buchudaGiven}</span>
+                                    <span style={{ color: '#f59e0b', fontWeight: 700 }}>💀 Deu: {s.buchudaGiven}</span>
                                   )}
                                   {s.buchudaReceived > 0 && (
-                                    <span style={{ color: '#ef4444', fontWeight: 700 }}>­ƒÆ® Levou: {s.buchudaReceived}</span>
+                                    <span style={{ color: '#ef4444', fontWeight: 700 }}>💩 Levou: {s.buchudaReceived}</span>
                                   )}
                                 </div>
                               </div>
@@ -4809,7 +4808,7 @@
 
                       {statEntries.every(s => s.matchesWon === 0 && s.matchesLost === 0 && s.roundsWon === 0 && s.roundsLost === 0) && (
                         <div style={{ textAlign: 'center', padding: 20, color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-                          Nenhuma estat├¡stica ainda. Jogue uma rodada!
+                          Nenhuma estatística ainda. Jogue uma rodada!
                         </div>
                       )}
                     </div>
@@ -4826,7 +4825,7 @@
 
     // Auto-load neural model if available
     loadNeuralModel('domino_model.bin').catch(() => {
-      console.log('Neural model not found ÔÇö using heuristic AI only');
+      console.log('Neural model not found — using heuristic AI only');
       USE_NN_LEAF_VALUE = false;
     });
 
