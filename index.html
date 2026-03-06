@@ -557,6 +557,67 @@
       return { tiles: result };
     }
 
+    // === Stable component definitions (outside App to prevent remount on every render) ===
+    const DominoDots = ({ value, size = 'normal', dotPxProp, containerPxProp }) => {
+      const dotPx = dotPxProp || (size === 'small' ? 4 : size === 'board' ? 5 : 7);
+      const containerPx = containerPxProp || (size === 'small' ? 18 : size === 'board' ? 22 : 32);
+      const patterns = {
+        0: [],
+        1: [[1,1]],
+        2: [[0,2],[2,0]],
+        3: [[0,2],[1,1],[2,0]],
+        4: [[0,0],[0,2],[2,0],[2,2]],
+        5: [[0,0],[0,2],[1,1],[2,0],[2,2]],
+        6: [[0,0],[0,2],[1,0],[1,2],[2,0],[2,2]]
+      };
+      const dots = patterns[value] || [];
+      const pad = size === 'small' ? '12%' : '10%';
+      return (
+        <div style={{ width: containerPx, height: containerPx, position: 'relative' }}>
+          {dots.map((pos, idx) => (
+            <div
+              key={idx}
+              className="domino-dot"
+              style={{
+                width: dotPx, height: dotPx,
+                position: 'absolute',
+                top: pos[0] === 0 ? pad : pos[0] === 1 ? '50%' : `calc(100% - ${pad})`,
+                left: pos[1] === 0 ? pad : pos[1] === 1 ? '50%' : `calc(100% - ${pad})`,
+                transform: 'translate(-50%, -50%)'
+              }}
+            />
+          ))}
+        </div>
+      );
+    };
+
+    const DominoTile = ({ tile, playable, onClick, hDims }) => {
+      const fired = React.useRef(false);
+      const handleTouch = (e) => {
+        if (!playable) return;
+        e.preventDefault();
+        if (fired.current) return;
+        fired.current = true;
+        onClick();
+        setTimeout(() => { fired.current = false; }, 300);
+      };
+      return (
+        <div
+          onClick={(e) => { if (!fired.current) onClick(); }}
+          onTouchEnd={handleTouch}
+          className={'domino-tile inline-flex flex-col ' + (playable ? 'playable' : 'unplayable')}
+          style={{ width: hDims.w, height: hDims.h }}
+        >
+          <div className="flex-1 flex items-center justify-center" style={{ borderBottom: '1.5px solid #c8b898' }}>
+            <DominoDots value={tile.left} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <DominoDots value={tile.right} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
+          </div>
+        </div>
+      );
+    };
+
     function App() {
       const [screen, setScreen] = useState('menu');
       const [roomCode, setRoomCode] = useState('');
@@ -3242,7 +3303,7 @@
 
       // Pass badge on avatar
       useEffect(() => {
-        if (gameState?.lastPass == null) { return; }
+        if (gameState?.lastPass == null) { setPassedSlot(null); return; }
         setPassedSlot(gameState.lastPass);
         const t = setTimeout(() => setPassedSlot(null), 2500);
         return () => clearTimeout(t);
@@ -3594,70 +3655,8 @@
       }, [screen]);
 
       // Domino dots pattern
-      const DominoDots = ({ value, size = 'normal', dotPxProp, containerPxProp }) => {
-        const dotPx = dotPxProp || (size === 'small' ? 4 : size === 'board' ? 5 : 7);
-        const containerPx = containerPxProp || (size === 'small' ? 18 : size === 'board' ? 22 : 32);
-
-        const patterns = {
-          0: [],
-          1: [[1,1]],
-          2: [[0,2],[2,0]],
-          3: [[0,2],[1,1],[2,0]],
-          4: [[0,0],[0,2],[2,0],[2,2]],
-          5: [[0,0],[0,2],[1,1],[2,0],[2,2]],
-          6: [[0,0],[0,2],[1,0],[1,2],[2,0],[2,2]]
-        };
-
-        const dots = patterns[value] || [];
-        const pad = size === 'small' ? '12%' : '10%';
-
-        return (
-          <div style={{ width: containerPx, height: containerPx, position: 'relative' }}>
-            {dots.map((pos, idx) => (
-              <div
-                key={idx}
-                className="domino-dot"
-                style={{
-                  width: dotPx, height: dotPx,
-                  position: 'absolute',
-                  top: pos[0] === 0 ? pad : pos[0] === 1 ? '50%' : `calc(100% - ${pad})`,
-                  left: pos[1] === 0 ? pad : pos[1] === 1 ? '50%' : `calc(100% - ${pad})`,
-                  transform: 'translate(-50%, -50%)'
-                }}
-              />
-            ))}
-          </div>
-        );
-      };
-
       /* Hand tiles same size as board tiles (vertical orientation: vw × hw) */
       const hDims = { w: bDims.vw, h: bDims.hw, dot: bDims.vw <= 22 ? 3 : bDims.vw <= 26 ? 4 : 5, cont: bDims.vw <= 22 ? 15 : bDims.vw <= 26 ? 18 : 22 };
-      const DominoTile = ({ tile, playable, onClick }) => {
-        const fired = React.useRef(false);
-        const handleTouch = (e) => {
-          if (!playable) return;
-          e.preventDefault();
-          if (fired.current) return;
-          fired.current = true;
-          onClick();
-          setTimeout(() => { fired.current = false; }, 300);
-        };
-        return (
-        <div
-          onClick={(e) => { if (!fired.current) onClick(); }}
-          onTouchEnd={handleTouch}
-          className={'domino-tile inline-flex flex-col ' + (playable ? 'playable' : 'unplayable')}
-          style={{ width: hDims.w, height: hDims.h }}
-        >
-          <div className="flex-1 flex items-center justify-center" style={{ borderBottom: '1.5px solid #c8b898' }}>
-            <DominoDots value={tile.left} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
-          </div>
-          <div className="flex-1 flex items-center justify-center">
-            <DominoDots value={tile.right} dotPxProp={hDims.dot} containerPxProp={hDims.cont} />
-          </div>
-        </div>
-      );
-      };
 
       const BoardTile = ({ tile, orientation, flipped, extraStyle, hw: hwOverride, vw: vwOverride }) => {
         const isVertical = orientation === 'vertical';
@@ -4126,8 +4125,7 @@
                   ) : (gameState.hands?.[topSlot] || []).length > 0 ? (
                     <div className="flex gap-0.5 ml-1 flex-wrap">
                       {(gameState.hands?.[topSlot] || []).map(tile => (
-                        <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false}
-                          extraStyle={{ transform: 'scale(1.1)', transformOrigin: 'center' }} />
+                        <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
                       ))}
                       {gameState.blockedReveal && (() => {
                         const p = gameState.blockedReveal.players?.find(x => x.slot === topSlot);
@@ -4162,8 +4160,7 @@
                     ) : (gameState.hands?.[leftSlot] || []).length > 0 ? (
                       <div className="flex flex-wrap gap-0.5 justify-center mt-1">
                         {(gameState.hands?.[leftSlot] || []).map(tile => (
-                          <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false}
-                            extraStyle={{ transform: 'scale(1.1)', transformOrigin: 'center' }} />
+                          <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
                         ))}
                         {gameState.blockedReveal && (() => {
                           const p = gameState.blockedReveal.players?.find(x => x.slot === leftSlot);
@@ -4421,8 +4418,7 @@
                     ) : (gameState.hands?.[rightSlot] || []).length > 0 ? (
                       <div className="flex flex-wrap gap-0.5 justify-center mt-1">
                         {(gameState.hands?.[rightSlot] || []).map(tile => (
-                          <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false}
-                            extraStyle={{ transform: 'scale(1.1)', transformOrigin: 'center' }} />
+                          <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
                         ))}
                         {gameState.blockedReveal && (() => {
                           const p = gameState.blockedReveal.players?.find(x => x.slot === rightSlot);
@@ -4549,9 +4545,10 @@
                         key={tile.id}
                         tile={tile}
                         playable={isMyTurn && canPlayTile(tile)}
+                        hDims={hDims}
                         onClick={() => {
                           if (!isMyTurn || !canPlayTile(tile)) return;
-                          playTile(tile, canPlayOnBothEnds(tile) ? 'left' : null);
+                          playTile(tile);
                         }}
                       />
                     ))}
@@ -4607,23 +4604,22 @@
                     )}
                   </div>
 
-                  {/* Team summaries */}
-                  <div className="flex gap-2 mb-2">
-                    {[0, 1].map(team => {
-                      const teamPips = team === 0 ? gameState.blockedReveal.team0Pips : gameState.blockedReveal.team1Pips;
-                      const isWinner = !gameState.blockedReveal.isDobrada && gameState.blockedReveal.winningTeam === team;
+                  {/* Individual player summaries — jogo trancado is won by the player with fewest pips */}
+                  <div className="grid grid-cols-2 gap-1 mb-2">
+                    {gameState.blockedReveal.players?.slice().sort((a, b) => a.pips - b.pips).map(p => {
+                      const isWinner = !gameState.blockedReveal.isDobrada && gameState.blockedReveal.winnerSlot === p.slot;
                       const isTie = gameState.blockedReveal.isDobrada;
-                      const teamColor = team === 0 ? '#3b82f6' : '#ef4444';
+                      const teamColor = p.slot % 2 === 0 ? '#3b82f6' : '#ef4444';
                       return (
-                        <div key={team} className="flex-1 rounded-lg" style={{
+                        <div key={p.slot} className="rounded-lg" style={{
                           background: isWinner ? 'rgba(34,197,94,0.15)' : isTie ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.04)',
                           border: '1px solid ' + (isWinner ? 'rgba(34,197,94,0.35)' : isTie ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.08)'),
                           padding: '4px 6px'
                         }}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-[9px] font-bold" style={{ color: teamColor }}>Time {team + 1}</span>
+                            <span className="text-[9px] font-bold truncate mr-1" style={{ color: teamColor }}>{p.name}</span>
                             <span className={'text-[11px] font-extrabold ' + (isWinner ? 'text-green-400' : isTie ? 'text-yellow-400' : 'text-white/50')}>
-                              {teamPips} pts
+                              {p.pips} pts
                             </span>
                           </div>
                           {isWinner && <div className="text-[8px] text-green-400/80 font-bold text-center">VENCEU</div>}

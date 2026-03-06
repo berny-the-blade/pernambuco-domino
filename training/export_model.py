@@ -25,7 +25,7 @@ def export_onnx(checkpoint_path, output_path):
     """Export checkpoint to ONNX format."""
     # Load checkpoint
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
-    model = DominoNet(input_dim=185, hidden_dim=256, num_actions=57, num_blocks=4)
+    model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
     model.load_state_dict(ckpt['model_state_dict'])
     model.eval()
 
@@ -33,7 +33,7 @@ def export_onnx(checkpoint_path, output_path):
     print(f"  Buffer size: {ckpt.get('buffer_size', '?')}")
 
     # Dummy inputs for tracing
-    dummy_state = torch.randn(1, 185)
+    dummy_state = torch.randn(1, 213)
     dummy_mask = torch.ones(1, 57)
 
     # Export
@@ -62,7 +62,7 @@ def export_raw_weights(checkpoint_path, output_path):
     matrices that can be loaded with a tiny custom inference engine in JS.
     """
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
-    model = DominoNet(input_dim=185, hidden_dim=256, num_actions=57, num_blocks=4)
+    model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
     model.load_state_dict(ckpt['model_state_dict'])
     model.eval()
 
@@ -81,7 +81,7 @@ def export_raw_weights(checkpoint_path, output_path):
         json.dump({
             'generation': ckpt.get('generation', 0),
             'architecture': {
-                'input_dim': 185,
+                'input_dim': 213,
                 'hidden_dim': 256,
                 'num_actions': 57,
                 'num_blocks': 4,
@@ -100,7 +100,7 @@ def export_binary_weights(checkpoint_path, output_path):
     Much smaller than JSON (~1/3 size) and faster to parse.
     """
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
-    model = DominoNet(input_dim=185, hidden_dim=256, num_actions=57, num_blocks=4)
+    model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
     model.load_state_dict(ckpt['model_state_dict'])
     model.eval()
 
@@ -124,7 +124,7 @@ def export_binary_weights(checkpoint_path, output_path):
     header = json.dumps({
         'generation': ckpt.get('generation', 0),
         'architecture': {
-            'input_dim': 185,
+            'input_dim': 213,
             'hidden_dim': 256,
             'num_actions': 57,
             'num_blocks': 4,

@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import argparse
+import subprocess
 from collections import deque
 
 import numpy as np
@@ -98,7 +99,7 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                                           multiplier=match.multiplier)
 
                 if use_mcts and valid_mask.sum() > 1:
-                    temp = 1.0 if step_count < 8 else 0.1
+                    temp = 1.0 if step_count < 14 else 0.1
                     target_pi = mcts.get_action_probs(env, encoder, temperature=temp)
                 else:
                     policy_probs, _ = model.predict(state_np, valid_mask, device)
@@ -107,7 +108,8 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                     target_pi = policy_probs.copy()
 
                     if len(valid_indices) > 1:
-                        noise = np.random.dirichlet([0.3] * len(valid_indices))
+                        alpha = min(1.0, 10.0 / max(len(valid_indices), 1))
+                        noise = np.random.dirichlet([alpha] * len(valid_indices))
                         target_pi[valid_indices] = (
                             0.75 * target_pi[valid_indices] + 0.25 * noise
                         )
@@ -279,8 +281,8 @@ class Orchestrator:
         (10, 0.505),  # after 10 rejections: accept 50.5%
     ]
 
-    def __init__(self, num_workers=4, buffer_size=200000, use_mcts=False,
-                 mcts_sims=50, value_target='me',
+    def __init__(self, num_workers=4, buffer_size=200000, use_mcts=True,
+                 mcts_sims=200, value_target='me',
                  high_sim_fraction=0.1, high_sim_multiplier=4):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
@@ -427,12 +429,14 @@ class Orchestrator:
                         'consecutive_rejections': 0,
                     }, ckpt_path)
                     print(f"Saved champion checkpoint: {ckpt_path}")
+                    self._notify_telegram(
+                        f"🏆 Gen {gen} promoted! Champion saved → {ckpt_path}"
+                    )
                 else:
-                    # Revert to champion weights
+                    # Revert to champion weights — do NOT recreate Trainer (preserves Adam momentum)
                     self.model.load_state_dict(
                         {k: v.to(self.device) for k, v in self.champion_weights.items()}
                     )
-                    self.trainer = Trainer(self.model, lr=1e-3)
                     self.rejections += 1
                     self.consecutive_rejections += 1
                     print(f"Reverted to champion. "
@@ -442,6 +446,13 @@ class Orchestrator:
             else:
                 print(f"Buffer too small ({len(self.replay_buffer)}/{min_buffer}). "
                       f"Gathering more data...")
+
+            # === LR DECAY SCHEDULE (relative to this run) ===
+            if gen in (50, 100):
+                for g in self.trainer.optimizer.param_groups:
+                    g['lr'] *= 0.1
+                print(f"LR decay at gen {gen}: "
+                      f"new LR = {self.trainer.optimizer.param_groups[0]['lr']:.2e}")
 
         print(f"\nTraining complete. {total_generations} generations. "
               f"Rejections: {self.rejections}")
@@ -586,9 +597,23 @@ class Orchestrator:
                   f"in {elapsed:.1f}s")
             return False
 
+    def _notify_telegram(self, message):
+        """Send a Telegram notification via OpenClaw CLI (fire and forget)."""
+        try:
+            subprocess.Popen(
+                ['openclaw', 'message', 'send',
+                 '--channel', 'telegram',
+                 '--target', '1570780899',
+                 '--message', message],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            print(f"  [Telegram notify failed: {e}]")
+
     def load_checkpoint(self, path):
         """Resume training from a checkpoint."""
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(ckpt['model_state_dict'])
         self.champion_weights = {
             k: v.cpu().clone() for k, v in self.model.state_dict().items()
@@ -610,10 +635,12 @@ def main():
                         help='Games each worker plays per generation')
     parser.add_argument('--buffer-size', type=int, default=200000,
                         help='Replay buffer capacity')
-    parser.add_argument('--mcts', action='store_true',
-                        help='Use IS-MCTS (slower but stronger)')
-    parser.add_argument('--mcts-sims', type=int, default=50,
-                        help='MCTS simulations per move (base budget)')
+    parser.add_argument('--mcts', action='store_true', default=True,
+                        help='Use IS-MCTS (slower but stronger, default ON)')
+    parser.add_argument('--no-mcts', dest='mcts', action='store_false',
+                        help='Disable IS-MCTS (fast, weaker)')
+    parser.add_argument('--mcts-sims', type=int, default=200,
+                        help='MCTS simulations per move (base budget, default 200)')
     parser.add_argument('--high-sim-fraction', type=float, default=0.1,
                         help='Fraction of games using high sim count (default 0.1)')
     parser.add_argument('--high-sim-multiplier', type=int, default=4,

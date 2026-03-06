@@ -63,9 +63,10 @@ class DominoMCTS:
         for act in valid_actions:
             root.children[act] = MCTSNode(prior=root_probs[act])
 
-        # Add Dirichlet noise to root for exploration
+        # Add Dirichlet noise to root for exploration (dynamic alpha)
         if len(valid_actions) > 1:
-            noise = np.random.dirichlet([0.3] * len(valid_actions))
+            alpha = min(1.0, 10.0 / max(len(valid_actions), 1))
+            noise = np.random.dirichlet([alpha] * len(valid_actions))
             for i, act in enumerate(valid_actions):
                 root.children[act].prior = (
                     0.75 * root.children[act].prior + 0.25 * noise[i]
