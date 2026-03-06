@@ -140,9 +140,9 @@
     }
 
     /* === Animations === */
-    @keyframes pulse-glow {
+    @keyframes last-played-glow {
       0%, 100% { box-shadow: 0 0 8px rgba(250,204,21,0.3); }
-      50% { box-shadow: 0 0 20px rgba(250,204,21,0.6); }
+      50% { box-shadow: 0 0 20px rgba(250,204,21,0.8); }
     }
     @keyframes slide-down {
       from { transform: translateY(-20px); opacity: 0; }
@@ -709,7 +709,7 @@
       const setTileLayout = (v) => { setTileLayoutRaw(v); localStorage.setItem('domino_tile_layout', v); };
       const [showEndBadges, setShowEndBadgesRaw] = useState(localStorage.getItem('domino_end_badges') === 'true');
       const setShowEndBadges = (v) => { setShowEndBadgesRaw(v); localStorage.setItem('domino_end_badges', v ? 'true' : 'false'); };
-      const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 48, vw: 24 } };
+      const BOARD_DIMS = { S: { hw: 36, vw: 18 }, M: { hw: 42, vw: 21 }, L: { hw: 54, vw: 27 } };
       const bDims = BOARD_DIMS[boardSize] || BOARD_DIMS.M;
 
       const roomRef = useRef(null);
@@ -2294,7 +2294,7 @@
       };
 
       // Endgame solver entry point
-      const endgameSolve = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+      const endgameSolve = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         if (bLen === 0) return null;
         const deadline = Date.now() + ENDGAME_BUDGET_MS;
         const myTeam = player % 2;
@@ -2336,6 +2336,11 @@
         const dm = dobMultiplier || 1;
 
         for (let d = 0; d < deals.length && Date.now() < deadline; d++) {
+          // Yield to browser every 10 deals to prevent UI freeze
+          if (d > 0 && d % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+
           const deal = deals[d];
           const w = 1 / deals.length;
           const tt = new Map();
@@ -2679,7 +2684,7 @@
         return 1;
       };
 
-      const ismctsEval = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+      const ismctsEval = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         const MAX_ITERATIONS = 600;
         const TIME_LIMIT = 300;
         const MAX_NODES = 5000;
@@ -2731,6 +2736,11 @@
         for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
           if (Date.now() - startTime > TIME_LIMIT) break;
           if (nodeCount >= MAX_NODES) break;
+
+          // Yield to browser every 50 iterations to prevent UI freeze
+          if (iter > 0 && iter % 50 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
 
           // 1. DETERMINIZE: sample a consistent deal
           let deal;
@@ -2895,7 +2905,7 @@
       };
 
       // === Expert AI router: endgame solver → ISMCTS → MC → smartAI ===
-      const expertAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+      const expertAI = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         if (bLen === 0) {
           return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
         }
@@ -2904,13 +2914,13 @@
 
         // Endgame: when few tiles remain, exact solver is tractable
         if (totalRemaining <= 16) {
-          const egResult = endgameSolve(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+          const egResult = await endgameSolve(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
           if (egResult) return egResult;
         }
 
         // Mid-game: ISMCTS tree search for deeper strategic play
         if (bLen >= 6) {
-          const ismctsResult = ismctsEval(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+          const ismctsResult = await ismctsEval(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
           if (ismctsResult) return ismctsResult;
         }
 
@@ -2938,11 +2948,11 @@
       };
 
       // === Bot AI router — picks AI based on difficulty setting ===
-      const botAI = (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+      const botAI = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
         const diff = gameState?.config?.aiDifficulty || aiDifficulty;
         if (diff === 'easy') return randomAI(hand, lE, rE, bLen);
         if (diff === 'medium') return smartAI(hand, lE, rE, bLen, player, knowledge, matchScores);
-        return expertAI(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
+        return await expertAI(hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier);
       };
 
       const executeTilePlay = async (tile, slot, side = null) => {
@@ -3509,7 +3519,7 @@
 
           const matchScores = gameState.teamScores || [0, 0];
           const dobMultiplier = gameState.scoreMultiplier || 1;
-          const result = botAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge, matchScores, dobMultiplier);
+          const result = await botAI(botHand, gameState.leftEnd, gameState.rightEnd, bLen, currentSlot, knowledge, matchScores, dobMultiplier);
 
           if (result) {
             await executeTilePlay(result.tile, currentSlot, result.side);
@@ -4240,12 +4250,15 @@
                                     position:'absolute', left: p.x, top: p.y,
                                     width: tw, height: th, borderRadius: 4,
                                     zIndex: isLastPlayed ? 5 : isEndTile ? 4 : 3,
-                                    boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none'
+                                    boxShadow: 'none'
                                   }}
                                 >
                                   <BoardTile tile={t} orientation={p.orient} flipped={p.flip}
                                     hw={spiralHW} vw={spiralVW}
-                                    extraStyle={isEndTile ? {
+                                    extraStyle={isLastPlayed ? {
+                                      animation: 'last-played-glow 1.0s ease-in-out infinite',
+                                      borderRadius: 4
+                                    } : isEndTile ? {
                                       animation: 'pulse-glow 1.8s ease-in-out infinite',
                                       borderRadius: 4
                                     } : null}
@@ -4314,8 +4327,9 @@
                                   return (
                                     <div key={t.id + '-' + tileIndex}
                                       ref={(el) => { if (el) tileElRef.current.set(t.id + '-' + tileIndex, el); }}
-                                      style={{ display:'inline-block', boxShadow: isLastPlayed ? '0 0 8px 3px #FFD700' : 'none', borderRadius: 4, position:'relative', zIndex: isLastPlayed ? 3 : 'auto' }}>
-                                      <BoardTile tile={t} orientation={orient} flipped={flip} />
+                                      style={{ display:'inline-block', boxShadow: 'none', borderRadius: 4, position:'relative', zIndex: isLastPlayed ? 3 : 'auto' }}>
+                                      <BoardTile tile={t} orientation={orient} flipped={flip}
+                                        extraStyle={isLastPlayed ? { animation: 'last-played-glow 1.0s ease-in-out infinite', borderRadius: 4 } : null} />
                                     </div>
                                   );
                                 })}
@@ -4344,7 +4358,6 @@
                     {/* Dormidas badge — tiny corner indicator */}
                     {gameState.dormidas && gameState.currentPlayer !== -1 && (
                       <div style={{ position: 'absolute', bottom: 4, left: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.4 }}>
-                        <span style={{ fontSize: 9, color: '#fff', fontWeight: 700 }}>Dorme</span>
                         <div style={{ display: 'flex', gap: 2 }}>
                           {[0,1,2,3].map(i => (
                             <div key={i} style={{ width: 6, height: 10, borderRadius: 1, background: '#5a4a3a', border: '1px solid rgba(255,255,255,0.15)' }} />
@@ -4582,7 +4595,7 @@
                   <div className="text-[9px] text-white/40 font-bold text-center mb-0.5">Dormidas</div>
                   <div className="flex gap-1 justify-center flex-wrap">
                     {gameState.dormidas.map(tile => (
-                      <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} />
+                      <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} hw={48} vw={24} />
                     ))}
                   </div>
                 </div>

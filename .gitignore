@@ -18,3 +18,9 @@ training/*.log
 # Misc
 *.bak
 app_content.txt
+
+# Temp node modules
+node_modules_temp/
+
+# Old training artifacts
+training/domino_model_gen96.bin

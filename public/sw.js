@@ -1,4 +1,4 @@
-const CACHE_NAME = 'domino-pernambuco-v6';
+const CACHE_NAME = 'domino-pernambuco-v7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -36,27 +36,42 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch — network first, fall back to cache (game needs live Firebase)
+// Fetch — cache-first for static assets, network-only for Firebase Realtime DB
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Always go to network for Firebase realtime database
-  if (url.hostname.includes('firebaseio.com') || url.hostname.includes('googleapis.com')) {
+  // Always go to network for Firebase Realtime Database (live game state)
+  if (url.hostname.includes('firebaseio.com') || url.hostname.includes('firebasedatabase.app')) {
     return;
   }
 
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Cache successful responses for offline fallback
-        if (response.ok) {
+    caches.match(event.request).then((cached) => {
+      if (cached) {
+        // Cache-first: serve immediately from cache
+        // For non-hashed assets, also revalidate in the background (stale-while-revalidate)
+        if (!url.pathname.includes('/assets/')) {
+          fetch(event.request)
+            .then((response) => {
+              if (response && response.ok) {
+                caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response));
+              }
+            })
+            .catch(() => {}); // silent — we already have the cached version
+        }
+        return cached;
+      }
+
+      // Not in cache — fetch from network and cache for next time
+      return fetch(event.request).then((response) => {
+        if (response && response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
+      }).catch(() => {
+        return caches.match('./index.html'); // offline fallback
+      });
+    })
   );
 });
