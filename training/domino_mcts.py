@@ -3,12 +3,15 @@ Information-Set Monte Carlo Tree Search (IS-MCTS) with PUCT selection.
 Designed for 2v2 Pernambuco Domino with imperfect information.
 
 Key design: All values stored from Team 0's perspective.
-Before each simulation, hidden hands are determinized from Bayesian beliefs.
+Before each simulation, hidden hands are determinized via constraint-aware
+particle sampling (BeliefSampler) with pass-derived forbidden tile sets.
 """
 
 import math
 import numpy as np
 import torch
+from belief_sampler import BeliefSampler
+from search_diagnostics import summarize_search
 
 
 class MCTSNode:
@@ -36,6 +39,8 @@ class DominoMCTS:
         self.num_simulations = num_simulations
         self.c_puct = c_puct
         self.device = torch.device("cpu")  # CPU for parallel workers
+        self.sampler = BeliefSampler()
+        self.last_search_stats = None  # filled after each get_action_probs
 
     def get_action_probs(self, env, encoder, temperature=1.0):
         """
@@ -74,9 +79,9 @@ class DominoMCTS:
 
         # Run simulations
         for _ in range(self.num_simulations):
-            # Determinize: hallucinate hidden hands from beliefs
-            sim_env = env.clone()
-            sim_env.determinize_hidden_hands(encoder.belief_state)
+            # Determinize: sample hidden hands via constraint-aware belief sampler
+            particle = self.sampler.sample_particle(env)
+            sim_env = self.sampler.determinize_env(env, particle)
             sim_enc = encoder.clone()
 
             node = root
@@ -155,6 +160,10 @@ class DominoMCTS:
         action_visits = np.zeros(57, dtype=np.float32)
         for act, child in root.children.items():
             action_visits[act] = child.visits
+
+        # Record search quality diagnostics
+        self.last_search_stats = summarize_search(action_visits)
+        self.last_search_stats['belief_fallback_rate'] = self.sampler.stats()['fallback_rate']
 
         if temperature < 0.01:
             # Greedy: most-visited action, tie-break by Q-value
