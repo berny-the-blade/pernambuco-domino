@@ -2797,10 +2797,10 @@
               node = node.expand(expandMove);
               nodeCount++;
               if (_prevNode === root && curPlayer === player) {
-                // Set PUCT prior or heuristic bias
+                // Always set actionIdx for rootVisitPolicy (unconditional)
+                const tIdx = TILE_INDEX[expandMove.tile.id];
+                node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
                 if (rootPrior) {
-                  const tIdx = TILE_INDEX[expandMove.tile.id];
-                  node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
                   node.priorP = rootPrior[node.actionIdx];
                 }
                 if (!cfg.usePUCT) {
@@ -2849,9 +2849,10 @@
               node = node.expand(expandMove);
               nodeCount++;
               if (_leafParent === root && curPlayer === player) {
+                // Always set actionIdx for rootVisitPolicy (unconditional)
+                const tIdx = TILE_INDEX[expandMove.tile.id];
+                node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
                 if (rootPrior) {
-                  const tIdx = TILE_INDEX[expandMove.tile.id];
-                  node.actionIdx = expandMove.side === 'right' ? 28 + tIdx : tIdx;
                   node.priorP = rootPrior[node.actionIdx];
                 }
                 if (!cfg.usePUCT) {
@@ -2885,6 +2886,35 @@
           }
           _ismctsBackprop(node, reward);
         }
+
+        // === rootVisitPolicy: 57-dim visit-count policy target for training ===
+        // Call before dedup. Uses canonical actionIdx (0-27=left, 28-55=right, 56=pass).
+        // legalMask: Float32Array(57) from _nnActionMask — filters impossible actions.
+        // Fallback: uniform over legal if no visited root children (e.g. forced/shallow tree).
+        const rootVisitPolicy = (root, legalMask, tau = 1.0) => {
+          const pi = new Float32Array(NN_NUM_ACTIONS);
+          let totalVisits = 0;
+          for (const child of root.children) {
+            const a = child.actionIdx;
+            if (child.visits === 0 || a < 0 || a >= NN_NUM_ACTIONS) continue;
+            if (legalMask && !legalMask[a]) continue;
+            const v = tau === 1.0 ? child.visits : Math.pow(child.visits, 1.0 / tau);
+            pi[a] += v;
+            totalVisits += v;
+          }
+          if (totalVisits > 0) {
+            for (let a = 0; a < NN_NUM_ACTIONS; a++) pi[a] /= totalVisits;
+          } else if (legalMask) {
+            // Fallback: uniform over legal actions
+            let nLegal = 0;
+            for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) nLegal++;
+            if (nLegal > 0) {
+              const u = 1.0 / nLegal;
+              for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) pi[a] = u;
+            }
+          }
+          return pi;
+        };
 
         // Extract best move from root children
         if (root.children.length === 0) return null;
