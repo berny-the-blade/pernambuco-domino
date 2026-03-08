@@ -8,24 +8,23 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  background: #1a1a2e;
+  background: #000;
   font-family: 'Arial Black', Arial, sans-serif;
   overflow: hidden;
   touch-action: none;
-  width: 100vw;
-  height: 100vh;
+  margin: 0;
+  padding: 0;
 }
 
 #game-wrapper {
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 #hud {
-  width: 100%;
-  flex-shrink: 0;
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -99,16 +98,14 @@ body {
 }
 
 #arena-container {
-  position: relative;
-  flex: 1;
-  width: 100%;
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border: none;
-  min-height: 0;
 }
 
 #arena {
   position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   background-color: #4caf50;
@@ -421,7 +418,7 @@ body {
       <div class="hud-label" style="font-size:10px;color:#00bcd4;">⚡ SUPER</div>
     </div>
     <div id="hud-right">
-      <div id="wave-info">WAVE 1/3</div>
+      <div id="wave-info">WAVE 1/5</div>
       <div id="enemies-left">👾 0 left</div>
     </div>
   </div>
@@ -459,15 +456,8 @@ let ARENA_W = window.innerWidth;
 let ARENA_H = window.innerHeight - HUD_H;
 
 function resizeArena() {
-  const container = document.getElementById('arena-container');
-  ARENA_W = container ? container.clientWidth  : window.innerWidth;
-  ARENA_H = container ? container.clientHeight : window.innerHeight - HUD_H;
-  if (ARENA_H < 200) ARENA_H = window.innerHeight - HUD_H; // fallback
-  const arenaEl = document.getElementById('arena');
-  if (arenaEl) {
-    arenaEl.style.width  = ARENA_W + 'px';
-    arenaEl.style.height = ARENA_H + 'px';
-  }
+  ARENA_W = window.innerWidth;
+  ARENA_H = window.innerHeight;
 }
 window.addEventListener('resize', resizeArena);
 const PLAYER_HP = 300, PLAYER_SPEED = 180, PLAYER_RADIUS = 24;
@@ -674,7 +664,7 @@ function updateHUD() {
     'linear-gradient(90deg,#f44336,#e91e63)';
   hpText.textContent = Math.max(0, Math.round(player.hp)) + '/' + PLAYER_HP;
   superBarEl.style.width = (superBar / SUPER_MAX * 100) + '%';
-  waveInfo.textContent = 'WAVE ' + waveNum + '/3';
+  waveInfo.textContent = 'WAVE ' + waveNum + '/5';
   enemiesLeft.textContent = '👾 ' + enemies.filter(e=>e.alive).length + ' left';
 }
 
@@ -869,6 +859,28 @@ function getWaveConfigs() {
       { type:'dynamike', x:50,   y:50 },
       { type:'dynamike', x:W-50, y:50 },
       { type:'elprimo',  x:W-50, y:H/2 },
+      // spike spawned later
+    ],
+    // Wave 4
+    [
+      { type:'bull',     x:50,   y:50 },
+      { type:'bull',     x:W-50, y:H-50 },
+      { type:'colt',     x:W/2,  y:50 },
+      { type:'colt',     x:W/2,  y:H-50 },
+      { type:'elprimo',  x:50,   y:H-50 },
+      { type:'elprimo',  x:W-50, y:50 },
+      { type:'dynamike', x:W/4,  y:H/2 },
+    ],
+    // Wave 5 — FINAL WAVE
+    [
+      { type:'bull',     x:50,   y:H/3 },
+      { type:'bull',     x:W-50, y:H*2/3 },
+      { type:'elprimo',  x:50,   y:H*2/3 },
+      { type:'elprimo',  x:W-50, y:H/3 },
+      { type:'dynamike', x:W/3,  y:50 },
+      { type:'dynamike', x:W*2/3,y:H-50 },
+      { type:'colt',     x:W/4,  y:50 },
+      { type:'colt',     x:W*3/4,y:H-50 },
       // spike spawned later
     ],
   ];
@@ -1355,7 +1367,7 @@ function checkWaveComplete() {
   const alive = enemies.filter(e=>e.alive);
 
   // Wave 3: Spike spawns after other enemies are dealt with (or after delay)
-  if (waveNum === 3 && !spikeBossSpawned) {
+  if ((waveNum === 3 || waveNum === 5) && !spikeBossSpawned) {
     const nonSpike = alive.filter(e=>e.type !== 'spike');
     if (nonSpike.length === 0) {
       spikeBossSpawned = true;
@@ -1371,7 +1383,7 @@ function checkWaveComplete() {
   }
 
   if (alive.length === 0) {
-    if (waveNum >= 3) {
+    if (waveNum >= 5) {
       winGame();
     } else {
       wavePaused = true;
