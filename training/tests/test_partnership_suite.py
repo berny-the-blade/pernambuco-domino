@@ -1,20 +1,19 @@
 """
 test_partnership_suite.py
 
-Evaluate engine move choices against the partnership tactical suite.
+Evaluate engine move choices against the partnership tactical regression suite.
 
 Usage:
-    python tests/test_partnership_suite.py
-    python tests/test_partnership_suite.py --suite tests/partnership_suite.json
-    python tests/test_partnership_suite.py --checkpoint checkpoints/domino_gen_0050.pt --sims 200
+    python tests/test_partnership_suite.py                              # greedy NN, threshold 0.70
+    python tests/test_partnership_suite.py 0.85                         # stricter threshold
+    python tests/test_partnership_suite.py --checkpoint PATH --sims 200 # MCTS
+    python tests/test_partnership_suite.py --stub                       # smoke test (stub returns preferred)
 
 Scoring:
-    preferred  = 1.0   (engine chose a preferred move)
-    acceptable = 0.5   (engine chose an acceptable move)
-    discouraged = 0.0  (engine chose a discouraged move)
-    other      = 0.25  (engine chose something not explicitly categorized)
-
-Pass threshold: mean score >= 0.70 across all cases.
+    preferred   = 1.0
+    acceptable  = 0.5
+    discouraged = 0.0
+    fallback    = 0.25  (engine chose something not explicitly categorized)
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -32,261 +31,248 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from domino_env import DominoEnv, TILES as ALL_TILES, NUM_TILES
-# TILES is list of (left, right) tuples; build lookup dicts
-TILE_INDEX = {lr: i for i, lr in enumerate(ALL_TILES)}  # (l,r) -> index
-TILE_BY_LR = {}
-for i, (l, r) in enumerate(ALL_TILES):
-    TILE_BY_LR[(l, r)] = i
-    TILE_BY_LR[(r, l)] = i
 from domino_encoder import DominoEncoder
 from domino_net import DominoNet
 from domino_mcts import DominoMCTS
 import torch
 
-
-# ============================================================
-# Scoring constants
-# ============================================================
-SCORE_PREFERRED   = 1.0
-SCORE_ACCEPTABLE  = 0.5
-SCORE_DISCOURAGED = 0.0
-SCORE_OTHER       = 0.25
-PASS_THRESHOLD    = 0.70
+SUITE_PATH = Path("tests/partnership_suite.json")
+TILE_BY_LR: dict[tuple, int] = {}
+for _i, (_l, _r) in enumerate(ALL_TILES):
+    TILE_BY_LR[(_l, _r)] = _i
+    TILE_BY_LR[(_r, _l)] = _i
 
 
 # ============================================================
-# Data helpers
+# Canonical scoring helpers
 # ============================================================
 
-@dataclass
-class CaseResult:
-    case_id: str
-    theme: str
-    engine_tile: tuple[int, int]
-    engine_side: str
-    outcome: str      # preferred | acceptable | discouraged | other
-    score: float
-    preferred: list
-    discouraged: list
-
-
-def canonical_move(tile: tuple | None, side: str | None) -> tuple:
-    """Canonical (sorted_tile, side) key — handles [1,4] == [4,1] symmetry."""
-    if side == "pass" or tile is None:
-        return ("pass",)
-    if side is None:
+def canonical_move(move: dict | None) -> tuple:
+    """Normalize move spec for comparison. Handles tile symmetry ([1,4] == [4,1])."""
+    if move is None:
         return ("invalid",)
-    a, b = sorted(tile)
-    return (a, b, side)
-
-
-def canonical_spec(move_spec: dict) -> tuple:
-    if move_spec is None:
-        return ("invalid",)
-    if move_spec.get("side") == "pass":
+    side = move.get("side")
+    if side == "pass":
         return ("pass",)
-    tile = move_spec.get("tile")
-    side = move_spec.get("side")
+    tile = move.get("tile")
     if not isinstance(tile, (list, tuple)) or len(tile) != 2 or side is None:
         return ("invalid",)
     a, b = sorted(tile)
     return (a, b, side)
 
 
-def score_move(engine_tile, engine_side, case: dict) -> tuple[str, float]:
-    pred = canonical_move(engine_tile, engine_side)
-    expected = case["expected"]
-    scoring  = case.get("scoring", {})
+def move_set(moves: list[dict]) -> set:
+    return {canonical_move(m) for m in moves}
 
-    preferred   = {canonical_spec(m) for m in expected.get("preferred_moves", [])}
-    acceptable  = {canonical_spec(m) for m in expected.get("acceptable_moves", [])}
-    discouraged = {canonical_spec(m) for m in expected.get("discouraged_moves", [])}
 
-    if pred in preferred:
-        return "preferred",   scoring.get("preferred_score",   SCORE_PREFERRED)
-    if pred in acceptable:
-        return "acceptable",  scoring.get("acceptable_score",  SCORE_ACCEPTABLE)
-    if pred in discouraged:
-        return "discouraged", scoring.get("discouraged_score", SCORE_DISCOURAGED)
-    return "other", scoring.get("fallback_score", SCORE_OTHER)
+def score_case(pred_move: dict, case: dict) -> tuple[float, str]:
+    pred = canonical_move(pred_move)
+    exp  = case["expected"]
+    sc   = case.get("scoring", {})
+
+    preferred   = move_set(exp.get("preferred_moves",   []))
+    acceptable  = move_set(exp.get("acceptable_moves",  []))
+    discouraged = move_set(exp.get("discouraged_moves", []))
+
+    if pred in preferred:   return sc.get("preferred_score",   1.00), "preferred"
+    if pred in acceptable:  return sc.get("acceptable_score",  0.50), "acceptable"
+    if pred in discouraged: return sc.get("discouraged_score", 0.00), "discouraged"
+    return sc.get("fallback_score", 0.25), "fallback"
+
+
+def pretty_move(move: dict | None) -> str:
+    if move is None: return "None"
+    if move.get("side") == "pass": return "PASS"
+    return f"{move.get('tile')} @ {move.get('side')}"
 
 
 # ============================================================
-# Engine interface
+# Suite loader
+# ============================================================
+
+def load_suite(path: Path = SUITE_PATH) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+# ============================================================
+# Engine adapters
 # ============================================================
 
 def build_env_from_case(case: dict) -> tuple[DominoEnv, dict]:
-    """
-    Reconstruct a DominoEnv state from a suite case by direct field injection.
-    Returns (env, obs) with the board at the described position.
-    """
+    """Inject board state from suite case into DominoEnv."""
     board = case["board"]
-    hands_raw = case["hands"]
     player = case["player_to_move"]
 
-    # Convert [[l,r],...] specs to tile indices
     env = DominoEnv()
-    env.reset(seed=0)  # Initialize all fields
-
+    env.reset(seed=0)
     env.hands = [[] for _ in range(4)]
-    for p_key, tiles in hands_raw.items():
-        p = int(p_key.split("_")[1])
+    for pk, tiles in case["hands"].items():
+        p = int(pk.split("_")[1])
         env.hands[p] = [TILE_BY_LR[tuple(lr)] for lr in tiles if lr]
 
-    env.left_end  = board["left_end"]
-    env.right_end = board["right_end"]
-    env.board     = list(range(board["board_length"]))  # placeholder length
+    env.left_end       = board["left_end"]
+    env.right_end      = board["right_end"]
+    env.board          = list(range(board["board_length"]))
     env.current_player = player
-    env.game_over = False
-    env.pass_count = 0
+    env.game_over      = False
+    env.pass_count     = 0
+    env.played         = {TILE_BY_LR[tuple(e["tile"])] for e in board.get("history", [])}
+    env.cant_have      = [set() for _ in range(4)]
+    env.plays_by       = [[] for _ in range(4)]
 
-    # Reconstruct played set from all non-hand tiles listed in history
-    env.played = set()
-    for entry in board.get("history", []):
-        lr = tuple(entry["tile"])
-        idx = TILE_BY_LR.get(lr)
-        if idx is not None:
-            env.played.add(idx)
-
-    # cant_have from case spec
-    env.cant_have = [set() for _ in range(4)]
-    for k, pips in case.get("cant_have", {}).items():
-        env.cant_have[int(k)] = set(pips)
-
-    env.plays_by = [[] for _ in range(4)]
-
-    obs = env.get_obs()
-    return env, obs
+    return env, env.get_obs()
 
 
-def get_engine_move(case: dict, model: Any, sims: int, device: str) -> tuple[tuple, str] | None:
-    """
-    Run engine on the case position and return (tile, side).
-    Falls back to greedy if sims=0.
-    """
-    try:
-        env, obs = build_env_from_case(case)
-    except Exception as e:
-        print(f"    [SKIP] Could not build env: {e}")
-        return None
+def make_engine_fn(model, sims: int, device: str):
+    """Returns engine_fn(case) -> {tile, side} using real NN/MCTS."""
+    def engine_fn(case: dict) -> dict:
+        try:
+            env, obs = build_env_from_case(case)
+        except Exception as e:
+            return {"side": "pass", "_error": str(e)}
 
-    mask = env.get_legal_moves_mask()
-    if mask.sum() == 0:
-        return None
+        mask = env.get_legal_moves_mask()
+        if mask.sum() == 0:
+            return {"side": "pass"}
 
-    enc = DominoEncoder()
-    enc.reset()
-    state_np = enc.encode(obs)
+        enc = DominoEncoder(); enc.reset()
+        state_np = enc.encode(obs)
 
-    if sims > 0 and model is not None:
-        mcts = DominoMCTS(model, num_simulations=sims)
-        pi = mcts.get_action_probs(env, enc, temperature=0.0)
-    else:
-        pi, _ = model.predict(state_np, mask) if model else (mask / mask.sum(), 0)
+        if sims > 0 and model is not None:
+            mcts = DominoMCTS(model, num_simulations=sims)
+            pi   = mcts.get_action_probs(env, enc, temperature=0.0)
+        else:
+            pi, _ = model.predict(state_np, mask) if model else (mask / mask.sum(), 0.0)
 
-    action = int(np.argmax(pi * mask))
+        action = int(np.argmax(pi * mask))
+        if action == 56:
+            return {"side": "pass"}
+        side     = "right" if action >= 28 else "left"
+        tile_idx = action - (28 if action >= 28 else 0)
+        l, r     = ALL_TILES[tile_idx]
+        return {"tile": [l, r], "side": side}
 
-    # Map action index back to (tile, side)
-    if action == 56:
-        return (None, None), "pass"
-    side = "right" if action >= 28 else "left"
-    tile_idx = action - (28 if action >= 28 else 0)
-    l, r = ALL_TILES[tile_idx]
-    return (l, r), side
+    return engine_fn
+
+
+def engine_fn_stub(case: dict) -> dict:
+    """Smoke-test stub — returns first preferred move so suite always passes."""
+    preferred = case["expected"].get("preferred_moves", [])
+    if preferred: return preferred[0]
+    acceptable = case["expected"].get("acceptable_moves", [])
+    if acceptable: return acceptable[0]
+    return {"side": "pass"}
 
 
 # ============================================================
-# Suite runner
+# Suite evaluator
 # ============================================================
 
-def run_suite(suite_path: str, checkpoint: str | None, sims: int, device: str) -> list[CaseResult]:
-    with open(suite_path, encoding="utf-8") as f:
-        suite = json.load(f)
+def evaluate_suite(engine_fn, suite_path: Path = SUITE_PATH) -> dict:
+    suite = load_suite(suite_path)
+    cases = suite["cases"]
 
-    model = None
-    if checkpoint:
-        ckpt = torch.load(checkpoint, map_location=device, weights_only=True)
-        state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
-        input_dim = state_dict["input_fc.weight"].shape[1]
-        model = DominoNet(input_dim=input_dim, hidden_dim=256, num_actions=57, num_blocks=4)
-        model.load_state_dict(state_dict)
-        model.to(device).eval()
-        print(f"Loaded checkpoint: {checkpoint} (dim={input_dim})")
-    else:
-        print("No checkpoint — using random policy (baseline)")
+    total_score    = 0.0
+    results        = []
+    theme_scores   = defaultdict(float)
+    theme_counts   = defaultdict(int)
+    bucket_counts  = defaultdict(int)
 
-    results = []
-    for case in suite["cases"]:
-        cid = case["id"]
-        theme = case["theme"]
-        print(f"\n[{cid}] {case['description'][:70]}")
+    for case in cases:
+        pred_move       = engine_fn(case)
+        score, bucket   = score_case(pred_move, case)
+        theme           = case.get("theme", "unknown")
 
-        result = get_engine_move(case, model, sims, device)
-        if result is None:
-            print(f"    SKIP")
-            continue
+        total_score          += score
+        theme_scores[theme]  += score
+        theme_counts[theme]  += 1
+        bucket_counts[bucket]+= 1
 
-        engine_tile, engine_side = result
-        outcome, score = score_move(engine_tile, engine_side, case)
+        results.append({
+            "id":            case["id"],
+            "theme":         theme,
+            "description":   case.get("description", ""),
+            "pred_move":     pred_move,
+            "pred_move_str": pretty_move(pred_move),
+            "score":         score,
+            "bucket":        bucket,
+        })
 
-        mark = "OK" if outcome == "preferred" else ("~" if outcome == "acceptable" else "XX")
-        print(f"    Engine: {engine_tile} {engine_side} -> {outcome.upper()} {mark} (score={score:.2f})")
+    avg_score = total_score / max(1, len(cases))
+    theme_avg = {t: theme_scores[t] / theme_counts[t] for t in theme_scores}
 
-        results.append(CaseResult(
-            case_id=cid, theme=theme,
-            engine_tile=engine_tile, engine_side=engine_side,
-            outcome=outcome, score=score,
-            preferred=case["expected"].get("preferred_moves", []),
-            discouraged=case["expected"].get("discouraged_moves", []),
-        ))
+    return {
+        "suite_name":   suite.get("name", "Unnamed Suite"),
+        "num_cases":    len(cases),
+        "total_score":  total_score,
+        "avg_score":    avg_score,
+        "bucket_counts": dict(bucket_counts),
+        "theme_avg":    theme_avg,
+        "results":      results,
+    }
 
-    return results
+
+# ============================================================
+# Report printer
+# ============================================================
+
+def print_report(report: dict) -> None:
+    print("=" * 72)
+    print(report["suite_name"])
+    print("=" * 72)
+    print(f"Cases      : {report['num_cases']}")
+    print(f"Avg Score  : {report['avg_score']:.3f}")
+    print(f"Total Score: {report['total_score']:.3f}")
+    print()
+    print("Bucket counts:")
+    for k in ["preferred", "acceptable", "discouraged", "fallback"]:
+        print(f"  {k:12s}: {report['bucket_counts'].get(k, 0)}")
+    print()
+    print("Theme averages:")
+    for theme, avg in sorted(report["theme_avg"].items()):
+        print(f"  {theme:40s} {avg:.3f}")
+    print()
+    print("Per-case results:")
+    for r in report["results"]:
+        print(f"  {r['id']:30s} {r['bucket']:11s} {r['score']:.2f}  {r['pred_move_str']}")
 
 
-def print_summary(results: list[CaseResult]) -> float:
-    if not results:
-        print("\nNo results.")
-        return 0.0
-
-    mean_score = sum(r.score for r in results) / len(results)
-    n_pref = sum(1 for r in results if r.outcome == "preferred")
-    n_disc = sum(1 for r in results if r.outcome == "discouraged")
-    n_other = sum(1 for r in results if r.outcome == "other")
-
-    print(f"\n{'='*60}")
-    print(f"PARTNERSHIP SUITE RESULTS")
-    print(f"  Cases:       {len(results)}")
-    print(f"  Preferred:   {n_pref}/{len(results)} ({n_pref/len(results)*100:.0f}%)")
-    print(f"  Discouraged: {n_disc}/{len(results)} ({n_disc/len(results)*100:.0f}%)")
-    print(f"  Other:       {n_other}/{len(results)}")
-    print(f"  Mean score:  {mean_score:.3f}")
-    print(f"  Threshold:   {PASS_THRESHOLD}")
-    verdict = "PASS" if mean_score >= PASS_THRESHOLD else "FAIL"
-    print(f"  Verdict:     {verdict}")
-    print(f"{'='*60}")
-
-    # By theme
-    themes: dict[str, list] = {}
-    for r in results:
-        themes.setdefault(r.theme, []).append(r.score)
-    print("\nBy theme:")
-    for theme, scores in sorted(themes.items()):
-        print(f"  {theme:<40} mean={sum(scores)/len(scores):.2f}  n={len(scores)}")
-
-    return mean_score
-
+# ============================================================
+# Main
+# ============================================================
 
 def main():
     parser = argparse.ArgumentParser(description="Partnership tactical suite evaluator")
-    parser.add_argument("--suite", default="tests/partnership_suite.json")
-    parser.add_argument("--checkpoint", default=None, help="Path to .pt checkpoint")
-    parser.add_argument("--sims", type=int, default=0, help="MCTS sims per move (0=greedy)")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("threshold", nargs="?", type=float, default=0.70)
+    parser.add_argument("--suite",       default=str(SUITE_PATH))
+    parser.add_argument("--checkpoint",  default=None)
+    parser.add_argument("--sims",        type=int, default=0)
+    parser.add_argument("--device",      default="cpu")
+    parser.add_argument("--stub",        action="store_true", help="Use stub engine (smoke test)")
     args = parser.parse_args()
 
-    results = run_suite(args.suite, args.checkpoint, args.sims, args.device)
-    score = print_summary(results)
-    sys.exit(0 if score >= PASS_THRESHOLD else 1)
+    if args.stub:
+        engine_fn = engine_fn_stub
+    else:
+        model = None
+        if args.checkpoint:
+            ckpt       = torch.load(args.checkpoint, map_location=args.device, weights_only=True)
+            state_dict = ckpt.get("model_state_dict", ckpt)
+            input_dim  = state_dict["input_fc.weight"].shape[1]
+            model      = DominoNet(input_dim=input_dim, hidden_dim=256, num_actions=57, num_blocks=4)
+            model.load_state_dict(state_dict)
+            model.to(args.device).eval()
+            print(f"Loaded checkpoint: {args.checkpoint} (dim={input_dim})")
+        engine_fn = make_engine_fn(model, args.sims, args.device)
+
+    report = evaluate_suite(engine_fn, Path(args.suite))
+    print_report(report)
+
+    if report["avg_score"] < args.threshold:
+        print(f"\nFAIL: avg={report['avg_score']:.3f} < threshold={args.threshold:.3f}")
+        sys.exit(1)
+    print(f"\nPASS: avg={report['avg_score']:.3f} >= threshold={args.threshold:.3f}")
 
 
 if __name__ == "__main__":
