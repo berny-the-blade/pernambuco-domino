@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>⚔️ Battle Arena</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0d0d1a;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #game {
+    width: 100%;
+    max-width: 480px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+    position: relative;
+  }
+
+  /* ── TITLE ── */
+  .title-bar {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+  }
+
+  /* ── ENEMY CARD ── */
+  .enemy-card {
+    background: linear-gradient(135deg, #1a0a2e, #2d1052);
+    border: 2px solid #6b21a8;
+    border-radius: 16px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.1s;
+  }
+  .enemy-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(168,85,247,0.15) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .enemy-card.shake { animation: shake 0.35s ease-out; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-5px); }
+    80% { transform: translateX(5px); }
+  }
+
+  .enemy-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .enemy-sprite { font-size: 52px; line-height: 1; filter: drop-shadow(0 0 12px rgba(168,85,247,0.6)); transition: transform 0.3s; }
+  .enemy-sprite.attack-anim { animation: enemyAttack 0.4s ease-out; }
+  @keyframes enemyAttack {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.3) translateX(-10px); }
+    60% { transform: scale(0.9) translateX(5px); }
+    100% { transform: scale(1); }
+  }
+  .enemy-info { flex: 1; }
+  .enemy-name { font-size: 18px; font-weight: 800; color: #e879f9; }
+  .enemy-title { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 1px; }
+
+  /* ── HP / MP BARS ── */
+  .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .bar-label { font-size: 11px; font-weight: 700; width: 26px; color: rgba(255,255,255,0.5); }
+  .bar-track { flex: 1; height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; position: relative; }
+  .bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+    position: relative;
+  }
+  .bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0;
+    width: 40%;
+    height: 100%;
+    background: rgba(255,255,255,0.25);
+    border-radius: 0 5px 5px 0;
+  }
+  .hp-bar  { background: linear-gradient(90deg, #ef4444, #f97316); }
+  .mp-bar  { background: linear-gradient(90deg, #3b82f6, #8b5cf6); }
+  .exp-bar { background: linear-gradient(90deg, #f59e0b, #eab308); }
+  .bar-val { font-size: 10px; color: rgba(255,255,255,0.5); min-width: 44px; text-align: right; }
+
+  /* ── BATTLE LOG ── */
+  .log-box {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 10px 14px;
+    height: 110px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+  .log-entry {
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0;
+    animation: fadeSlide 0.3s forwards;
+    padding: 2px 0;
+  }
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .log-entry.player  { color: #86efac; }
+  .log-entry.enemy   { color: #fca5a5; }
+  .log-entry.system  { color: #fbbf24; font-weight: 600; }
+  .log-entry.heal    { color: #67e8f9; }
+
+  /* ── PLAYER CARD ── */
+  .player-card {
+    background: linear-gradient(135deg, #0a1a2e, #0c2544);
+    border: 2px solid #1e40af;
+    border-radius: 16px;
+    padding: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .player-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 100%, rgba(59,130,246,0.15) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .player-card.shake { animation: shake 0.35s ease-out; }
+  .player-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .player-sprite { font-size: 40px; line-height: 1; filter: drop-shadow(0 0 10px rgba(59,130,246,0.5)); }
+  .player-sprite.attack-anim { animation: playerAttack 0.4s ease-out; }
+  @keyframes playerAttack {
+    0%  { transform: scale(1) translateX(0); }
+    30% { transform: scale(1.2) translateX(14px); }
+    60% { transform: scale(0.9) translateX(-4px); }
+    100% { transform: scale(1); }
+  }
+  .player-name { font-size: 16px; font-weight: 800; color: #60a5fa; }
+  .player-level { font-size: 11px; color: rgba(255,255,255,0.4); }
+
+  /* ── ACTIONS ── */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .btn {
+    background: rgba(255,255,255,0.06);
+    border: 1.5px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 14px 10px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.25);
+    transform: translateY(-2px);
+  }
+  .btn:active:not(:disabled) { transform: translateY(0) scale(0.97); }
+  .btn:disabled { opacity: 0.35; cursor: default; transform: none; }
+  .btn-icon { font-size: 24px; display: block; margin-bottom: 4px; }
+  .btn-name { font-size: 13px; font-weight: 700; display: block; }
+  .btn-desc { font-size: 10px; color: rgba(255,255,255,0.45); margin-top: 2px; display: block; }
+
+  .btn-attack { border-color: rgba(239,68,68,0.4); }
+  .btn-attack:hover:not(:disabled) { border-color: #ef4444; background: rgba(239,68,68,0.15); }
+
+  .btn-magic  { border-color: rgba(139,92,246,0.4); }
+  .btn-magic:hover:not(:disabled)  { border-color: #8b5cf6; background: rgba(139,92,246,0.15); }
+
+  .btn-defend { border-color: rgba(251,191,36,0.4); }
+  .btn-defend:hover:not(:disabled) { border-color: #fbbf24; background: rgba(251,191,36,0.15); }
+
+  .btn-heal   { border-color: rgba(52,211,153,0.4); }
+  .btn-heal:hover:not(:disabled)   { border-color: #34d399; background: rgba(34,211,153,0.15); }
+
+  .btn .mp-cost { font-size: 9px; color: #93c5fd; position: absolute; top: 6px; right: 8px; }
+
+  /* ── FLOATING DAMAGE ── */
+  .floater {
+    position: fixed;
+    font-size: 24px;
+    font-weight: 900;
+    pointer-events: none;
+    z-index: 999;
+    animation: floatUp 1s ease-out forwards;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+  }
+  @keyframes floatUp {
+    0%   { opacity: 1; transform: translateY(0) scale(1); }
+    60%  { opacity: 1; transform: translateY(-40px) scale(1.1); }
+    100% { opacity: 0; transform: translateY(-70px) scale(0.8); }
+  }
+  .floater.dmg    { color: #ff6b6b; }
+  .floater.mdmg   { color: #c084fc; }
+  .floater.heal   { color: #4ade80; }
+  .floater.miss   { color: #fbbf24; font-size: 16px; }
+  .floater.crit   { color: #ff3333; font-size: 32px; }
+
+  /* ── OVERLAY (win/lose/new enemy) ── */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    gap: 16px;
+    backdrop-filter: blur(6px);
+    animation: fadeIn 0.4s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .overlay-emoji { font-size: 72px; animation: bounceIn 0.5s ease; }
+  @keyframes bounceIn {
+    0%   { transform: scale(0); }
+    70%  { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+  .overlay-title { font-size: 32px; font-weight: 900; text-align: center; }
+  .overlay-sub   { font-size: 14px; color: rgba(255,255,255,0.6); text-align: center; max-width: 280px; }
+  .overlay-btn {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    border: none; border-radius: 14px;
+    color: #fff; font-size: 16px; font-weight: 700;
+    padding: 14px 40px; cursor: pointer;
+    transition: all 0.15s;
+    box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+    margin-top: 8px;
+  }
+  .overlay-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(124,58,237,0.6); }
+
+  /* ── DEFEND INDICATOR ── */
+  .defend-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; color: #fbbf24;
+    background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 6px; padding: 2px 7px;
+    margin-left: 8px;
+  }
+  .status-row { display: flex; align-items: center; margin-bottom: 4px; min-height: 20px; }
+
+  /* ── SCREEN FLASH ── */
+  .flash {
+    position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    opacity: 0;
+  }
+  .flash.red  { animation: flashRed  0.3s ease-out; }
+  .flash.blue { animation: flashBlue 0.3s ease-out; }
+  @keyframes flashRed  { 0% { background: #ef4444; opacity: 0.3; } 100% { opacity: 0; } }
+  @keyframes flashBlue { 0% { background: #3b82f6; opacity: 0.3; } 100% { opacity: 0; } }
+
+  /* ── TURN INDICATOR ── */
+  .turn-indicator {
+    text-align: center; font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+    transition: color 0.3s;
+  }
+  .turn-indicator.enemy-turn { color: #f87171; }
+  .turn-indicator.player-turn { color: #60a5fa; }
+</style>
+</head>
+<body>
+<div id="game">
+  <div class="title-bar">⚔️ Battle Arena</div>
+
+  <!-- Enemy -->
+  <div class="enemy-card" id="enemyCard">
+    <div class="enemy-top">
+      <div class="enemy-sprite" id="enemySprite">🐉</div>
+      <div class="enemy-info">
+        <div class="enemy-name" id="enemyName">Dragon</div>
+        <div class="enemy-title" id="enemyTitle">Stage 1</div>
+      </div>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">HP</span>
+      <div class="bar-track"><div class="bar-fill hp-bar" id="enemyHpBar" style="width:100%"></div></div>
+      <span class="bar-val" id="enemyHpVal">80/80</span>
+    </div>
+  </div>
+
+  <!-- Turn indicator -->
+  <div class="turn-indicator player-turn" id="turnIndicator">Your Turn</div>
+
+  <!-- Battle log -->
+  <div class="log-box" id="logBox"></div>
+
+  <!-- Player -->
+  <div class="player-card" id="playerCard">
+    <div class="player-top">
+      <div class="player-sprite" id="playerSprite">🧙</div>
+      <div style="flex:1">
+        <div class="status-row">
+          <div class="player-name">Hero</div>
+          <span id="defendBadge" class="defend-badge" style="display:none">🛡️ Defending</span>
+        </div>
+        <div class="player-level" id="levelLabel">Level 1 · EXP: 0/30</div>
+      </div>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">HP</span>
+      <div class="bar-track"><div class="bar-fill hp-bar" id="playerHpBar" style="width:100%"></div></div>
+      <span class="bar-val" id="playerHpVal">100/100</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label">MP</span>
+      <div class="bar-track"><div class="bar-fill mp-bar" id="playerMpBar" style="width:100%"></div></div>
+      <span class="bar-val" id="playerMpVal">50/50</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label" style="color:#f59e0b">EXP</span>
+      <div class="bar-track"><div class="bar-fill exp-bar" id="playerExpBar" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions" id="actionBar">
+    <button class="btn btn-attack" onclick="playerAction('attack')">
+      <span class="btn-icon">⚔️</span>
+      <span class="btn-name">Attack</span>
+      <span class="btn-desc">Physical strike</span>
+    </button>
+    <button class="btn btn-magic" id="btnMagic" onclick="playerAction('magic')">
+      <span class="btn-icon">🔥</span>
+      <span class="btn-name">Fireball</span>
+      <span class="btn-desc">Heavy magic</span>
+      <span class="mp-cost">15 MP</span>
+    </button>
+    <button class="btn btn-defend" onclick="playerAction('defend')">
+      <span class="btn-icon">🛡️</span>
+      <span class="btn-name">Defend</span>
+      <span class="btn-desc">Halve next hit</span>
+    </button>
+    <button class="btn btn-heal" id="btnHeal" onclick="playerAction('heal')">
+      <span class="btn-icon">💚</span>
+      <span class="btn-name">Heal</span>
+      <span class="btn-desc">Restore 25 HP</span>
+      <span class="mp-cost">10 MP</span>
+    </button>
+  </div>
+</div>
+
+<!-- Screen flash layer -->
+<div class="flash" id="flashLayer"></div>
+
+<script>
+// ─────────────────────────────────────────────
+//  ENEMY ROSTER
+// ─────────────────────────────────────────────
+const ENEMIES = [
+  { name:'Goblin',     title:'Weakling',     sprite:'👺', hp:55,  atk:[8,14],  sAtk:[14,20], sName:'Club Smash',  sChance:0.2, exp:20, color:'#a3e635' },
+  { name:'Orc',        title:'Warrior',      sprite:'👹', hp:80,  atk:[12,20], sAtk:[22,30], sName:'War Cry',     sChance:0.25, exp:30, color:'#f97316' },
+  { name:'Wraith',     title:'Undead',       sprite:'👻', hp:70,  atk:[10,18], sAtk:[18,28], sName:'Drain',       sChance:0.3, exp:35, color:'#a78bfa' },
+  { name:'Dragon',     title:'Ancient',      sprite:'🐉', hp:110, atk:[15,24], sAtk:[28,38], sName:'Fire Breath', sChance:0.3, exp:50, color:'#ef4444' },
+  { name:'Demon Lord', title:'Final Boss',   sprite:'😈', hp:150, atk:[18,28], sAtk:[35,50], sName:'Hellfire',    sChance:0.35, exp:80, color:'#c026d3' },
+];
+
+// ─────────────────────────────────────────────
+//  GAME STATE
+// ─────────────────────────────────────────────
+const state = {
+  player: { hp: 100, maxHp: 100, mp: 50, maxMp: 50, atk: 22, def: 5, level: 1, exp: 0, expNext: 30, defending: false },
+  enemy:  { hp: 0, maxHp: 0, atk: [0,0], sAtk: [0,0], sName: '', sChance: 0 },
+  enemyIdx: 0,
+  busy: false,
+  turn: 'player',  // 'player' | 'enemy'
+};
+
+// ─────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────
+function loadEnemy(idx) {
+  const e = ENEMIES[idx];
+  state.enemy = { ...e };
+  state.enemy.hp = e.hp;
+  state.enemy.maxHp = e.hp;
+  el('enemyName').textContent = e.name;
+  el('enemyTitle').textContent = `Stage ${idx + 1} / ${ENEMIES.length}`;
+  el('enemySprite').textContent = e.sprite;
+  updateBars();
+}
+
+function startGame() {
+  state.player.hp     = state.player.maxHp;
+  state.player.mp     = state.player.maxMp;
+  state.player.defending = false;
+  state.player.level  = 1;
+  state.player.exp    = 0;
+  state.player.expNext = 30;
+  state.player.atk    = 22;
+  state.player.def    = 5;
+  state.enemyIdx = 0;
+  el('logBox').innerHTML = '';
+  loadEnemy(0);
+  setTurn('player');
+  log('⚔️ A new battle begins! Defeat all enemies to win!', 'system');
+  log(`You face the ${ENEMIES[0].name}! Fight!`, 'system');
+}
+
+// ─────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────
+const el = id => document.getElementById(id);
+const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const clamp = (v, mn, mx) => Math.max(mn, Math.min(mx, v));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function log(msg, type = 'system') {
+  const d = document.createElement('div');
+  d.className = `log-entry ${type}`;
+  d.textContent = msg;
+  const box = el('logBox');
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+function updateBars() {
+  const p = state.player, e = state.enemy;
+  el('playerHpBar').style.width = clamp(p.hp / p.maxHp * 100, 0, 100) + '%';
+  el('playerMpBar').style.width = clamp(p.mp / p.maxMp * 100, 0, 100) + '%';
+  el('playerExpBar').style.width = clamp(p.exp / p.expNext * 100, 0, 100) + '%';
+  el('playerHpVal').textContent  = `${p.hp}/${p.maxHp}`;
+  el('playerMpVal').textContent  = `${p.mp}/${p.maxMp}`;
+  el('levelLabel').textContent   = `Level ${p.level} · EXP: ${p.exp}/${p.expNext}`;
+  el('enemyHpBar').style.width   = clamp(e.hp / e.maxHp * 100, 0, 100) + '%';
+  el('enemyHpVal').textContent   = `${Math.max(0, e.hp)}/${e.maxHp}`;
+  el('btnMagic').disabled = p.mp < 15;
+  el('btnHeal').disabled  = p.mp < 10;
+  el('defendBadge').style.display = p.defending ? 'inline-flex' : 'none';
+}
+
+function setTurn(who) {
+  state.turn = who;
+  const ind = el('turnIndicator');
+  if (who === 'player') {
+    ind.textContent = '— Your Turn —';
+    ind.className = 'turn-indicator player-turn';
+    setActionsEnabled(true);
+  } else {
+    ind.textContent = '— Enemy Turn —';
+    ind.className = 'turn-indicator enemy-turn';
+    setActionsEnabled(false);
+  }
+}
+
+function setActionsEnabled(on) {
+  document.querySelectorAll('.btn').forEach(b => b.disabled = !on);
+  if (on) updateBars(); // re-evaluate MP costs
+}
+
+function floatNumber(text, cssClass, targetEl) {
+  const r = targetEl.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = `floater ${cssClass}`;
+  d.textContent = text;
+  d.style.left  = (r.left + r.width / 2 - 20) + 'px';
+  d.style.top   = (r.top  + r.height / 4)      + 'px';
+  document.body.appendChild(d);
+  d.addEventListener('animationend', () => d.remove());
+}
+
+function flash(color) {
+  const f = el('flashLayer');
+  f.className = 'flash';
+  requestAnimationFrame(() => {
+    f.className = `flash ${color}`;
+    f.addEventListener('animationend', () => { f.className = 'flash'; }, { once: true });
+  });
+}
+
+function animSprite(id) {
+  const s = el(id);
+  s.classList.remove('attack-anim');
+  requestAnimationFrame(() => requestAnimationFrame(() => s.classList.add('attack-anim')));
+  s.addEventListener('animationend', () => s.classList.remove('attack-anim'), { once: true });
+}
+
+function shakeCard(id) {
+  const c = el(id);
+  c.classList.remove('shake');
+  requestAnimationFrame(() => requestAnimationFrame(() => c.classList.add('shake')));
+  c.addEventListener('animationend', () => c.classList.remove('shake'), { once: true });
+}
+
+// ─────────────────────────────────────────────
+//  LEVELING
+// ─────────────────────────────────────────────
+function gainExp(amount) {
+  const p = state.player;
+  p.exp += amount;
+  log(`+${amount} EXP!`, 'system');
+  while (p.exp >= p.expNext) {
+    p.exp     -= p.expNext;
+    p.level   += 1;
+    p.maxHp   += 15;
+    p.maxMp   += 8;
+    p.hp       = p.maxHp;
+    p.mp       = p.maxMp;
+    p.atk     += 4;
+    p.def     += 1;
+    p.expNext  = Math.floor(p.expNext * 1.5);
+    log(`✨ LEVEL UP! → Lv ${p.level}! HP, MP, and stats increased!`, 'system');
+  }
+  updateBars();
+}
+
+// ─────────────────────────────────────────────
+//  PLAYER ACTIONS
+// ─────────────────────────────────────────────
+async function playerAction(action) {
+  if (state.busy || state.turn !== 'player') return;
+  state.busy = true;
+  setActionsEnabled(false);
+  state.player.defending = false; // reset defend (only lasts one enemy turn)
+
+  let dmg = 0, miss = false, crit = false;
+
+  if (action === 'attack') {
+    crit = Math.random() < 0.15;
+    miss = Math.random() < 0.08;
+    if (miss) {
+      log('⚔️ You swung... and missed!', 'player');
+      floatNumber('Miss!', 'miss', el('enemyCard'));
+    } else {
+      dmg = rand(state.player.atk - 6, state.player.atk + 6);
+      if (crit) { dmg = Math.floor(dmg * 1.8); log(`⚔️ CRITICAL HIT! You slash for ${dmg} damage!`, 'player'); }
+      else       { log(`⚔️ You attack for ${dmg} damage.`, 'player'); }
+      animSprite('playerSprite');
+      await sleep(180);
+      dealDamageToEnemy(dmg, crit);
+    }
+
+  } else if (action === 'magic') {
+    if (state.player.mp < 15) { state.busy = false; setActionsEnabled(true); return; }
+    state.player.mp -= 15;
+    dmg = rand(28, 42);
+    crit = Math.random() < 0.2;
+    if (crit) dmg = Math.floor(dmg * 1.6);
+    log(`🔥 Fireball! ${crit ? 'CRITICAL! ' : ''}${dmg} magic damage!`, 'player');
+    animSprite('playerSprite');
+    await sleep(180);
+    dealDamageToEnemy(dmg, crit, 'mdmg');
+
+  } else if (action === 'defend') {
+    state.player.defending = true;
+    log('🛡️ You brace for impact — damage halved next hit!', 'player');
+    updateBars();
+
+  } else if (action === 'heal') {
+    if (state.player.mp < 10) { state.busy = false; setActionsEnabled(true); return; }
+    state.player.mp -= 10;
+    const restored = rand(20, 30);
+    state.player.hp = clamp(state.player.hp + restored, 0, state.player.maxHp);
+    log(`💚 You heal for ${restored} HP!`, 'heal');
+    floatNumber(`+${restored}`, 'heal', el('playerCard'));
+    updateBars();
+  }
+
+  await sleep(600);
+
+  if (state.enemy.hp <= 0) { await onEnemyDied(); return; }
+
+  setTurn('enemy');
+  await sleep(500);
+  await enemyTurn();
+}
+
+// ─────────────────────────────────────────────
+//  DEAL DAMAGE
+// ─────────────────────────────────────────────
+function dealDamageToEnemy(dmg, crit, floatClass = 'dmg') {
+  state.enemy.hp -= dmg;
+  floatNumber(crit ? `💥 ${dmg}!` : `-${dmg}`, crit ? 'crit' : floatClass, el('enemyCard'));
+  shakeCard('enemyCard');
+  flash('blue');
+  updateBars();
+}
+
+function dealDamageToPlayer(dmg, isSAtk) {
+  let actual = dmg;
+  if (state.player.defending) {
+    actual = Math.floor(dmg / 2);
+    log(`🛡️ Blocked! Damage reduced to ${actual}!`, 'heal');
+    state.player.defending = false;
+    updateBars();
+  }
+  actual = Math.max(0, actual - state.player.def + rand(-2, 2));
+  state.player.hp = clamp(state.player.hp - actual, 0, state.player.maxHp);
+  floatNumber(`-${actual}`, 'dmg', el('playerCard'));
+  shakeCard('playerCard');
+  flash('red');
+  updateBars();
+}
+
+// ─────────────────────────────────────────────
+//  ENEMY TURN
+// ─────────────────────────────────────────────
+async function enemyTurn() {
+  const e = state.enemy;
+  const useSpecial = Math.random() < e.sChance;
+
+  if (useSpecial) {
+    const dmg = rand(e.sAtk[0], e.sAtk[1]);
+    log(`💢 ${e.name} uses ${e.sName} for ${dmg} damage!`, 'enemy');
+    animSprite('enemySprite');
+    await sleep(300);
+    dealDamageToPlayer(dmg, true);
+  } else {
+    const miss = Math.random() < 0.1;
+    if (miss) {
+      log(`${e.sprite} ${e.name} attacks... and misses!`, 'enemy');
+      floatNumber('Miss!', 'miss', el('playerCard'));
+    } else {
+      const dmg = rand(e.atk[0], e.atk[1]);
+      log(`${e.sprite} ${e.name} attacks for ${dmg} damage.`, 'enemy');
+      animSprite('enemySprite');
+      await sleep(300);
+      dealDamageToPlayer(dmg, false);
+    }
+  }
+
+  await sleep(600);
+
+  if (state.player.hp <= 0) { await onPlayerDied(); return; }
+
+  state.busy = false;
+  setTurn('player');
+}
+
+// ─────────────────────────────────────────────
+//  WIN / LOSE
+// ─────────────────────────────────────────────
+async function onEnemyDied() {
+  const e = ENEMIES[state.enemyIdx];
+  log(`💀 ${e.name} is defeated!`, 'system');
+  gainExp(e.exp);
+  await sleep(800);
+
+  state.enemyIdx++;
+  if (state.enemyIdx >= ENEMIES.length) {
+    showOverlay('🏆', 'YOU WIN!', 'All enemies defeated! You are the champion!', 'Play Again', startGame);
+    return;
+  }
+
+  // Next enemy
+  const next = ENEMIES[state.enemyIdx];
+  showOverlay(next.sprite, `${next.name} appears!`, `Stage ${state.enemyIdx + 1} — prepare yourself!`, 'Fight!', () => {
+    loadEnemy(state.enemyIdx);
+    state.busy = false;
+    setTurn('player');
+    log(`⚔️ ${next.name} enters the arena!`, 'system');
+  });
+}
+
+async function onPlayerDied() {
+  log('💀 You have fallen...', 'system');
+  showOverlay('💀', 'YOU DIED', 'Darkness claims you. Rise again?', 'Try Again', startGame);
+}
+
+// ─────────────────────────────────────────────
+//  OVERLAY
+// ─────────────────────────────────────────────
+function showOverlay(emoji, title, sub, btnText, callback) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `
+    <div class="overlay-emoji">${emoji}</div>
+    <div class="overlay-title">${title}</div>
+    <div class="overlay-sub">${sub}</div>
+    <button class="overlay-btn">${btnText}</button>
+  `;
+  ov.querySelector('button').onclick = () => { ov.remove(); callback(); };
+  document.body.appendChild(ov);
+}
+
+// ─────────────────────────────────────────────
+//  START
+// ─────────────────────────────────────────────
+startGame();
+</script>
+</body>
+</html>
