@@ -2919,18 +2919,20 @@
         // Extract best move from root children
         if (root.children.length === 0) return null;
 
+        // commit 10: visits-max root choice -- most-visited wins, Q breaks ties
+        // Dedup by tile: keep highest-visit child per tile (was: highest-Q)
         const tileResults = new Map();
         for (const child of root.children) {
           if (child.visits === 0) continue;
           const avgReward = child.totalReward / child.visits;
           const tileKey = child.move.tile.id;
           const r = { tile: child.move.tile, side: child.move.side, expectedPoints: avgReward * 4, visits: child.visits };
-          if (!tileResults.has(tileKey) || r.expectedPoints > tileResults.get(tileKey).expectedPoints) {
+          if (!tileResults.has(tileKey) || r.visits > tileResults.get(tileKey).visits) {
             tileResults.set(tileKey, r);
           }
         }
         const finalResults = [...tileResults.values()];
-        finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+        finalResults.sort((a, b) => b.visits - a.visits || b.expectedPoints - a.expectedPoints);
         return finalResults.length > 0 ? finalResults[0] : null;
       };
 
