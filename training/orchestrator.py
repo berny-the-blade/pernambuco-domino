@@ -37,6 +37,7 @@ from match_equity import get_match_equity, delta_me, DOB_VALUES
 
 def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                      mcts_sims, result_queue, value_target='me',
+                     policy_target='visits',
                      high_sim_fraction=0.1, high_sim_multiplier=4):
     """
     Isolated CPU process. Plays games against itself and pipes training data back.
@@ -353,7 +354,7 @@ class Orchestrator:
                     target=self_play_worker,
                     args=(w_id, shared_weights, games_per_worker,
                           self.use_mcts, self.mcts_sims, result_queue,
-                          self.value_target,
+                          self.value_target, self.policy_target,
                           self.high_sim_fraction, self.high_sim_multiplier)
                 )
                 p.start()
