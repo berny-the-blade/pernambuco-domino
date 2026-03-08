@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "name": "Domino Pernambucano Partnership Tactical Suite",
+  "rules": {
+    "players": 4,
+    "hand_size": 6,
+    "dorme": 4,
+    "action_space": 57,
+    "notes": "Move encoding uses tile [left,right] + side. Preferred moves are evaluated against engine top choice."
+  },
+  "cases": [
+    {
+      "id": "PARTNER_NEW_END_001",
+      "theme": "preserve_new_end",
+      "description": "After 55 is opened and opponent plays 51, partner should usually continue the 1 end, not reconnect to 5.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": {
+        "left_end": 5,
+        "right_end": 1,
+        "board_length": 2,
+        "history": [
+          { "player": 0, "tile": [5, 5], "side": "open" },
+          { "player": 1, "tile": [5, 1], "side": "left" }
+        ]
+      },
+      "hands": {
+        "player_0": [[5, 5]],
+        "player_1": [[5, 1]],
+        "player_2": [[1, 4], [1, 6], [5, 3], [2, 2], [3, 6], [0, 4]],
+        "player_3": []
+      },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [
+          { "tile": [1, 4], "side": "right" },
+          { "tile": [1, 6], "side": "right" }
+        ],
+        "acceptable_moves": [],
+        "discouraged_moves": [
+          { "tile": [5, 3], "side": "left", "reason": "collapses newly opened 1 end" }
+        ]
+      },
+      "tags": ["signaling", "new-end-preservation", "partner-play"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_NEW_END_002",
+      "theme": "preserve_new_end_forced_exception",
+      "description": "Partner should reconnect to 5 only because they have no 1 available.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": {
+        "left_end": 5,
+        "right_end": 1,
+        "board_length": 2,
+        "history": [
+          { "player": 0, "tile": [5, 5], "side": "open" },
+          { "player": 1, "tile": [5, 1], "side": "left" }
+        ]
+      },
+      "hands": {
+        "player_0": [[5, 5]],
+        "player_1": [[5, 1]],
+        "player_2": [[5, 3], [5, 6], [2, 2], [3, 6], [0, 4], [4, 6]],
+        "player_3": []
+      },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [
+          { "tile": [5, 3], "side": "left" },
+          { "tile": [5, 6], "side": "left" }
+        ],
+        "acceptable_moves": [],
+        "discouraged_moves": []
+      },
+      "tags": ["signaling", "forced-move", "partner-play"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_SUIT_STEAL_001",
+      "theme": "dont_steal_partner_suit",
+      "description": "Partner has just signaled strength on 4; current player should not immediately close 4 if another healthy continuation exists.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": {
+        "left_end": 4,
+        "right_end": 6,
+        "board_length": 5,
+        "history": [
+          { "player": 2, "tile": [4, 2], "side": "left" }
+        ]
+      },
+      "hands": {
+        "player_0": [[6, 1], [6, 3], [4, 5], [0, 0], [2, 3], [5, 5]],
+        "player_1": [],
+        "player_2": [],
+        "player_3": []
+      },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [
+          { "tile": [6, 1], "side": "right" },
+          { "tile": [6, 3], "side": "right" }
+        ],
+        "acceptable_moves": [],
+        "discouraged_moves": [
+          { "tile": [4, 5], "side": "left", "reason": "steals partner-signaled 4 line" }
+        ]
+      },
+      "tags": ["partner-play", "signaling", "suit-stealing"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    }
+  ]
+}
