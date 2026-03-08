@@ -98,10 +98,12 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                                           opp_score=opp_score,
                                           multiplier=match.multiplier)
 
-                if use_mcts and valid_mask.sum() > 1:
+                if use_mcts and valid_mask.sum() > 1 and policy_target == 'visits':
+                    # AlphaZero-style: train on MCTS visit-count pi
                     temp = 1.0 if step_count < 14 else 0.1
                     target_pi = mcts.get_action_probs(env, encoder, temperature=temp)
                 else:
+                    # Legacy heuristic: network policy + Dirichlet noise
                     policy_probs, _ = model.predict(state_np, valid_mask, device)
 
                     valid_indices = np.where(valid_mask > 0)[0]
@@ -282,16 +284,17 @@ class Orchestrator:
     ]
 
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=True,
-                 mcts_sims=200, value_target='me',
+                 mcts_sims=200, value_target='me', policy_target='visits',
                  high_sim_fraction=0.1, high_sim_multiplier=4):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
+        self.policy_target = policy_target
         print(f"Orchestrator device: {self.device}")
         print(f"Workers: {num_workers}, Buffer: {buffer_size}, "
               f"MCTS: {use_mcts} ({mcts_sims} sims, "
               f"{high_sim_fraction:.0%} at {mcts_sims * high_sim_multiplier}), "
-              f"Value: {value_target}")
+              f"Value: {value_target}, Policy: {policy_target}")
 
         self.model = DominoNet().to(self.device)
         self.champion_weights = {
@@ -628,6 +631,10 @@ def main():
                         choices=['me', 'points'],
                         help='Value target: "me" for ΔME (default), '
                              '"points" for legacy points/4')
+    parser.add_argument('--policy-target', type=str, default='visits',
+                        choices=['visits', 'heuristic'],
+                        help='Policy target: "visits" = MCTS visit-count pi (default, AlphaZero-style), '
+                             '"heuristic" = network policy + Dirichlet noise (legacy)')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume from checkpoint path')
     args = parser.parse_args()
@@ -638,6 +645,7 @@ def main():
         use_mcts=args.mcts,
         mcts_sims=args.mcts_sims,
         value_target=args.value_target,
+        policy_target=args.policy_target,
         high_sim_fraction=args.high_sim_fraction,
         high_sim_multiplier=args.high_sim_multiplier,
     )
