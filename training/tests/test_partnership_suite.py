@@ -70,26 +70,36 @@ class CaseResult:
     discouraged: list
 
 
-def tile_matches(engine_tile: tuple, engine_side: str, move_spec: dict) -> bool:
-    """Check if engine's choice matches a move spec {tile:[l,r], side:str}."""
-    spec_tile = tuple(move_spec["tile"])
-    spec_side = move_spec["side"]
-    # Tiles are symmetric — [1,4] == [4,1]
-    tile_ok = engine_tile == spec_tile or engine_tile == (spec_tile[1], spec_tile[0])
-    side_ok = engine_side == spec_side
-    return tile_ok and side_ok
+def canonical_move(tile: tuple | None, side: str) -> tuple:
+    """Canonical (sorted_tile, side) key — handles [1,4] == [4,1] symmetry."""
+    if side == "pass" or tile is None:
+        return ("pass",)
+    a, b = sorted(tile)
+    return (a, b, side)
 
 
-def score_move(engine_tile, engine_side, expected: dict) -> tuple[str, float]:
-    for m in expected.get("preferred_moves", []):
-        if tile_matches(engine_tile, engine_side, m):
-            return "preferred", SCORE_PREFERRED
-    for m in expected.get("acceptable_moves", []):
-        if tile_matches(engine_tile, engine_side, m):
-            return "acceptable", SCORE_ACCEPTABLE
-    for m in expected.get("discouraged_moves", []):
-        if tile_matches(engine_tile, engine_side, m):
-            return "discouraged", SCORE_DISCOURAGED
+def canonical_spec(move_spec: dict) -> tuple:
+    if move_spec.get("side") == "pass":
+        return ("pass",)
+    a, b = sorted(move_spec["tile"])
+    return (a, b, move_spec["side"])
+
+
+def score_move(engine_tile, engine_side, case: dict) -> tuple[str, float]:
+    pred = canonical_move(engine_tile, engine_side)
+    expected = case["expected"]
+    scoring  = case.get("scoring", {})
+
+    preferred   = {canonical_spec(m) for m in expected.get("preferred_moves", [])}
+    acceptable  = {canonical_spec(m) for m in expected.get("acceptable_moves", [])}
+    discouraged = {canonical_spec(m) for m in expected.get("discouraged_moves", [])}
+
+    if pred in preferred:
+        return "preferred",   scoring.get("preferred_score",   SCORE_PREFERRED)
+    if pred in acceptable:
+        return "acceptable",  scoring.get("acceptable_score",  SCORE_ACCEPTABLE)
+    if pred in discouraged:
+        return "discouraged", scoring.get("discouraged_score", SCORE_DISCOURAGED)
     return "other", SCORE_OTHER
 
 
@@ -209,7 +219,7 @@ def run_suite(suite_path: str, checkpoint: str | None, sims: int, device: str) -
             continue
 
         engine_tile, engine_side = result
-        outcome, score = score_move(engine_tile, engine_side, case["expected"])
+        outcome, score = score_move(engine_tile, engine_side, case)
 
         mark = "OK" if outcome == "preferred" else ("~" if outcome == "acceptable" else "XX")
         print(f"    Engine: {engine_tile} {engine_side} -> {outcome.upper()} {mark} (score={score:.2f})")
