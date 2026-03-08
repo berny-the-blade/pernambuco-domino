@@ -538,6 +538,8 @@ document.addEventListener('touchend', handleTouchEnd, {passive:false});
 document.addEventListener('touchcancel', handleTouchEnd, {passive:false});
 
 function handleTouchStart(e) {
+  // Don't block overlay button taps
+  if (!gameRunning) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     const sx = t.clientX, sy = t.clientY;
@@ -570,6 +572,7 @@ function handleTouchStart(e) {
 }
 
 function handleTouchMove(e) {
+  if (!gameRunning) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (t.identifier === joystickId) {
@@ -588,6 +591,7 @@ function handleTouchMove(e) {
 }
 
 function handleTouchEnd(e) {
+  if (!gameRunning) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (t.identifier === joystickId) {
