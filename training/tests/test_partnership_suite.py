@@ -70,19 +70,27 @@ class CaseResult:
     discouraged: list
 
 
-def canonical_move(tile: tuple | None, side: str) -> tuple:
+def canonical_move(tile: tuple | None, side: str | None) -> tuple:
     """Canonical (sorted_tile, side) key — handles [1,4] == [4,1] symmetry."""
     if side == "pass" or tile is None:
         return ("pass",)
+    if side is None:
+        return ("invalid",)
     a, b = sorted(tile)
     return (a, b, side)
 
 
 def canonical_spec(move_spec: dict) -> tuple:
+    if move_spec is None:
+        return ("invalid",)
     if move_spec.get("side") == "pass":
         return ("pass",)
-    a, b = sorted(move_spec["tile"])
-    return (a, b, move_spec["side"])
+    tile = move_spec.get("tile")
+    side = move_spec.get("side")
+    if not isinstance(tile, (list, tuple)) or len(tile) != 2 or side is None:
+        return ("invalid",)
+    a, b = sorted(tile)
+    return (a, b, side)
 
 
 def score_move(engine_tile, engine_side, case: dict) -> tuple[str, float]:
@@ -100,7 +108,7 @@ def score_move(engine_tile, engine_side, case: dict) -> tuple[str, float]:
         return "acceptable",  scoring.get("acceptable_score",  SCORE_ACCEPTABLE)
     if pred in discouraged:
         return "discouraged", scoring.get("discouraged_score", SCORE_DISCOURAGED)
-    return "other", SCORE_OTHER
+    return "other", scoring.get("fallback_score", SCORE_OTHER)
 
 
 # ============================================================
