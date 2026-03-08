@@ -54,12 +54,14 @@ body {
 }
 
 .player {
-  width: 44px;
-  height: 44px;
-  background: radial-gradient(circle at 35% 35%, #42a5f5, #1565c0);
-  border: 3px solid #0d47a1;
-  box-shadow: 0 3px 8px rgba(0,0,0,0.4), inset 0 1px 3px rgba(255,255,255,0.3);
+  width: 56px;
+  height: 56px;
+  background: url('shelly.png') center/contain no-repeat;
+  border: none;
+  box-shadow: none;
   z-index: 10;
+  overflow: visible;
+  image-rendering: auto;
 }
 
 .eye {
@@ -484,7 +486,7 @@ function addEyes(container, sz) {
 
 function createPlayer() {
   const elem = el('div','character player',arena);
-  addEyes(elem, 44);
+  // No CSS eyes — using Shelly sprite image
   player = { x: ARENA_W/2, y: ARENA_H/2, hp: PLAYER.maxHp, radius: PLAYER.radius, el: elem };
   pos(elem, player.x, player.y);
   updatePlayerHpBar();
