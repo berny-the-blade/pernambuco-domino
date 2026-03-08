@@ -60,6 +60,55 @@ def _validate_policy_targets_np(pis, masks, atol=1e-4):
         raise ValueError(f"ReplayDataset: row {idx} has zero legal actions")
 
 
+def _validate_policy_targets_torch(target_pis, masks, atol=1e-4):
+    """Cheap batch-time safety check. Call only on the first batch or debug runs."""
+    if target_pis.ndim != 2 or target_pis.shape[1] != 57:
+        raise ValueError(f"train_epoch: target_pis shape {tuple(target_pis.shape)} != [B,57]")
+    if masks.ndim != 2 or masks.shape[1] != 57:
+        raise ValueError(f"train_epoch: masks shape {tuple(masks.shape)} != [B,57]")
+
+    if not torch.isfinite(target_pis).all():
+        raise ValueError("train_epoch: target_pis contains NaN/Inf")
+    if not torch.isfinite(masks).all():
+        raise ValueError("train_epoch: masks contains NaN/Inf")
+
+    if (target_pis < -1e-6).any():
+        raise ValueError("train_epoch: target_pis contains negative mass")
+
+    row_sums = target_pis.sum(dim=1)
+    if torch.max(torch.abs(row_sums - 1.0)) > atol:
+        bad_idx = int(torch.argmax(torch.abs(row_sums - 1.0)).item())
+        # Print debug summary for worst row before raising
+        summary = _summarize_bad_policy_row(target_pis[bad_idx], masks[bad_idx])
+        print(f"  [DEBUG] bad row {bad_idx}: {summary}")
+        raise ValueError(
+            f"train_epoch: pi row {bad_idx} sums to {row_sums[bad_idx].item():.8f}, expected ~1.0"
+        )
+
+    illegal_mass = (target_pis * (masks <= 0.5)).sum(dim=1)
+    if torch.max(illegal_mass) > 1e-6:
+        bad_idx = int(torch.argmax(illegal_mass).item())
+        summary = _summarize_bad_policy_row(target_pis[bad_idx], masks[bad_idx])
+        print(f"  [DEBUG] bad row {bad_idx}: {summary}")
+        raise ValueError(
+            f"train_epoch: row {bad_idx} has illegal pi mass {illegal_mass[bad_idx].item():.8e}"
+        )
+
+
+def _summarize_bad_policy_row(pi_row, mask_row) -> dict:
+    """Return compact debug info for a bad policy row (tensor inputs)."""
+    pi   = pi_row.detach().cpu().numpy()
+    mask = mask_row.detach().cpu().numpy()
+    top  = np.argsort(-pi)[:5]
+    return {
+        "top_actions":  top.tolist(),
+        "top_probs":    [float(pi[t]) for t in top],
+        "top_legal":    [bool(mask[t] > 0.5) for t in top],
+        "sum":          float(pi.sum()),
+        "illegal_mass": float((pi * (mask <= 0.5)).sum()),
+    }
+
+
 class ReplayDataset(Dataset):
     """PyTorch dataset wrapping replay buffer.
 
@@ -81,6 +130,15 @@ class ReplayDataset(Dataset):
         self.has_belief = len(buffer[0]) >= 5
         if self.has_belief:
             self.beliefs = np.array([b[4] for b in buffer], dtype=np.float32)
+            # Belief target guard: shape [N,21], values in [0,1]
+            if self.beliefs.shape[1] != 21:
+                raise ValueError(
+                    f"ReplayDataset: expected belief shape [N,21], got {self.beliefs.shape}"
+                )
+            if not np.isfinite(self.beliefs).all():
+                raise ValueError("ReplayDataset: belief_target contains NaN/Inf")
+            if ((self.beliefs < -1e-6) | (self.beliefs > 1.0 + 1e-6)).any():
+                raise ValueError("ReplayDataset: belief_target outside [0,1]")
         else:
             self.beliefs = None
 
@@ -139,6 +197,10 @@ class Trainer:
             masks      = masks.to(self.device)
             target_pis = target_pis.to(self.device)
             target_vs  = target_vs.to(self.device)
+
+            # Fail fast on first batch only — cheap and sufficient
+            if n_batches == 0:
+                _validate_policy_targets_torch(target_pis, masks)
 
             if use_belief:
                 pred_policy, pred_value, pred_belief_logits = self.model(
