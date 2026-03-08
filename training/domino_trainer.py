@@ -14,6 +14,52 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
 
+def _validate_policy_targets_np(pis, masks, atol=1e-4):
+    """
+    Fast offline validation for replay-buffer rows before training starts.
+    Raises ValueError immediately if anything is malformed.
+    """
+    pis   = np.asarray(pis,   dtype=np.float32)
+    masks = np.asarray(masks, dtype=np.float32)
+
+    if pis.ndim != 2 or pis.shape[1] != 57:
+        raise ValueError(f"ReplayDataset: expected pis shape [N,57], got {pis.shape}")
+    if masks.ndim != 2 or masks.shape[1] != 57:
+        raise ValueError(f"ReplayDataset: expected masks shape [N,57], got {masks.shape}")
+
+    if not np.isfinite(pis).all():
+        raise ValueError("ReplayDataset: pi contains NaN/Inf")
+    if not np.isfinite(masks).all():
+        raise ValueError("ReplayDataset: mask contains NaN/Inf")
+
+    if (pis < -1e-6).any():
+        bad = np.argwhere(pis < -1e-6)[:10]
+        raise ValueError(f"ReplayDataset: negative pi mass at {bad.tolist()}")
+
+    row_sums = pis.sum(axis=1)
+    bad_sum  = np.where(np.abs(row_sums - 1.0) > atol)[0]
+    if len(bad_sum) > 0:
+        idx = int(bad_sum[0])
+        raise ValueError(
+            f"ReplayDataset: pi row {idx} sums to {row_sums[idx]:.8f}, expected ~1.0"
+        )
+
+    illegal_mass = (pis * (masks <= 0.5)).sum(axis=1)
+    bad_illegal  = np.where(illegal_mass > 1e-6)[0]
+    if len(bad_illegal) > 0:
+        idx         = int(bad_illegal[0])
+        bad_actions = np.where((masks[idx] <= 0.5) & (pis[idx] > 1e-9))[0][:10]
+        raise ValueError(
+            f"ReplayDataset: row {idx} has illegal pi mass {illegal_mass[idx]:.8e} "
+            f"on actions {bad_actions.tolist()}"
+        )
+
+    legal_counts = (masks > 0.5).sum(axis=1)
+    if (legal_counts == 0).any():
+        idx = int(np.where(legal_counts == 0)[0][0])
+        raise ValueError(f"ReplayDataset: row {idx} has zero legal actions")
+
+
 class ReplayDataset(Dataset):
     """PyTorch dataset wrapping replay buffer.
 
@@ -27,6 +73,9 @@ class ReplayDataset(Dataset):
         self.states = np.array([b[0] for b in buffer], dtype=np.float32)
         self.masks  = np.array([b[1] for b in buffer], dtype=np.float32)
         self.pis    = np.array([b[2] for b in buffer], dtype=np.float32)
+
+        # Fail fast on malformed policy targets / masks before dataloader starts
+        _validate_policy_targets_np(self.pis, self.masks)
         self.values = np.array([b[3] for b in buffer], dtype=np.float32).reshape(-1, 1)
 
         self.has_belief = len(buffer[0]) >= 5
