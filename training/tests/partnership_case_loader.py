@@ -124,15 +124,32 @@ def build_case_observation(case: dict) -> dict:
     cant_have_raw = case.get("cant_have", {})
     cant_have = {int(k): list(v) for k, v in cant_have_raw.items()}
 
+    hands_raw = case.get("hands", {})
+    hand_sizes = {
+        i: len(hands_raw.get(f"player_{i}", [])) or 6
+        for i in range(4)
+    }
+
     return {
         "player":       p,
         "hand_indices": hand_indices,
+        "hand":         hand_indices,            # alias for adapter compatibility
         "left_end":     board["left_end"],
         "right_end":    board["right_end"],
         "board_length": board["board_length"],
         "played":       played,
         "cant_have":    cant_have,
+        "hand_sizes":   hand_sizes,
+        "history":      board.get("history", []),
+        "raw_case":     case,
     }
+
+
+# ── Suite loader ─────────────────────────────────────────────────────────────
+
+def load_partnership_suite(path: Path | str = SUITE_PATH) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ── Suite validator ───────────────────────────────────────────────────────────
