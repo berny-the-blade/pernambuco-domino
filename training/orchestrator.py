@@ -85,6 +85,9 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     # Unique seed per worker
     np.random.seed(int(time.time() * 1000) % (2**31) + worker_id * 1000)
 
+    if policy_target == 'visits' and not use_mcts:
+        raise ValueError("policy_target='visits' requires use_mcts=True")
+
     # Mixed sim budget: 90% at base sims, 10% at 4× base sims
     mcts_base = DominoMCTS(model, num_simulations=mcts_sims) if use_mcts else None
     mcts_high = DominoMCTS(model, num_simulations=mcts_sims * high_sim_multiplier) if use_mcts else None

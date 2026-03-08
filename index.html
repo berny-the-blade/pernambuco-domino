@@ -2637,6 +2637,48 @@
         return mask;
       };
 
+      // Convert a move object → canonical 57-action index
+      // 0..27 = tile-left, 28..55 = tile-right, 56 = pass
+      const _moveToActionIdx = (move) => {
+        if (!move) return -1;
+        if (move.pass) return 56;
+        if (!move.tile || move.tile.id == null) return -1;
+        const tileIdx = TILE_INDEX[move.tile.id];
+        if (tileIdx == null) return -1;
+        if (move.side === 'right') return 28 + tileIdx;
+        return tileIdx;
+      };
+
+      // Extract 57-dim visit-count policy from ISMCTS root (for training export).
+      // legalMask is optional. Falls back to uniform over legal if no root visits.
+      const rootVisitPolicy = (root, legalMask, tau = 1.0) => {
+        const pi = new Float32Array(NN_NUM_ACTIONS);
+        let total = 0.0;
+        for (const child of root.children) {
+          if (!child || child.visits <= 0) continue;
+          const a = (child.actionIdx != null && child.actionIdx >= 0)
+            ? child.actionIdx : _moveToActionIdx(child.move);
+          if (a < 0 || a >= NN_NUM_ACTIONS) continue;
+          if (legalMask && !legalMask[a]) continue;
+          const w = (tau === 1.0) ? child.visits : Math.pow(child.visits, 1.0 / tau);
+          pi[a] += w;
+          total += w;
+        }
+        if (total > 0) {
+          for (let a = 0; a < NN_NUM_ACTIONS; a++) pi[a] /= total;
+          return pi;
+        }
+        if (legalMask) {
+          let nLegal = 0;
+          for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) nLegal++;
+          if (nLegal > 0) {
+            const u = 1.0 / nLegal;
+            for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) pi[a] = u;
+          }
+        }
+        return pi;
+      };
+
       // === ISMCTS (Information Set Monte Carlo Tree Search) ===
       class ISMCTSNode {
         constructor(move = null, parent = null) {
@@ -2770,7 +2812,7 @@
         return 1;
       };
 
-      const ismctsEval = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier) => {
+      const ismctsEval = async (hand, lE, rE, bLen, player, knowledge, matchScores, dobMultiplier, returnPolicy = false, policyTau = 1.0) => {
         const MAX_ITERATIONS = 600;
         const TIME_LIMIT = 300;
         const MAX_NODES = 5000;
@@ -2973,52 +3015,44 @@
           _ismctsBackprop(node, reward);
         }
 
-        // === rootVisitPolicy: 57-dim visit-count policy target for training ===
-        // Call before dedup. Uses canonical actionIdx (0-27=left, 28-55=right, 56=pass).
-        // legalMask: Float32Array(57) from _nnActionMask — filters impossible actions.
-        // Fallback: uniform over legal if no visited root children (e.g. forced/shallow tree).
-        const rootVisitPolicy = (root, legalMask, tau = 1.0) => {
-          const pi = new Float32Array(NN_NUM_ACTIONS);
-          let totalVisits = 0;
-          for (const child of root.children) {
-            const a = child.actionIdx;
-            if (child.visits === 0 || a < 0 || a >= NN_NUM_ACTIONS) continue;
-            if (legalMask && !legalMask[a]) continue;
-            const v = tau === 1.0 ? child.visits : Math.pow(child.visits, 1.0 / tau);
-            pi[a] += v;
-            totalVisits += v;
-          }
-          if (totalVisits > 0) {
-            for (let a = 0; a < NN_NUM_ACTIONS; a++) pi[a] /= totalVisits;
-          } else if (legalMask) {
-            // Fallback: uniform over legal actions
-            let nLegal = 0;
-            for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) nLegal++;
-            if (nLegal > 0) {
-              const u = 1.0 / nLegal;
-              for (let a = 0; a < NN_NUM_ACTIONS; a++) if (legalMask[a]) pi[a] = u;
-            }
-          }
-          return pi;
-        };
+        // Extract results from root's children
+        if (root.children.length === 0) {
+          return returnPolicy ? { results: [], pi: new Float32Array(NN_NUM_ACTIONS) } : null;
+        }
 
-        // Extract best move from root children
-        if (root.children.length === 0) return null;
+        const legalMask = _nnActionMask(hand, lE, rE, bLen);
+        const pi57 = rootVisitPolicy(root, legalMask, policyTau);
 
-        // commit 10: visits-max root choice -- most-visited wins, Q breaks ties
-        // Dedup by tile: keep highest-visit child per tile (was: highest-Q)
+        // Dedup by tile: keep highest-avgReward child per tile (for UI display)
         const tileResults = new Map();
         for (const child of root.children) {
-          if (child.visits === 0) continue;
+          if (!child || child.visits === 0) continue;
           const avgReward = child.totalReward / child.visits;
+          const actionIdx = (child.actionIdx != null && child.actionIdx >= 0)
+            ? child.actionIdx : _moveToActionIdx(child.move);
+          const r = {
+            tile: child.move.tile,
+            side: child.move.side,
+            actionIdx,
+            winRate: (avgReward + 1) / 2,
+            expectedPoints: avgReward * 4,
+            avgReward,
+            visits: child.visits,
+            blockRate: 0, sims: child.visits,
+            outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
+            variance: 0, stdDev: 0, ci95: 0, cvar5: 0,
+            ismcts: true
+          };
           const tileKey = child.move.tile.id;
-          const r = { tile: child.move.tile, side: child.move.side, expectedPoints: avgReward * 4, visits: child.visits };
-          if (!tileResults.has(tileKey) || r.visits > tileResults.get(tileKey).visits) {
+          if (!tileResults.has(tileKey) || r.avgReward > tileResults.get(tileKey).avgReward) {
             tileResults.set(tileKey, r);
           }
         }
         const finalResults = [...tileResults.values()];
-        finalResults.sort((a, b) => b.visits - a.visits || b.expectedPoints - a.expectedPoints);
+        finalResults.sort((a, b) => b.avgReward - a.avgReward || b.visits - a.visits);
+        if (returnPolicy) {
+          return { results: finalResults, pi: pi57 };
+        }
         return finalResults.length > 0 ? finalResults[0] : null;
       };
 

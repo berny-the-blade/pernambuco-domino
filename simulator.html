@@ -7858,6 +7858,18 @@
       return mask;
     }
 
+    // Convert a move object → canonical 57-action index
+    // 0..27 = tile-left, 28..55 = tile-right, 56 = pass
+    function _moveToActionIdx(move) {
+      if (!move) return -1;
+      if (move.pass) return 56;
+      if (!move.tile || move.tile.id == null) return -1;
+      const tileIdx = TILE_INDEX[move.tile.id];
+      if (tileIdx == null) return -1;
+      if (move.side === 'right') return 28 + tileIdx;
+      return tileIdx;
+    }
+
     // Decode policy action index to {tile, side}
     function _nnDecodeAction(actionIdx, hand) {
       if (actionIdx === 56) return null; // pass
@@ -8041,7 +8053,7 @@
       console.log(`ISMCTS config: C=${ISMCTS_C}, progBias=${ISMCTS_PROG_BIAS}, sims=${MC_SIMS_PLAY_EXPERT}, pool=${ISMCTS_POOL_SIZE}`);
     };
 
-    function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel) {
+    function ismctsEval(hand, lE, rE, bLen, player, knowledge, beliefModel, returnPolicy = false, policyTau = 1.0) {
       const MAX_ITERATIONS = 600;
       const TIME_LIMIT = 300; // ms
       const MAX_NODES = 5000;
@@ -8264,37 +8276,50 @@
       }
 
       // Extract results from root's children
-      if (root.children.length === 0) return []; // fallback: no tree built
+      if (root.children.length === 0) {
+        return returnPolicy ? { results: [], pi: new Float32Array(NN_NUM_ACTIONS) } : [];
+      }
 
-      const results = [];
+      const legalMask = _nnActionMask(hand, lE, rE, bLen);
+      const pi57 = rootVisitPolicy(root, legalMask, policyTau);
+
+      // Dedup by tile: keep highest-avgReward child per tile (for UI display)
       const tileResults = new Map();
       for (const child of root.children) {
-        if (child.visits === 0) continue;
+        if (!child || child.visits === 0) continue;
         const avgReward = child.totalReward / child.visits;
-        const key = `${child.move.tile.id}:${child.move.side}`;
+        const actionIdx = (child.actionIdx != null && child.actionIdx >= 0)
+          ? child.actionIdx
+          : (() => {
+              if (!child.move) return -1;
+              if (child.move.pass) return 56;
+              if (!child.move.tile || child.move.tile.id == null) return -1;
+              const tIdx = TILE_INDEX[child.move.tile.id];
+              return child.move.side === 'right' ? 28 + tIdx : tIdx;
+            })();
         const tileKey = child.move.tile.id;
         const r = {
-          tile: child.move.tile, side: child.move.side,
-          winRate: (avgReward + 1) / 2, // normalize [-1,1] → [0,1]
-          expectedPoints: avgReward * 4, // scale back
+          tile: child.move.tile,
+          side: child.move.side,
+          actionIdx,
+          winRate: (avgReward + 1) / 2,
+          expectedPoints: avgReward * 4,
+          avgReward,
           visits: child.visits,
           blockRate: 0, sims: child.visits,
           outcomes: { normal: 0, carroca: 0, laelo: 0, cruzada: 0, blocked: 0, tie: 0 },
           variance: 0, stdDev: 0, ci95: 0, cvar5: 0,
           ismcts: true
         };
-        const existing = tileResults.get(tileKey);
-        const dominated = usePUCT
-          ? (!existing || r.visits > existing.visits || (r.visits === existing.visits && r.expectedPoints > existing.expectedPoints))
-          : (!existing || r.expectedPoints > existing.expectedPoints);
-        if (dominated) tileResults.set(tileKey, r);
+        if (!tileResults.has(tileKey) || r.avgReward > tileResults.get(tileKey).avgReward) {
+          tileResults.set(tileKey, r);
+        }
       }
       const finalResults = [...tileResults.values()];
-      // PUCT: sort by most-visited (stable at high sims), fallback to avgReward
-      if (usePUCT) {
-        finalResults.sort((a, b) => b.visits - a.visits || b.expectedPoints - a.expectedPoints);
-      } else {
-        finalResults.sort((a, b) => b.expectedPoints - a.expectedPoints || b.visits - a.visits);
+      finalResults.sort((a, b) => b.avgReward - a.avgReward || b.visits - a.visits);
+
+      if (returnPolicy) {
+        return { results: finalResults, pi: pi57 };
       }
       return finalResults;
     }
