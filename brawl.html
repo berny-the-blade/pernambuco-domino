@@ -24,6 +24,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  transform-origin: top center;
 }
 
 #hud {
@@ -458,6 +459,18 @@ body {
 <script>
 // ─── CONSTANTS ────────────────────────────────────────────────
 const ARENA_W = 800, ARENA_H = 560;
+
+// Scale game to fit screen width on mobile
+function scaleGame() {
+  const wrapper = document.getElementById('game-wrapper');
+  const scaleX = window.innerWidth / 800;
+  const scaleY = window.innerHeight / (560 + 60); // arena + hud
+  const scale = Math.min(scaleX, scaleY, 1);
+  wrapper.style.transform = `scale(${scale})`;
+  wrapper.style.marginBottom = `-${(1 - scale) * (560 + 60)}px`;
+}
+scaleGame();
+window.addEventListener('resize', scaleGame);
 const PLAYER_HP = 300, PLAYER_SPEED = 180, PLAYER_RADIUS = 24;
 const SUPER_MAX = 100;
 
@@ -521,12 +534,20 @@ arena.addEventListener('touchstart', handleTouchStart, {passive:false});
 arena.addEventListener('touchmove', handleTouchMove, {passive:false});
 arena.addEventListener('touchend', handleTouchEnd, {passive:false});
 
+function getTouchArenaPos(t) {
+  const rect = arena.getBoundingClientRect();
+  const scaleX = ARENA_W / rect.width;
+  const scaleY = ARENA_H / rect.height;
+  return {
+    x: (t.clientX - rect.left) * scaleX,
+    y: (t.clientY - rect.top) * scaleY
+  };
+}
+
 function handleTouchStart(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
-    const rect = arena.getBoundingClientRect();
-    const x = t.clientX - rect.left;
-    const y = t.clientY - rect.top;
+    const {x, y} = getTouchArenaPos(t);
     if (x < ARENA_W / 2) {
       joystickId = t.identifier;
       joystickActive = true;
@@ -554,9 +575,7 @@ function handleTouchMove(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (t.identifier === joystickId) {
-      const rect = arena.getBoundingClientRect();
-      const x = t.clientX - rect.left;
-      const y = t.clientY - rect.top;
+      const {x, y} = getTouchArenaPos(t);
       updateJoystick(x, y, false);
     }
   }
