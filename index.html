@@ -1041,7 +1041,13 @@
           k._moveCount = this._moveCount;
           return k;
         }
-        recordPlay(p, t) {
+        recordPlay(p, t, curLE, curRE) {
+          // Track board ends before this move for new-end detection
+          if (curLE !== undefined && curRE !== undefined) {
+            this.prevLE = this.lastMove ? this.lastMove.postLE : curLE;
+            this.prevRE = this.lastMove ? this.lastMove.postRE : curRE;
+            this.lastMove = { player: p, tile: t, postLE: curLE, postRE: curRE };
+          }
           if (!this.played.has(t.id)) {
             this.played.add(t.id);
             this._remainingCount[t.left]--;
@@ -1152,6 +1158,67 @@
         if (isD) return { pts: 2, type: 'CARROCA' };
         if (wasBoth) return { pts: 3, type: 'LA E LO' };
         return { pts: 1, type: 'NORMAL' };
+      };
+
+      // === Partnership convention helpers ===
+
+      // Returns the pip value newly introduced by opponent's last move, or null.
+      // e.g. prev ends 5,5 → opponent plays 5|1 → new ends 5,1 → newly opened = 1
+      const getNewlyOpenedEnd = (lastMove, prevLE, prevRE, curLE, curRE) => {
+        if (lastMove == null || prevLE == null) return null;
+        const prev = new Set([prevLE, prevRE]);
+        for (const e of [curLE, curRE]) {
+          if (!prev.has(e)) return e;
+        }
+        return null;
+      };
+
+      // Does this move keep the newly opened end alive?
+      const movePreservesEnd = (move, newlyOpenedEnd, curLE, curRE) => {
+        if (newlyOpenedEnd == null || move.pass) return false;
+        return move.newLE === newlyOpenedEnd || move.newRE === newlyOpenedEnd;
+      };
+
+      // Does this move remove the newly opened end entirely?
+      const moveCollapsesEnd = (move, newlyOpenedEnd, curLE, curRE) => {
+        if (newlyOpenedEnd == null || move.pass) return false;
+        return move.newLE !== newlyOpenedEnd && move.newRE !== newlyOpenedEnd;
+      };
+
+      // === FEATURE: Preserve newly opened end (partnership convention) ===
+      // If opponent just opened a new end X and we can keep it alive, prefer that.
+      // Example: 55 opened, opponent plays 5|1 → ends 5,1.
+      //          Partner should continue the 1-side, not reconnect to 5.
+      const scoreNewEndPreservation = ({ move, legalMoves, player, knowledge, curLE, curRE, bLen }) => {
+        const PENALTY_COLLAPSE = -10;
+        const BONUS_PRESERVE   = +3;
+
+        if (!knowledge.lastMove || bLen <= 1) return 0;
+        if (move.pass) return 0;
+
+        // Only applies when last mover was an opponent
+        const meTeam   = player % 2;
+        const lastTeam = knowledge.lastMove.player % 2;
+        if (lastTeam === meTeam) return 0;
+
+        const newlyOpenedEnd = getNewlyOpenedEnd(
+          knowledge.lastMove, knowledge.prevLE, knowledge.prevRE, curLE, curRE
+        );
+        if (newlyOpenedEnd == null) return 0;
+
+        // Is there at least one legal move that keeps the new end alive?
+        const hasPreserveOption = legalMoves.some(
+          alt => !alt.pass && movePreservesEnd(alt, newlyOpenedEnd, curLE, curRE)
+        );
+        if (!hasPreserveOption) return 0;
+
+        if (moveCollapsesEnd(move, newlyOpenedEnd, curLE, curRE)) {
+          return PENALTY_COLLAPSE;
+        }
+        if (movePreservesEnd(move, newlyOpenedEnd, curLE, curRE)) {
+          return BONUS_PRESERVE;
+        }
+        return 0;
       };
 
       // === Full smartAI — ported from simulator with all strategic features ===
@@ -1514,6 +1581,25 @@
               if (coverCount === 2) ss += 25;
               else if (coverCount === 0) ss -= 15;
             }
+
+            // Partnership convention: preserve newly opened end
+            const moveObj = {
+              pass: false,
+              newLE: side === 'left' ? (tile.left === lE ? tile.right : tile.left) : lE,
+              newRE: side === 'right' ? (tile.right === rE ? tile.left : tile.right) : rE,
+            };
+            const allLegalMoves = playable.flatMap(pt => {
+              const opts = [];
+              if (bLen === 0 || pt.left === lE || pt.right === lE)
+                opts.push({ pass: false, newLE: pt.left === lE ? pt.right : pt.left, newRE: rE });
+              if (bLen > 0 && lE !== rE && (pt.left === rE || pt.right === rE))
+                opts.push({ pass: false, newLE: lE, newRE: pt.right === rE ? pt.left : pt.right });
+              return opts;
+            });
+            ss += scoreNewEndPreservation({
+              move: moveObj, legalMoves: allLegalMoves, player,
+              knowledge, curLE: lE, curRE: rE, bLen
+            });
 
             options.push({ tile, score: ss, side });
           }
