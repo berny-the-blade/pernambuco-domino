@@ -21,12 +21,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from domino_net import DominoNet
 
 
+def filtered_inference_state_dict(model):
+    """Strip training-only belief head weights — browser format stays unchanged."""
+    sd = model.state_dict()
+    return {
+        k: v for k, v in sd.items()
+        if not k.startswith("belief_fc1")
+        and not k.startswith("belief_bn")
+        and not k.startswith("belief_fc2")
+    }
+
+
 def export_onnx(checkpoint_path, output_path):
     """Export checkpoint to ONNX format."""
     # Load checkpoint
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
     model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
-    model.load_state_dict(ckpt['model_state_dict'])
+    incompat = model.load_state_dict(ckpt['model_state_dict'], strict=False)
+    if incompat.missing_keys:    print(f"[export] Missing keys: {incompat.missing_keys}")
+    if incompat.unexpected_keys: print(f"[export] Unexpected keys: {incompat.unexpected_keys}")
     model.eval()
 
     print(f"Loaded checkpoint: generation {ckpt.get('generation', '?')}")
@@ -63,13 +76,15 @@ def export_raw_weights(checkpoint_path, output_path):
     """
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
     model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
-    model.load_state_dict(ckpt['model_state_dict'])
+    incompat = model.load_state_dict(ckpt['model_state_dict'], strict=False)
+    if incompat.missing_keys:    print(f"[export] Missing keys: {incompat.missing_keys}")
+    if incompat.unexpected_keys: print(f"[export] Unexpected keys: {incompat.unexpected_keys}")
     model.eval()
 
     print(f"Loaded checkpoint: generation {ckpt.get('generation', '?')}")
 
     weights = {}
-    for name, param in model.state_dict().items():
+    for name, param in filtered_inference_state_dict(model).items():
         arr = param.cpu().numpy()
         weights[name] = {
             'shape': list(arr.shape),
@@ -101,7 +116,9 @@ def export_binary_weights(checkpoint_path, output_path):
     """
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
     model = DominoNet(input_dim=213, hidden_dim=256, num_actions=57, num_blocks=4)
-    model.load_state_dict(ckpt['model_state_dict'])
+    incompat = model.load_state_dict(ckpt['model_state_dict'], strict=False)
+    if incompat.missing_keys:    print(f"[export] Missing keys: {incompat.missing_keys}")
+    if incompat.unexpected_keys: print(f"[export] Unexpected keys: {incompat.unexpected_keys}")
     model.eval()
 
     print(f"Loaded checkpoint: generation {ckpt.get('generation', '?')}")
@@ -110,7 +127,7 @@ def export_binary_weights(checkpoint_path, output_path):
     layer_info = []
     all_data = []
     offset = 0
-    for name, param in model.state_dict().items():
+    for name, param in filtered_inference_state_dict(model).items():
         arr = param.cpu().numpy().astype(np.float32).flatten()
         layer_info.append({
             'name': name,

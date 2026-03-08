@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader
 # Add parent dir for imports when running from training/
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from domino_env import DominoEnv, DominoMatch
+from domino_env import DominoEnv, DominoMatch, TILES
 from domino_net import DominoNet
 from domino_encoder import DominoEncoder
 from domino_mcts import DominoMCTS
@@ -35,10 +35,34 @@ from domino_trainer import Trainer, ReplayDataset
 from match_equity import get_match_equity, delta_me, DOB_VALUES
 
 
+def build_belief_target(hidden_hands_by_player, me):
+    """
+    21-dim target:
+      0..6  = partner has pip 0..6
+      7..13 = LHO has pip 0..6
+      14..20 = RHO has pip 0..6
+
+    hidden_hands_by_player: dict/list keyed by absolute player id
+    """
+    target = np.zeros(21, dtype=np.float32)
+    partner = (me + 2) % 4
+    lho     = (me + 1) % 4
+    rho     = (me + 3) % 4
+    for rel_idx, abs_player in enumerate([partner, lho, rho]):
+        seen = np.zeros(7, dtype=np.float32)
+        for tile_idx in hidden_hands_by_player[abs_player]:
+            a, b = TILES[tile_idx]
+            seen[a] = 1.0
+            seen[b] = 1.0
+        target[rel_idx * 7 : rel_idx * 7 + 7] = seen
+    return target
+
+
 def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                      mcts_sims, result_queue, value_target='me',
                      policy_target='visits',
-                     high_sim_fraction=0.1, high_sim_multiplier=4):
+                     high_sim_fraction=0.1, high_sim_multiplier=4,
+                     use_belief_head=False):
     """
     Isolated CPU process. Plays games against itself and pipes training data back.
 
@@ -50,7 +74,11 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     """
     device = torch.device("cpu")
     model = DominoNet().to(device)
-    model.load_state_dict(model_state_dict)
+    incompat = model.load_state_dict(model_state_dict, strict=False)
+    if incompat.missing_keys:
+        print(f"[worker {worker_id}] Missing keys: {incompat.missing_keys}")
+    if incompat.unexpected_keys:
+        print(f"[worker {worker_id}] Unexpected keys: {incompat.unexpected_keys}")
     model.eval()
     torch.set_grad_enabled(False)
 
@@ -122,12 +150,15 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
 
                 chosen_action = np.random.choice(57, p=target_pi)
 
-                game_history.append({
+                record = {
                     'state': state_np,
                     'mask': valid_mask,
                     'pi': target_pi,
                     'team': current_team,
-                })
+                }
+                if use_belief_head:
+                    record['belief_target'] = build_belief_target(env.hands, obs['player'])
+                game_history.append(record)
 
                 # Execute action
                 obs, _, done, info = env.step(chosen_action)
@@ -164,9 +195,15 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                             opp_score=opp_s,
                             multiplier=multiplier_before
                         )
-                        worker_data.append((
-                            step['state'], step['mask'], step['pi'], v
-                        ))
+                        if use_belief_head:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v,
+                                step['belief_target'],
+                            ))
+                        else:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v,
+                            ))
                 else:
                     # Legacy: points/4
                     winner_team = env.winner_team
@@ -176,9 +213,15 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                             v_target = reward_magnitude
                         else:
                             v_target = -reward_magnitude
-                        worker_data.append((
-                            step['state'], step['mask'], step['pi'], v_target
-                        ))
+                        if use_belief_head:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v_target,
+                                step['belief_target'],
+                            ))
+                        else:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v_target,
+                            ))
 
     result_queue.put(worker_data)
 
@@ -190,11 +233,11 @@ def arena_match(champion_weights, challenger_weights, seed, challenger_team=0):
     """
     device = torch.device("cpu")
     champion = DominoNet().to(device)
-    champion.load_state_dict(champion_weights)
+    champion.load_state_dict(champion_weights, strict=False)
     champion.eval()
 
     challenger = DominoNet().to(device)
-    challenger.load_state_dict(challenger_weights)
+    challenger.load_state_dict(challenger_weights, strict=False)
     challenger.eval()
 
     match = DominoMatch(target_points=6)
@@ -286,7 +329,8 @@ class Orchestrator:
 
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=True,
                  mcts_sims=200, value_target='me', policy_target='visits',
-                 high_sim_fraction=0.1, high_sim_multiplier=4):
+                 high_sim_fraction=0.1, high_sim_multiplier=4,
+                 use_belief_head=False, belief_weight=0.2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
@@ -295,13 +339,16 @@ class Orchestrator:
         print(f"Workers: {num_workers}, Buffer: {buffer_size}, "
               f"MCTS: {use_mcts} ({mcts_sims} sims, "
               f"{high_sim_fraction:.0%} at {mcts_sims * high_sim_multiplier}), "
-              f"Value: {value_target}, Policy: {policy_target}")
+              f"Value: {value_target}, Policy: {policy_target}, "
+              f"BeliefHead: {use_belief_head}, BeliefWeight: {belief_weight}")
 
         self.model = DominoNet().to(self.device)
         self.champion_weights = {
             k: v.cpu().clone() for k, v in self.model.state_dict().items()
         }
-        self.trainer = Trainer(self.model, lr=1e-3)
+        self.use_belief_head = use_belief_head
+        self.belief_weight   = belief_weight
+        self.trainer = Trainer(self.model, lr=1e-3, belief_weight=belief_weight)
 
         self.num_workers = num_workers
         self.use_mcts = use_mcts
@@ -355,7 +402,8 @@ class Orchestrator:
                     args=(w_id, shared_weights, games_per_worker,
                           self.use_mcts, self.mcts_sims, result_queue,
                           self.value_target, self.policy_target,
-                          self.high_sim_fraction, self.high_sim_multiplier)
+                          self.high_sim_fraction, self.high_sim_multiplier,
+                          self.use_belief_head)
                 )
                 p.start()
                 processes.append(p)
@@ -405,9 +453,10 @@ class Orchestrator:
                 )
 
                 for epoch in range(5):
-                    loss, v_loss, p_loss = self.trainer.train_epoch(dataloader)
+                    loss, v_loss, p_loss, b_loss = self.trainer.train_epoch(dataloader)
                     print(f"  Epoch {epoch+1}/5 | "
-                          f"Loss: {loss:.4f} (V: {v_loss:.4f}, P: {p_loss:.4f})")
+                          f"Loss: {loss:.4f} "
+                          f"(V: {v_loss:.4f}, P: {p_loss:.4f}, B: {b_loss:.4f})")
 
                 # === PHASE 3: ARENA EVALUATION ===
                 challenger_weights = {
@@ -621,7 +670,11 @@ class Orchestrator:
     def load_checkpoint(self, path):
         """Resume training from a checkpoint."""
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
-        self.model.load_state_dict(ckpt['model_state_dict'])
+        incompat = self.model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        if incompat.missing_keys:
+            print(f"[load_checkpoint] Missing keys: {incompat.missing_keys}")
+        if incompat.unexpected_keys:
+            print(f"[load_checkpoint] Unexpected keys: {incompat.unexpected_keys}")
         self.champion_weights = {
             k: v.cpu().clone() for k, v in self.model.state_dict().items()
         }
@@ -662,6 +715,10 @@ def main():
                              '"heuristic" = network policy + Dirichlet noise (legacy)')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume from checkpoint path')
+    parser.add_argument('--belief-head', action='store_true',
+                        help='Enable 21-output auxiliary pip-belief head')
+    parser.add_argument('--belief-weight', type=float, default=0.2,
+                        help='Auxiliary belief loss weight')
     args = parser.parse_args()
 
     orch = Orchestrator(
@@ -673,6 +730,8 @@ def main():
         policy_target=args.policy_target,
         high_sim_fraction=args.high_sim_fraction,
         high_sim_multiplier=args.high_sim_multiplier,
+        use_belief_head=args.belief_head,
+        belief_weight=args.belief_weight,
     )
 
     if args.resume:

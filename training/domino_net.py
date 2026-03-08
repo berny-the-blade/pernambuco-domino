@@ -48,30 +48,49 @@ class DominoNet(nn.Module):
         self.value_bn = nn.BatchNorm1d(64)
         self.value_fc2 = nn.Linear(64, 1)
 
-    def forward(self, x, valid_actions_mask=None):
+        # Belief head (training-only auxiliary head)
+        # 21 outputs = partner(7) + LHO(7) + RHO(7)
+        self.belief_fc1 = nn.Linear(hidden_dim, 128)
+        self.belief_bn  = nn.BatchNorm1d(128)
+        self.belief_fc2 = nn.Linear(128, 21)
+
+    def forward(self, x, valid_actions_mask=None, return_belief=False):
         """
         Args:
             x: (batch, 213) state tensor
-            valid_actions_mask: (batch, 57) binary float32 mask of legal actions
+            valid_actions_mask: (batch, 57) binary mask of legal actions
+            return_belief: if True, also return belief logits (21)
 
         Returns:
             policy: (batch, 57) probability distribution (masked + softmax)
-            value:  (batch, 1) scalar in [-1, 1]
+            value:  (batch, 1)  scalar in [-1, 1]
+        or:
+            policy, value, belief_logits
         """
+        # Handle single-sample BatchNorm edge case
+        if x.shape[0] == 1:
+            self.eval()
+
+        # Shared trunk
         h = F.relu(self.input_bn(self.input_fc(x)))
         for block in self.res_blocks:
             h = block(h)
 
+        # Policy head
         p = F.relu(self.policy_bn(self.policy_fc1(h)))
-        p = self.policy_fc2(p)
-
+        p = self.policy_fc2(p)  # raw logits
         if valid_actions_mask is not None:
             p = p + (1 - valid_actions_mask) * (-1e9)
-
         policy = F.softmax(p, dim=-1)
 
+        # Value head
         v = F.relu(self.value_bn(self.value_fc1(h)))
         v = torch.tanh(self.value_fc2(v))
+
+        if return_belief:
+            b = F.relu(self.belief_bn(self.belief_fc1(h)))
+            b = self.belief_fc2(b)  # raw logits
+            return policy, v, b
 
         return policy, v
 
