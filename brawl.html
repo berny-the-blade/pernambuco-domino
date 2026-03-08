@@ -718,62 +718,58 @@ function createEnemy(type, x, y) {
 
   switch (type) {
     case 'colt':
-      el.style.width = el.style.height = '38px';
-      el.style.background = 'radial-gradient(circle at 40% 35%, #ffe082, #ffc107)';
-      el.style.border = '3px solid #ff8f00';
+      el.style.width = el.style.height = '48px';
+      el.style.background = 'none';
+      el.style.border = 'none';
+      el.style.borderRadius = '0';
+      el.innerHTML += '<img src="colt.png" style="width:48px;height:48px;object-fit:contain;position:absolute;top:0;left:0;" onerror="this.style.display=\'none\';el.style.background=\'radial-gradient(circle at 40% 35%, #ffe082, #ffc107)\';el.style.border=\'3px solid #ff8f00\';el.style.borderRadius=\'50%\'">';
       nameLabel.textContent = 'COLT';
       enemy.hp = enemy.maxHp = 80;
       enemy.speed = 100;
       enemy.radius = 19;
       enemy.fireTimer = 0;
-      // Hat
-      const hat1 = document.createElement('div');
-      hat1.style.cssText = 'position:absolute;width:22px;height:8px;background:#5d4037;border-radius:3px 3px 0 0;top:-8px;left:50%;transform:translateX(-50%);';
-      el.appendChild(hat1);
       break;
     case 'bull':
-      el.style.width = el.style.height = '48px';
-      el.style.background = 'radial-gradient(circle at 40% 35%, #ef9a9a, #f44336)';
-      el.style.border = '3px solid #b71c1c';
+      el.style.width = el.style.height = '56px';
+      el.style.background = 'none';
+      el.style.border = 'none';
+      el.style.borderRadius = '0';
+      el.innerHTML += '<img src="bull.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;">';
       nameLabel.textContent = 'BULL';
       enemy.hp = enemy.maxHp = 250;
       enemy.speed = 75;
       enemy.radius = 24;
       break;
     case 'elprimo':
-      el.style.width = el.style.height = '46px';
-      el.style.background = 'radial-gradient(circle at 40% 35%, #ffcc80, #ff9800)';
-      el.style.border = '3px solid #e65100';
+      el.style.width = el.style.height = '56px';
+      el.style.background = 'none';
+      el.style.border = 'none';
+      el.style.borderRadius = '0';
+      el.innerHTML += '<img src="elprimo.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;">';
       nameLabel.textContent = 'EL PRIMO';
       enemy.hp = enemy.maxHp = 180;
       enemy.speed = 110;
       enemy.radius = 23;
-      // Fists
-      const fist1 = document.createElement('div');
-      fist1.style.cssText = 'position:absolute;width:14px;height:14px;background:#ff9800;border-radius:50%;border:2px solid #e65100;top:50%;left:-8px;transform:translateY(-50%);';
-      const fist2 = document.createElement('div');
-      fist2.style.cssText = 'position:absolute;width:14px;height:14px;background:#ff9800;border-radius:50%;border:2px solid #e65100;top:50%;right:-8px;transform:translateY(-50%);';
-      el.appendChild(fist1);
-      el.appendChild(fist2);
       break;
     case 'dynamike':
-      el.style.width = el.style.height = '34px';
-      el.style.background = 'radial-gradient(circle at 40% 35%, #a1887f, #6d4c41)';
-      el.style.border = '3px solid #3e2723';
+      el.style.width = el.style.height = '44px';
+      el.style.background = 'none';
+      el.style.border = 'none';
+      el.style.borderRadius = '0';
+      el.innerHTML += '<img src="dynamike.png" style="width:44px;height:44px;object-fit:contain;position:absolute;top:0;left:0;">';
       nameLabel.textContent = 'DYNAMIKE';
       enemy.hp = enemy.maxHp = 100;
       enemy.speed = 90;
       enemy.radius = 17;
-      const hat2 = document.createElement('div');
-      hat2.style.cssText = 'position:absolute;width:18px;height:7px;background:#3e2723;border-radius:3px 3px 0 0;top:-7px;left:50%;transform:translateX(-50%);';
-      el.appendChild(hat2);
       break;
     case 'spike':
-      el.style.width = el.style.height = '58px';
-      el.style.background = 'radial-gradient(circle at 40% 35%, #a5d6a7, #4caf50)';
-      el.style.border = '4px solid #1b5e20';
-      el.style.boxShadow = '0 0 20px #4caf50';
+      el.style.width = el.style.height = '64px';
+      el.style.background = 'none';
+      el.style.border = 'none';
+      el.style.borderRadius = '0';
+      el.style.filter = 'drop-shadow(0 0 12px #76ff03)';
       el.style.animation = 'spikePulse 1.2s ease-in-out infinite';
+      el.innerHTML += '<img src="spike.png" style="width:64px;height:64px;object-fit:contain;position:absolute;top:0;left:0;">';
       nameLabel.textContent = '⚠ SPIKE';
       nameLabel.style.color = '#76ff03';
       nameLabel.style.fontSize = '10px';
