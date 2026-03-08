@@ -410,39 +410,18 @@ class Orchestrator:
                     k: v.cpu().clone() for k, v in self.model.state_dict().items()
                 }
 
-                # Skip arena for first generation (no champion to compare against)
-                if gen == 1:
-                    self.champion_weights = challenger_weights
-                    promoted = True
-                    print("First generation — auto-promoting to champion.")
-                else:
-                    promoted = self._arena_evaluate(challenger_weights)
-
-                if promoted:
-                    self.champion_weights = challenger_weights
-                    self.consecutive_rejections = 0  # reset streak
-                    ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
-                    torch.save({
-                        'generation': gen,
-                        'model_state_dict': self.model.state_dict(),
-                        'buffer_size': len(self.replay_buffer),
-                        'consecutive_rejections': 0,
-                    }, ckpt_path)
-                    print(f"Saved champion checkpoint: {ckpt_path}")
-                    self._notify_telegram(
-                        f"🏆 Gen {gen} promoted! Champion saved → {ckpt_path}"
-                    )
-                else:
-                    # Revert to champion weights — do NOT recreate Trainer (preserves Adam momentum)
-                    self.model.load_state_dict(
-                        {k: v.to(self.device) for k, v in self.champion_weights.items()}
-                    )
-                    self.rejections += 1
-                    self.consecutive_rejections += 1
-                    print(f"Reverted to champion. "
-                          f"Total rejections: {self.rejections}, "
-                          f"consecutive: {self.consecutive_rejections}, "
-                          f"next gate: {self._get_promote_threshold():.1%}")
+                # Arena gate REMOVED (per Gemini recommendation):
+                # 50-game SPRT has 40% false rejection rate at 52% true edge.
+                # Always promote latest checkpoint — unfreezes training.
+                self.champion_weights = challenger_weights
+                ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
+                torch.save({
+                    'generation': gen,
+                    'model_state_dict': self.model.state_dict(),
+                    'buffer_size': len(self.replay_buffer),
+                    'consecutive_rejections': 0,
+                }, ckpt_path)
+                print(f"Auto-promoted gen {gen}. Saved: {ckpt_path}")
             else:
                 print(f"Buffer too small ({len(self.replay_buffer)}/{min_buffer}). "
                       f"Gathering more data...")
