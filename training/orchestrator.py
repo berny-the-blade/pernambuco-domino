@@ -416,6 +416,29 @@ class Orchestrator:
                 # Arena gate REMOVED (per Gemini recommendation):
                 # 50-game SPRT has 40% false rejection rate at 52% true edge.
                 # Always promote latest checkpoint — unfreezes training.
+
+                # === PARTNERSHIP SUITE REGRESSION GUARD ===
+                # Soft check only — does not block promotion.
+                # Logs a warning if partnership score drops vs baseline.
+                partnership_score = None
+                try:
+                    import sys as _sys
+                    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tests'))
+                    from test_partnership_suite import evaluate_suite, make_engine_fn, SUITE_PATH
+                    _eng = make_engine_fn(self.model, sims=0, device=str(self.device))
+                    _report = evaluate_suite(_eng, SUITE_PATH)
+                    partnership_score = _report["avg_score"]
+                    PARTNER_BASELINE = 0.462  # gen50 greedy baseline
+                    if partnership_score < PARTNER_BASELINE - 0.05:
+                        print(f"  [PARTNERSHIP WARNING] score={partnership_score:.3f} "
+                              f"< baseline {PARTNER_BASELINE:.3f} - 0.05 "
+                              f"(regression detected — consider rejecting)")
+                    else:
+                        print(f"  [PARTNERSHIP] score={partnership_score:.3f} "
+                              f"(baseline={PARTNER_BASELINE:.3f})")
+                except Exception as _e:
+                    print(f"  [PARTNERSHIP] suite check skipped: {_e}")
+
                 self.champion_weights = challenger_weights
                 ckpt_path = f"checkpoints/domino_gen_{gen:04d}.pt"
                 torch.save({
@@ -423,6 +446,7 @@ class Orchestrator:
                     'model_state_dict': self.model.state_dict(),
                     'buffer_size': len(self.replay_buffer),
                     'consecutive_rejections': 0,
+                    'partnership_score': partnership_score,
                 }, ckpt_path)
                 print(f"Auto-promoted gen {gen}. Saved: {ckpt_path}")
             else:
