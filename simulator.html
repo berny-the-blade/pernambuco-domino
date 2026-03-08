@@ -204,6 +204,7 @@
       opponents: { en: 'Opponents', pt: 'Oponentes' },
       new_match: { en: 'New Match', pt: 'Nova Partida' },
       back_to_menu: { en: 'Back to Menu', pt: 'Voltar ao Menu' },
+      review_coach: { en: 'Review + Coach', pt: 'Revisar + Treinador' },
       first_to: { en: 'First to', pt: 'Primeiro a' },
       points: { en: 'points', pt: 'pontos' },
       buchuda: { en: 'BUCHUDA!', pt: 'BUCHUDA!' },
@@ -9259,6 +9260,7 @@
           <div class="flex gap-2 justify-center flex-wrap">
             <button class="btn text-sm px-5 py-2" style="background:#eab308;color:#0f172a;font-weight:bold" onclick="dismissMatchWinner(true)">${_t('new_match')}</button>
             <button class="btn btn-gray text-sm px-4 py-2" onclick="dismissMatchWinner(false)">${_t('back_to_menu')}</button>
+            <button class="btn text-sm px-4 py-2" style="background:#312e81;color:#a5b4fc;border:1px solid #6366f1" onclick="reviewLastGame()">&#129504; ${_t('review_coach')}</button>
           </div>
         </div>
       </div>`;
@@ -9277,6 +9279,16 @@
         currentGame = null;
         render();
       }
+    }
+
+    function reviewLastGame() {
+      // Dismiss overlay but keep the game and coach messages intact
+      playMatchWinner = null;
+      currentStep = 0;
+      coachEnabled = true;
+      coachCollapsed = false;
+      rightPanelTab = 'coach';
+      render();
     }
 
     function renderOpeningOverlay() {
