@@ -4366,15 +4366,15 @@
                         // space. Scale it down proportionally so the spiral has more room.
                         // The CornerDial SVG is transparent, so tiles placed beneath it
                         // remain visible through the overlay.
-                        const DIAL_CORNER = Math.min(78, Math.round(Math.min(W, H) * 0.22));
-                        const SPIRAL_PADS = { top: 2, right: 10, bottom: 4, left: 2 };
+                        const DIAL_CORNER = Math.min(110, Math.round(Math.min(W, H) * 0.27));
+                        const SPIRAL_PADS = { top: 2, right: 14, bottom: 6, left: 2 };
 
                         // Auto-scale: try current size, shrink until all tiles fit.
                         // Use 12 attempts and lower minimums (hw≥18, vw≥9) so even
                         // tiny landscape boards can accommodate all 28 tiles.
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
-                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 3,
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 5,
                             SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
