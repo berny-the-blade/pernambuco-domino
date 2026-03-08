@@ -2539,13 +2539,56 @@
       const completed = Object.keys(puzzleCompletion).length;
       const perfect = Object.values(puzzleCompletion).filter(g => g === 'perfect').length;
       const genCount = loadGeneratedPuzzles().length;
+
+      // Build "Training Focus" block from player weak points
+      const pid = getActivePlayerId();
+      const ps = pid ? _loadPlayerStats(pid) : null;
+      const weakPoints = ps ? getPlayerWeakPoints(ps) : [];
+      let trainingFocusHTML = '';
+      if (weakPoints.length > 0) {
+        const focusItems = weakPoints.slice(0, 2).map(wp => {
+          const matchingPuzzles = allP.filter(p => p.category === wp.category).slice(0, 3);
+          const recentBadge = wp.recentCount >= 2 ? `<span class="ml-1 px-1 rounded text-[10px] bg-red-900 text-red-300">×${wp.recentCount} recent</span>` : '';
+          const puzzleCards = matchingPuzzles.length > 0
+            ? matchingPuzzles.map(p => {
+                const comp = puzzleCompletion[p.id];
+                const border = comp === 'perfect' ? 'border-emerald-600' : comp ? 'border-yellow-600' : 'border-orange-700';
+                const badge = comp === 'perfect' ? '✔ ' : comp ? comp.toUpperCase() + ' ' : '';
+                return `<div class="bg-slate-800 rounded-lg p-2 border ${border} cursor-pointer hover:border-orange-400 transition-all flex-1 min-w-0" onclick="startPuzzle('${p.id}')">
+                  <div class="text-xs font-bold text-white truncate">${badge}${p.title}</div>
+                  <div class="text-[10px] text-slate-400 mt-0.5 truncate">${p.description}</div>
+                </div>`;
+              }).join('')
+            : `<div class="text-xs text-slate-500 italic">Play more games to generate puzzles for this area</div>`;
+          return `<div class="bg-slate-900 rounded-lg p-3 border border-orange-800/50">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-base">${wp.icon}</span>
+              <span class="text-sm font-bold text-orange-300">${wp.label}</span>
+              <span class="text-xs text-slate-500">${wp.count} total errors</span>
+              ${recentBadge}
+            </div>
+            <div class="text-xs text-slate-400 mb-2">${wp.tip}</div>
+            <div class="flex gap-2">${puzzleCards}</div>
+          </div>`;
+        }).join('');
+        trainingFocusHTML = `<div class="mb-6 bg-orange-950/30 border border-orange-700/40 rounded-xl p-4">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-lg">🎯</span>
+            <h2 class="text-base font-bold text-orange-300">Your Training Focus</h2>
+            <span class="text-xs text-slate-500 ml-1">based on your last ${ps.totalGames} games</span>
+          </div>
+          <div class="space-y-3">${focusItems}</div>
+        </div>`;
+      }
+
       return `<div class="flex items-center justify-center min-h-screen">
         <div class="max-w-4xl w-full p-4">
           <div class="flex items-center justify-between mb-4">
             <h1 class="text-3xl font-bold text-purple-400">Strategy Puzzles</h1>
             <div class="text-sm text-slate-400">${perfect}/${allP.length} perfect | ${completed}/${allP.length} attempted</div>
           </div>
-          <p class="text-slate-400 text-sm mb-6">Curated positions where multiple tiles look good but only one is truly optimal. Like chess tactics for dominos.</p>
+          <p class="text-slate-400 text-sm mb-4">Curated positions where multiple tiles look good but only one is truly optimal. Like chess tactics for dominos.</p>
+          ${trainingFocusHTML}
           ${categories.map(cat => {
             const cp = allP.filter(p => p.category === cat.key);
             if (cp.length === 0 && cat.key !== 'generated') return '';
@@ -3427,6 +3470,18 @@
         if (worst && worst.eqLoss > 0.02) {
           entry.worstMistake = { eqLoss: worst.eqLoss, moveNum: worst.move };
         }
+        // Tally leak types from analysis and persist to ps.leaks
+        const leakCounts = {};
+        for (const d of a.moveDetails) {
+          if (d.leakType && d.grade !== 'perfect') {
+            leakCounts[d.leakType] = (leakCounts[d.leakType] || 0) + 1;
+          }
+        }
+        for (const [type, count] of Object.entries(leakCounts)) {
+          if (ps.leaks.hasOwnProperty(type)) ps.leaks[type] += count;
+        }
+        const sortedLeaks = Object.entries(leakCounts).sort((a, b) => b[1] - a[1]);
+        entry.topLeak = sortedLeaks.length > 0 ? sortedLeaks[0][0] : null;
       }
       ps.recentGames.push(entry);
       if (ps.recentGames.length > 100) ps.recentGames = ps.recentGames.slice(-100);
@@ -3460,24 +3515,71 @@
 
     function _checkRepeatedMistakes(ps) {
       const recent5 = ps.recentGames.slice(-5);
-      if (recent5.length < 5) return;
-      // Count leaks by examining the main leak stats delta over recent games
-      // Use the session leaks which track recent activity
-      for (const type of Object.keys(LEAK_TYPES)) {
-        // Count how many of the last 5 games had this leak by checking recent game data
-        const recentCount = _sessionLeaks[type] || 0;
-        if (recentCount >= 3) {
-          _showMistakeToast(type, recentCount);
-          break;
-        }
+      if (recent5.length < 3) return;
+      // Count topLeak occurrences across recent games
+      const gameCounts = {};
+      for (const g of recent5) {
+        if (g.topLeak) gameCounts[g.topLeak] = (gameCounts[g.topLeak] || 0) + 1;
       }
+      // Also weight in session leaks
+      for (const [type, count] of Object.entries(_sessionLeaks)) {
+        gameCounts[type] = (gameCounts[type] || 0) + Math.floor(count / 2);
+      }
+      const sorted = Object.entries(gameCounts).sort((a, b) => b[1] - a[1]);
+      if (sorted.length > 0 && sorted[0][1] >= 3) {
+        _showMistakeToast(sorted[0][0], sorted[0][1]);
+      }
+    }
+
+    // Returns top weak points for a player based on accumulated leak history.
+    // Each entry: { type, label, count, recentCount, category, icon, tip }
+    const LEAK_TO_TRAINING = {
+      BLOCKING_MISS: { category: 'blocking',  icon: '\u{1F6E1}', tip: 'Keep blocked numbers on the board to force opponent passes' },
+      FEED_ERROR:    { category: 'feeding',   icon: '\u{1F91D}', tip: "Avoid playing numbers opponents have shown — you're feeding them" },
+      DOUBLE_TIMING: { category: 'doubles',   icon: '\u{1F3B2}', tip: 'Clear doubles early; they only match one end and are hard to place later' },
+      DEAD_END:      { category: 'endgame',   icon: '\u{1F3C1}', tip: 'Avoid plays that leave you with no matching tiles' },
+      PIP_WASTE:     { category: 'endgame',   icon: '\u26A1',    tip: 'Minimize pip count on remaining tiles when going out looks unlikely' },
+      PARTNER_IGNORE:{ category: 'feeding',   icon: '\u{1F91D}', tip: "Play numbers your partner has shown — help them stay in the game" },
+    };
+
+    function getPlayerWeakPoints(ps) {
+      if (!ps || ps.totalGames < 2) return [];
+      // Count leaks from recent 20 games (topLeak per game) for recency weighting
+      const recent20 = ps.recentGames.slice(-20);
+      const recentCounts = {};
+      for (const g of recent20) {
+        if (g.topLeak) recentCounts[g.topLeak] = (recentCounts[g.topLeak] || 0) + 1;
+      }
+      // Blend total leaks + 2× recent game counts
+      const blended = {};
+      for (const type of Object.keys(LEAK_TYPES)) {
+        const total = ps.leaks[type] || 0;
+        const recent = recentCounts[type] || 0;
+        blended[type] = total + recent * 2;
+      }
+      return Object.entries(blended)
+        .filter(([, v]) => v >= 1)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([type, score]) => ({
+          type,
+          label: LEAK_TYPES[type] || type,
+          count: ps.leaks[type] || 0,
+          recentCount: recentCounts[type] || 0,
+          score,
+          ...(LEAK_TO_TRAINING[type] || { category: 'generated', icon: '\u{1F4A1}', tip: 'Practice related puzzles' }),
+        }));
     }
 
     function _showMistakeToast(leakType, count) {
       const name = LEAK_TYPES[leakType] || leakType;
-      _mistakeToast = `${_t('repeated_warning')} ${count} ${name} ${_t('errors_last5')}`;
+      const training = LEAK_TO_TRAINING[leakType];
+      const practiceLink = training
+        ? ` <span class="underline cursor-pointer text-orange-300" onclick="showingPuzzleBrowser=true;_mistakeToast=null;render()">Practice ${name} →</span>`
+        : '';
+      _mistakeToast = `⚠️ Recurring: ${count}× ${name}.${practiceLink}`;
       if (_mistakeToastTimeout) clearTimeout(_mistakeToastTimeout);
-      _mistakeToastTimeout = setTimeout(() => { _mistakeToast = null; render(); }, 8000);
+      _mistakeToastTimeout = setTimeout(() => { _mistakeToast = null; render(); }, 10000);
       render();
     }
 
@@ -5040,12 +5142,20 @@
                     good: cache.filter(a => a.grade === 'good').length,
                     ok: cache.filter(a => a.grade === 'ok').length,
                     bad: cache.filter(a => a.grade === 'bad').length,
-                    moveDetails: cache.map(a => ({
-                      move: a.move, grade: a.grade, eqLoss: Math.round(a.eqLoss * 1000) / 1000,
-                      tile: a.tile ? `${a.tile.left}|${a.tile.right}` : '',
-                      bestTile: a.bestTile ? `${a.bestTile.left}|${a.bestTile.right}` : '',
-                      side: a.side, bestSide: a.bestSide
-                    }))
+                    moveDetails: cache.map(a => {
+                      let leakType = null;
+                      if (a.grade !== 'perfect' && a.bestTile && a.stepIdx > 0 && currentGame && currentGame.snapshots[a.stepIdx - 1]) {
+                        const ms = currentGame.snapshots[a.stepIdx - 1];
+                        const lk = classifyLeak({ tile: a.tile, side: a.side }, { tile: a.bestTile, side: a.bestSide }, ms, ms.knowledge);
+                        if (lk) leakType = lk.type;
+                      }
+                      return {
+                        move: a.move, grade: a.grade, eqLoss: Math.round(a.eqLoss * 1000) / 1000,
+                        tile: a.tile ? `${a.tile.left}|${a.tile.right}` : '',
+                        bestTile: a.bestTile ? `${a.bestTile.left}|${a.bestTile.right}` : '',
+                        side: a.side, bestSide: a.bestSide, leakType
+                      };
+                    })
                   };
                   saveGameHistory();
                   // Record to player profile after analysis completes
@@ -12084,6 +12194,33 @@
       }
 
       // Delete button
+      // Section F: Training Recommendations from weak point analysis
+      let trainingHTML = '';
+      const weakPoints = getPlayerWeakPoints(ps);
+      if (weakPoints.length > 0) {
+        const top = weakPoints[0];
+        const others = weakPoints.slice(1);
+        trainingHTML = `<div class="bg-slate-900 rounded-lg p-3 border border-orange-700/40">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs font-bold text-orange-300">🎯 Training Recommendations</div>
+            <button class="btn text-xs px-2 py-0.5" style="background:#431407;color:#fb923c;border:1px solid #c2410c"
+              onclick="showingPuzzleBrowser=true;render()">Practice Now</button>
+          </div>
+          <div class="space-y-1.5">
+            <div class="flex items-start gap-2">
+              <span>${top.icon}</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-semibold text-orange-200">${top.label} <span class="text-red-400 font-bold">(${top.count}× total${top.recentCount >= 2 ? ', ' + top.recentCount + '× recent' : ''})</span></div>
+                <div class="text-xs text-slate-400">${top.tip}</div>
+              </div>
+            </div>
+            ${others.map(wp => `<div class="flex items-center gap-2 text-xs text-slate-400">
+              <span>${wp.icon}</span><span class="text-slate-300">${wp.label}</span><span class="text-slate-600">${wp.count}×</span>
+            </div>`).join('')}
+          </div>
+        </div>`;
+      }
+
       const deleteHTML = `<div class="text-center mt-2">
         <button class="text-xs text-red-500 hover:text-red-400" onclick="if(confirm('${_t('confirm_delete').replace(/'/g, "\\'")}')) deletePlayer('${player.id}')">${_t('delete_player')}</button>
       </div>`;
@@ -12094,6 +12231,7 @@
         ${trendHTML}
         ${qualityHTML}
         ${mistakeHTML}
+        ${trainingHTML}
         ${startRollHTML}
         ${recentHTML}
         ${deleteHTML}
