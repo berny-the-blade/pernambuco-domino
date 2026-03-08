@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Brawl Arena</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Arial Black', Arial, sans-serif;
+}
+
+#game-wrap {
+  position: absolute;
+  width: 800px;
+  height: 560px;
+  transform-origin: top left;
+}
+
+#arena {
+  position: absolute;
+  inset: 0;
+  background: #56ab2f;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0,0,0,0.04) 0px, rgba(0,0,0,0.04) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,0.04) 0px, rgba(0,0,0,0.04) 1px, transparent 1px, transparent 40px);
+  overflow: hidden;
+  border: 5px solid #2e7d32;
+  border-radius: 6px;
+}
+
+/* ── WALLS ── */
+.wall {
+  position: absolute;
+  background: linear-gradient(160deg, #8d6e63, #6d4c41);
+  border: 3px solid #4e342e;
+  border-radius: 6px;
+  box-shadow: inset 0 2px 4px rgba(255,255,255,0.15), 0 4px 8px rgba(0,0,0,0.4);
+}
+
+/* ── CHARACTERS ── */
+.character {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: none;
+}
+
+.player {
+  width: 44px;
+  height: 44px;
+  background: radial-gradient(circle at 35% 35%, #42a5f5, #1565c0);
+  border: 3px solid #0d47a1;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.4), inset 0 1px 3px rgba(255,255,255,0.3);
+  z-index: 10;
+}
+
+.eye {
+  position: absolute;
+  background: white;
+  border-radius: 50%;
+  border: 2px solid #222;
+}
+.eye-left  { width: 11px; height: 11px; top: 9px; left:  7px; }
+.eye-right { width: 11px; height: 11px; top: 9px; right: 7px; }
+
+.pupil {
+  position: absolute;
+  width: 5px; height: 5px;
+  background: #111;
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Enemy base */
+.enemy {
+  border: 3px solid rgba(0,0,0,0.35);
+  z-index: 8;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.35), inset 0 1px 3px rgba(255,255,255,0.2);
+}
+.enemy-runner  { background: radial-gradient(circle at 35% 35%, #ef5350, #b71c1c); border-color: #7f0000; width: 36px; height: 36px; }
+.enemy-tank    { background: radial-gradient(circle at 35% 35%, #ffa726, #e65100); border-color: #bf360c; width: 46px; height: 46px; }
+.enemy-shooter { background: radial-gradient(circle at 35% 35%, #ab47bc, #6a1b9a); border-color: #4a148c; width: 38px; height: 38px; }
+
+/* ── HP BARS ── */
+.hp-bar-wrap {
+  position: absolute;
+  height: 7px;
+  background: #c62828;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,0.4);
+  z-index: 20;
+  pointer-events: none;
+}
+.hp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #43a047, #66bb6a);
+  border-radius: 4px;
+}
+
+/* ── BULLETS ── */
+.bullet {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9;
+}
+.bullet-player {
+  width: 13px; height: 13px;
+  background: radial-gradient(circle at 40% 40%, #fff176, #fdd835);
+  border: 2px solid #f9a825;
+  box-shadow: 0 0 6px #fdd835;
+}
+.bullet-enemy {
+  width: 11px; height: 11px;
+  background: radial-gradient(circle at 40% 40%, #ff80ab, #f50057);
+  border: 2px solid #c51162;
+  box-shadow: 0 0 6px #f50057;
+}
+
+/* ── HUD ── */
+#hud {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  pointer-events: none;
+  z-index: 30;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+#player-hp-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,0,0,0.55);
+  padding: 5px 10px;
+  border-radius: 20px;
+  border: 2px solid rgba(255,255,255,0.15);
+}
+.heart { font-size: 18px; line-height: 1; }
+#player-hp-bar {
+  width: 130px; height: 14px;
+  background: #b71c1c;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,0.25);
+}
+#player-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #43a047, #a5d6a7);
+  border-radius: 7px;
+  transition: width 0.15s;
+}
+
+#wave-info {
+  background: rgba(0,0,0,0.55);
+  padding: 5px 14px;
+  border-radius: 20px;
+  color: white;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: right;
+  line-height: 1.5;
+  border: 2px solid rgba(255,255,255,0.15);
+}
+
+/* ── WAVE BANNER ── */
+#wave-banner {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: rgba(0,0,0,0.85);
+  color: #fdd835;
+  font-size: 54px;
+  font-weight: 900;
+  padding: 22px 55px;
+  border-radius: 18px;
+  border: 4px solid #fdd835;
+  z-index: 50;
+  white-space: nowrap;
+  text-shadow: 3px 3px 0 #e65100, 6px 6px 0 rgba(0,0,0,0.3);
+  letter-spacing: 3px;
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#wave-banner.show {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* ── JOYSTICK ── */
+#joystick-zone {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  width: 130px;
+  height: 130px;
+  background: rgba(255,255,255,0.12);
+  border: 3px solid rgba(255,255,255,0.28);
+  border-radius: 50%;
+  z-index: 40;
+  touch-action: none;
+  display: none;
+}
+#joystick-knob {
+  position: absolute;
+  width: 58px;
+  height: 58px;
+  background: rgba(255,255,255,0.45);
+  border: 3px solid rgba(255,255,255,0.75);
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* ── OVERLAY SCREENS ── */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  border-radius: 4px;
+}
+
+#start-screen   { background: rgba(0,0,0,0.88); }
+#gameover-screen { background: rgba(100,0,0,0.90); display: none; }
+#win-screen      { background: rgba(0,80,0,0.90); display: none; }
+
+.overlay h1 {
+  font-size: 50px;
+  font-weight: 900;
+  color: white;
+  margin-bottom: 10px;
+  text-shadow: 3px 3px 0 rgba(0,0,0,0.5);
+  letter-spacing: 2px;
+}
+.overlay .sub {
+  font-size: 17px;
+  color: rgba(255,255,255,0.88);
+  margin-bottom: 10px;
+  text-align: center;
+  line-height: 1.5;
+}
+.overlay .hint {
+  font-size: 13px;
+  color: rgba(255,255,255,0.55);
+  margin-bottom: 26px;
+  text-align: center;
+  line-height: 1.6;
+  font-weight: normal;
+  font-family: Arial, sans-serif;
+}
+
+.btn {
+  background: #fdd835;
+  color: #1a1a1a;
+  border: none;
+  border-bottom: 5px solid #f9a825;
+  padding: 13px 40px;
+  font-size: 20px;
+  font-weight: 900;
+  border-radius: 30px;
+  cursor: pointer;
+  font-family: 'Arial Black', Arial, sans-serif;
+  letter-spacing: 1px;
+  transition: transform 0.1s;
+}
+.btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+.btn:hover  { background: #fff176; }
+</style>
+</head>
+<body>
+
+<div id="game-wrap">
+
+  <!-- Arena (walls + chars + bullets go here) -->
+  <div id="arena"></div>
+
+  <!-- HUD overlay -->
+  <div id="hud">
+    <div id="player-hp-wrap">
+      <span class="heart">❤️</span>
+      <div id="player-hp-bar">
+        <div id="player-hp-fill" style="width:100%"></div>
+      </div>
+    </div>
+    <div id="wave-info">
+      <div id="wave-label">WAVE 1 / 3</div>
+      <div id="enemy-count">Enemies: 0</div>
+    </div>
+  </div>
+
+  <!-- Wave banner -->
+  <div id="wave-banner">WAVE 1</div>
+
+  <!-- Joystick -->
+  <div id="joystick-zone"><div id="joystick-knob"></div></div>
+
+  <!-- Screens -->
+  <div class="overlay" id="start-screen">
+    <h1>🎮 BRAWL ARENA</h1>
+    <p class="sub">3 waves of enemies. Survive them all!</p>
+    <p class="hint">
+      ⌨️ WASD / Arrows — move &nbsp;|&nbsp; Space / Click — shoot<br>
+      📱 Left joystick — move &nbsp;|&nbsp; Tap right side — shoot<br>
+      Auto-aim always targets the closest enemy
+    </p>
+    <button class="btn" id="start-btn">▶ PLAY</button>
+  </div>
+
+  <div class="overlay" id="gameover-screen">
+    <h1>💀 GAME OVER</h1>
+    <p class="sub">You were defeated by the enemy horde!</p>
+    <button class="btn" id="restart-btn">↩ TRY AGAIN</button>
+  </div>
+
+  <div class="overlay" id="win-screen">
+    <h1>🏆 YOU WIN!</h1>
+    <p class="sub">All 3 waves cleared! You're a champion!</p>
+    <button class="btn" id="win-restart-btn">▶ PLAY AGAIN</button>
+  </div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════
+const ARENA_W = 800;
+const ARENA_H = 560;
+
+const PLAYER = {
+  maxHp: 300, speed: 180, radius: 22,
+  bulletSpeed: 400, bulletRange: 400, bulletDamage: 30,
+  shootInterval: 500,
+};
+
+const ENEMY_DEFS = {
+  runner:  { hp: 60,  speed: 140, damage: 20, radius: 18, size: 36 },
+  tank:    { hp: 180, speed: 70,  damage: 30, radius: 23, size: 46 },
+  shooter: { hp: 100, speed: 90,  damage: 20, radius: 19, size: 38, stopRange: 200, shootInterval: 1500, bulletDamage: 25 },
+};
+
+const WAVE_CONFIGS = [
+  ['runner','runner','tank'],
+  ['runner','runner','tank','shooter','runner'],
+  ['runner','tank','shooter','runner','tank','shooter','runner'],
+];
+
+const WALL_DEFS = [
+  { x: 90,  y: 90,  w: 130, h: 28 },
+  { x: 580, y: 70,  w: 28,  h: 140 },
+  { x: 290, y: 215, w: 220, h: 28 },
+  { x: 70,  y: 360, w: 28,  h: 155 },
+  { x: 605, y: 375, w: 140, h: 28 },
+  { x: 375, y: 420, w: 28,  h: 115 },
+];
+
+// Spawn positions (away from player start which is center 400,280)
+const SPAWN_POINTS = [
+  {x:55,  y:55},  {x:745, y:55},  {x:55,  y:505},
+  {x:745, y:505}, {x:400, y:45},  {x:400, y:515},
+  {x:50,  y:280},
+];
+
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+const arena   = document.getElementById('arena');
+const hpFillEl= document.getElementById('player-hp-fill');
+const waveLabel= document.getElementById('wave-label');
+const enemyCnt= document.getElementById('enemy-count');
+const waveBanner = document.getElementById('wave-banner');
+const joystickZone= document.getElementById('joystick-zone');
+const joystickKnob= document.getElementById('joystick-knob');
+
+let gameState = 'start';
+let afId = 0;
+let lastTime = 0;
+
+let player = null;
+let enemies = [];
+let bullets = [];
+let walls   = [];
+let currentWave = 0;
+
+// keyboard
+const keys = {};
+// joystick
+let joyActive = false, joyDX = 0, joyDY = 0;
+let joyOriginX = 0, joyOriginY = 0;
+const JOY_MAX = 62;
+// shoot
+let lastShot = 0;
+let manualShoot = false; // space / tap-right triggered
+
+// ══════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════
+function el(tag, cls, parent) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function pos(elem, x, y) {
+  elem.style.left = x + 'px';
+  elem.style.top  = y + 'px';
+}
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function dist2(ax,ay,bx,by){ const dx=ax-bx,dy=ay-by; return dx*dx+dy*dy; }
+
+// Circle vs AABB test
+function circleRect(cx,cy,cr,rx,ry,rw,rh) {
+  const nx = clamp(cx, rx, rx+rw);
+  const ny = clamp(cy, ry, ry+rh);
+  return (cx-nx)*(cx-nx)+(cy-ny)*(cy-ny) < cr*cr;
+}
+
+// Push circle out of AABB
+function resolveWalls(obj) {
+  for (const w of walls) {
+    if (!circleRect(obj.x, obj.y, obj.radius, w.x, w.y, w.w, w.h)) continue;
+    const nx = clamp(obj.x, w.x, w.x+w.w);
+    const ny = clamp(obj.y, w.y, w.y+w.h);
+    let dx = obj.x - nx, dy = obj.y - ny;
+    const d = Math.hypot(dx,dy) || 0.001;
+    const push = obj.radius - d;
+    obj.x += dx/d * push;
+    obj.y += dy/d * push;
+  }
+}
+
+function nearestEnemy() {
+  let best = null, bestD = Infinity;
+  for (const e of enemies) {
+    if (e.hp <= 0) continue;
+    const d = dist2(player.x, player.y, e.x, e.y);
+    if (d < bestD) { best = e; bestD = d; }
+  }
+  return best;
+}
+
+// ══════════════════════════════════════════════
+//  WALLS
+// ══════════════════════════════════════════════
+function buildWalls() {
+  walls = WALL_DEFS.map(d => {
+    const elem = el('div','wall',arena);
+    elem.style.left   = d.x+'px';
+    elem.style.top    = d.y+'px';
+    elem.style.width  = d.w+'px';
+    elem.style.height = d.h+'px';
+    return {...d, el: elem};
+  });
+}
+
+// ══════════════════════════════════════════════
+//  PLAYER
+// ══════════════════════════════════════════════
+function addEyes(container, sz) {
+  const small = sz <= 38;
+  const ew = small ? 9 : 11, eh = small ? 9 : 11;
+  const eyeL = el('div','eye eye-left', container);
+  eyeL.style.cssText = `width:${ew}px;height:${eh}px;top:${small?7:9}px;left:${small?5:7}px`;
+  el('div','pupil',eyeL);
+  const eyeR = el('div','eye eye-right', container);
+  eyeR.style.cssText = `width:${ew}px;height:${eh}px;top:${small?7:9}px;right:${small?5:7}px`;
+  el('div','pupil',eyeR);
+}
+
+function createPlayer() {
+  const elem = el('div','character player',arena);
+  addEyes(elem, 44);
+  player = { x: ARENA_W/2, y: ARENA_H/2, hp: PLAYER.maxHp, radius: PLAYER.radius, el: elem };
+  pos(elem, player.x, player.y);
+  updatePlayerHpBar();
+}
+
+function updatePlayerHpBar() {
+  hpFillEl.style.width = Math.max(0, player.hp / PLAYER.maxHp * 100) + '%';
+}
+
+// ══════════════════════════════════════════════
+//  ENEMIES
+// ══════════════════════════════════════════════
+let eid = 0;
+
+function spawnWave(waveIdx) {
+  enemies = WAVE_CONFIGS[waveIdx].map((type, i) => {
+    const def = ENEMY_DEFS[type];
+    const sp  = SPAWN_POINTS[i % SPAWN_POINTS.length];
+
+    const elem = el('div', `character enemy enemy-${type}`, arena);
+    elem.style.width  = def.size+'px';
+    elem.style.height = def.size+'px';
+    addEyes(elem, def.size);
+
+    const hpWrap = el('div','hp-bar-wrap',arena);
+    hpWrap.style.width = def.size+'px';
+    const hpFill = el('div','hp-bar-fill',hpWrap);
+    hpFill.style.width = '100%';
+
+    const e = {
+      id: ++eid, type,
+      x: sp.x, y: sp.y,
+      hp: def.hp, maxHp: def.hp,
+      speed: def.speed,
+      contactDmg: def.damage,
+      radius: def.radius,
+      size: def.size,
+      el: elem, hpWrap, hpFill,
+      lastShoot: 0,
+      stopRange:  def.stopRange  || 0,
+      shootInt:   def.shootInterval || Infinity,
+      bulletDmg:  def.bulletDamage || 0,
+    };
+    pos(elem, e.x, e.y);
+    e.hpWrap.style.left = (e.x - e.size/2)+'px';
+    e.hpWrap.style.top  = (e.y - e.radius - 14)+'px';
+    return e;
+  });
+  updateWaveHUD();
+}
+
+function updateWaveHUD() {
+  waveLabel.textContent = `WAVE ${currentWave+1} / 3`;
+  const alive = enemies.filter(e => e.hp > 0).length;
+  enemyCnt.textContent  = `Enemies: ${alive}`;
+}
+
+function hurtEnemy(e, dmg) {
+  e.hp -= dmg;
+  e.hpFill.style.width = Math.max(0, e.hp / e.maxHp * 100)+'%';
+  if (e.hp <= 0) {
+    e.el.remove();
+    e.hpWrap.remove();
+  }
+}
+
+// ══════════════════════════════════════════════
+//  BULLETS
+// ══════════════════════════════════════════════
+function fireBullet(fx, fy, tx, ty, isPlayer, dmg) {
+  const d = Math.hypot(tx-fx, ty-fy) || 1;
+  const spd = isPlayer ? PLAYER.bulletSpeed : 260;
+  const dx  = (tx-fx)/d * spd;
+  const dy  = (ty-fy)/d * spd;
+  const elem = el('div', `bullet ${isPlayer?'bullet-player':'bullet-enemy'}`, arena);
+  pos(elem, fx, fy);
+  bullets.push({ x:fx, y:fy, dx, dy, isPlayer, dmg, dist:0, maxDist: isPlayer ? PLAYER.bulletRange : 420, el:elem });
+}
+
+// ══════════════════════════════════════════════
+//  WAVE BANNER ANIMATION
+// ══════════════════════════════════════════════
+function showBanner(text, cb) {
+  waveBanner.textContent = text;
+  waveBanner.classList.add('show');
+  setTimeout(() => {
+    waveBanner.classList.remove('show');
+    setTimeout(cb, 350);
+  }, 1900);
+}
+
+// ══════════════════════════════════════════════
+//  GAME INIT
+// ══════════════════════════════════════════════
+function initGame() {
+  cancelAnimationFrame(afId);
+  arena.innerHTML = '';
+  bullets = []; enemies = [];
+  currentWave = 0;
+  manualShoot = false;
+  lastShot = 0;
+
+  ['start-screen','gameover-screen','win-screen'].forEach(id =>
+    document.getElementById(id).style.display = 'none'
+  );
+
+  buildWalls();
+  createPlayer();
+
+  gameState = 'banner';
+  showBanner('WAVE 1', () => {
+    spawnWave(0);
+    gameState = 'playing';
+  });
+
+  lastTime = performance.now();
+  afId = requestAnimationFrame(loop);
+}
+
+// ══════════════════════════════════════════════
+//  GAME OVER / WIN
+// ══════════════════════════════════════════════
+function endGame(win) {
+  gameState = win ? 'win' : 'gameover';
+  bullets.forEach(b => b.el.remove());
+  bullets = [];
+  document.getElementById(win ? 'win-screen' : 'gameover-screen').style.display = 'flex';
+}
+
+// ══════════════════════════════════════════════
+//  MAIN LOOP
+// ══════════════════════════════════════════════
+function loop(ts) {
+  afId = requestAnimationFrame(loop);
+  if (gameState !== 'playing') { lastTime = ts; return; }
+
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+
+  // ── PLAYER MOVEMENT ──
+  let vx = 0, vy = 0;
+  if (joyActive) { vx = joyDX; vy = joyDY; }
+  else {
+    if (keys['ArrowLeft']  || keys['a'] || keys['A']) vx -= 1;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) vx += 1;
+    if (keys['ArrowUp']    || keys['w'] || keys['W']) vy -= 1;
+    if (keys['ArrowDown']  || keys['s'] || keys['S']) vy += 1;
+  }
+  const vlen = Math.hypot(vx, vy);
+  if (vlen > 0) {
+    player.x += vx/vlen * PLAYER.speed * dt;
+    player.y += vy/vlen * PLAYER.speed * dt;
+  }
+  player.x = clamp(player.x, player.radius, ARENA_W - player.radius);
+  player.y = clamp(player.y, player.radius, ARENA_H - player.radius);
+  resolveWalls(player);
+
+  // ── AUTO-SHOOT (holding direction OR space/tap) ──
+  const target = nearestEnemy();
+  const wantShoot = (vlen > 0 || keys[' '] || manualShoot) && target;
+  if (wantShoot && ts - lastShot >= PLAYER.shootInterval) {
+    fireBullet(player.x, player.y, target.x, target.y, true, PLAYER.bulletDamage);
+    lastShot = ts;
+  }
+  manualShoot = false;
+
+  // ── ENEMIES ──
+  for (const e of enemies) {
+    if (e.hp <= 0) continue;
+    const dpx = player.x - e.x, dpy = player.y - e.y;
+    const dp  = Math.hypot(dpx, dpy) || 1;
+
+    if (e.type === 'shooter' && dp <= e.stopRange) {
+      // Stop & shoot back
+      if (ts - e.lastShoot >= e.shootInt) {
+        fireBullet(e.x, e.y, player.x, player.y, false, e.bulletDmg);
+        e.lastShoot = ts;
+      }
+    } else {
+      // Chase
+      e.x += dpx/dp * e.speed * dt;
+      e.y += dpy/dp * e.speed * dt;
+    }
+    e.x = clamp(e.x, e.radius, ARENA_W - e.radius);
+    e.y = clamp(e.y, e.radius, ARENA_H - e.radius);
+    resolveWalls(e);
+
+    // Contact damage
+    if (Math.hypot(player.x-e.x, player.y-e.y) < player.radius + e.radius) {
+      player.hp -= e.contactDmg * dt;
+      updatePlayerHpBar();
+      // nudge player away
+      const nx = player.x-e.x, ny = player.y-e.y, nd = Math.hypot(nx,ny)||1;
+      player.x += nx/nd * 2;
+      player.y += ny/nd * 2;
+    }
+
+    // Update DOM
+    pos(e.el, e.x, e.y);
+    e.hpWrap.style.left = (e.x - e.size/2)+'px';
+    e.hpWrap.style.top  = (e.y - e.radius - 14)+'px';
+  }
+
+  // ── BULLETS ──
+  for (let i = bullets.length-1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.dx * dt;
+    b.y += b.dy * dt;
+    b.dist += Math.hypot(b.dx, b.dy) * dt;
+
+    let kill = false;
+    if (b.dist >= b.maxDist) kill = true;
+    if (b.x < 0 || b.x > ARENA_W || b.y < 0 || b.y > ARENA_H) kill = true;
+
+    if (!kill) {
+      for (const w of walls) {
+        if (b.x >= w.x && b.x <= w.x+w.w && b.y >= w.y && b.y <= w.y+w.h) { kill = true; break; }
+      }
+    }
+
+    if (!kill) {
+      if (b.isPlayer) {
+        for (const e of enemies) {
+          if (e.hp <= 0) continue;
+          if (Math.hypot(b.x-e.x, b.y-e.y) < 7 + e.radius) {
+            hurtEnemy(e, b.dmg);
+            kill = true;
+            break;
+          }
+        }
+      } else {
+        if (Math.hypot(b.x-player.x, b.y-player.y) < 6 + player.radius) {
+          player.hp -= b.dmg;
+          updatePlayerHpBar();
+          kill = true;
+        }
+      }
+    }
+
+    if (kill) { b.el.remove(); bullets.splice(i,1); }
+    else pos(b.el, b.x, b.y);
+  }
+
+  // ── UPDATE PLAYER DOM ──
+  pos(player.el, player.x, player.y);
+
+  // ── CHECK DEATH ──
+  if (player.hp <= 0) {
+    player.hp = 0;
+    updatePlayerHpBar();
+    endGame(false);
+    return;
+  }
+
+  // ── CHECK WAVE CLEAR ──
+  updateWaveHUD();
+  const alive = enemies.filter(e => e.hp > 0).length;
+  if (alive === 0 && enemies.length > 0) {
+    currentWave++;
+    if (currentWave >= 3) { endGame(true); return; }
+    gameState = 'banner';
+    player.hp = PLAYER.maxHp;
+    updatePlayerHpBar();
+    showBanner(`WAVE ${currentWave+1}`, () => {
+      spawnWave(currentWave);
+      gameState = 'playing';
+    });
+  }
+}
+
+// ══════════════════════════════════════════════
+//  INPUT — KEYBOARD
+// ══════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ') { e.preventDefault(); manualShoot = true; }
+});
+document.addEventListener('keyup',  e => { keys[e.key] = false; });
+
+// Click right half to shoot
+arena.addEventListener('click', e => {
+  if (gameState !== 'playing') return;
+  const r = arena.getBoundingClientRect();
+  if ((e.clientX - r.left) > ARENA_W / 2) manualShoot = true;
+});
+
+// ══════════════════════════════════════════════
+//  INPUT — TOUCH JOYSTICK
+// ══════════════════════════════════════════════
+function isTouchDevice() { return 'ontouchstart' in window || navigator.maxTouchPoints > 0; }
+
+joystickZone.addEventListener('touchstart', ev => {
+  ev.preventDefault();
+  joyActive = true;
+  const r = joystickZone.getBoundingClientRect();
+  joyOriginX = r.left + r.width/2;
+  joyOriginY = r.top  + r.height/2;
+  updateJoyKnob(ev.changedTouches[0]);
+}, {passive:false});
+
+joystickZone.addEventListener('touchmove', ev => {
+  ev.preventDefault();
+  updateJoyKnob(ev.changedTouches[0]);
+}, {passive:false});
+
+function updateJoyKnob(t) {
+  let dx = t.clientX - joyOriginX;
+  let dy = t.clientY - joyOriginY;
+  const d = Math.hypot(dx,dy);
+  if (d > JOY_MAX) { dx = dx/d*JOY_MAX; dy = dy/d*JOY_MAX; }
+  joyDX = dx/JOY_MAX;
+  joyDY = dy/JOY_MAX;
+  joystickKnob.style.left = (65 + dx)+'px';
+  joystickKnob.style.top  = (65 + dy)+'px';
+}
+
+function resetJoy() {
+  joyActive = false; joyDX = 0; joyDY = 0;
+  joystickKnob.style.left = '50%';
+  joystickKnob.style.top  = '50%';
+}
+joystickZone.addEventListener('touchend',   ev => { ev.preventDefault(); resetJoy(); }, {passive:false});
+joystickZone.addEventListener('touchcancel',ev => { ev.preventDefault(); resetJoy(); }, {passive:false});
+
+// Tap right half of arena → shoot
+arena.addEventListener('touchstart', ev => {
+  if (gameState !== 'playing') return;
+  const r = arena.getBoundingClientRect();
+  for (const t of ev.changedTouches) {
+    if ((t.clientX - r.left) / r.width * ARENA_W > ARENA_W/2) {
+      manualShoot = true;
+    }
+  }
+}, {passive:true});
+
+// ══════════════════════════════════════════════
+//  SCALING
+// ══════════════════════════════════════════════
+function scaleGame() {
+  const wrap  = document.getElementById('game-wrap');
+  const scale = Math.min(window.innerWidth / ARENA_W, window.innerHeight / ARENA_H);
+  const lx    = (window.innerWidth  - ARENA_W * scale) / 2;
+  const ly    = (window.innerHeight - ARENA_H * scale) / 2;
+  wrap.style.transform = `scale(${scale})`;
+  wrap.style.left = lx + 'px';
+  wrap.style.top  = ly + 'px';
+}
+window.addEventListener('resize', scaleGame);
+scaleGame();
+
+// Show joystick on touch devices
+if (isTouchDevice()) joystickZone.style.display = 'block';
+
+// ══════════════════════════════════════════════
+//  BUTTONS
+// ══════════════════════════════════════════════
+document.getElementById('start-btn').addEventListener('click', initGame);
+document.getElementById('restart-btn').addEventListener('click', initGame);
+document.getElementById('win-restart-btn').addEventListener('click', initGame);
+</script>
+</body>
+</html>
