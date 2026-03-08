@@ -435,7 +435,7 @@ body {
       <div class="wall" style="left:675px;top:250px;width:25px;height:60px;"></div>
 
       <div id="player">
-        <img src="shelly.png" alt="Shelly" id="shelly-img" onerror="document.getElementById('shelly-img').style.display='none';document.getElementById('player-fallback').style.display='block';">
+        <img src="shelly.png" alt="Shelly" id="shelly-img" style="mix-blend-mode:multiply;" onerror="document.getElementById('shelly-img').style.display='none';document.getElementById('player-fallback').style.display='block';">
         <div id="player-fallback"></div>
       </div>
 
@@ -741,7 +741,7 @@ function createEnemy(type, x, y) {
       el.style.background = 'none';
       el.style.border = 'none';
       el.style.borderRadius = '0';
-      el.innerHTML += '<img src="colt.png" style="width:48px;height:48px;object-fit:contain;position:absolute;top:0;left:0;" onerror="this.style.display=\'none\';el.style.background=\'radial-gradient(circle at 40% 35%, #ffe082, #ffc107)\';el.style.border=\'3px solid #ff8f00\';el.style.borderRadius=\'50%\'">';
+      el.innerHTML += '<img src="colt.png" style="width:48px;height:48px;object-fit:contain;position:absolute;top:0;left:0;mix-blend-mode:multiply;" onerror="this.style.display=\'none\';el.style.background=\'radial-gradient(circle at 40% 35%, #ffe082, #ffc107)\';el.style.border=\'3px solid #ff8f00\';el.style.borderRadius=\'50%\'">';
       nameLabel.textContent = 'COLT';
       enemy.hp = enemy.maxHp = 80;
       enemy.speed = 100;
@@ -753,7 +753,7 @@ function createEnemy(type, x, y) {
       el.style.background = 'none';
       el.style.border = 'none';
       el.style.borderRadius = '0';
-      el.innerHTML += '<img src="bull.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;">';
+      el.innerHTML += '<img src="bull.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;mix-blend-mode:multiply;">';
       nameLabel.textContent = 'BULL';
       enemy.hp = enemy.maxHp = 250;
       enemy.speed = 75;
@@ -764,7 +764,7 @@ function createEnemy(type, x, y) {
       el.style.background = 'none';
       el.style.border = 'none';
       el.style.borderRadius = '0';
-      el.innerHTML += '<img src="elprimo.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;">';
+      el.innerHTML += '<img src="elprimo.png" style="width:56px;height:56px;object-fit:contain;position:absolute;top:0;left:0;mix-blend-mode:multiply;">';
       nameLabel.textContent = 'EL PRIMO';
       enemy.hp = enemy.maxHp = 180;
       enemy.speed = 110;
@@ -775,7 +775,7 @@ function createEnemy(type, x, y) {
       el.style.background = 'none';
       el.style.border = 'none';
       el.style.borderRadius = '0';
-      el.innerHTML += '<img src="dynamike.png" style="width:44px;height:44px;object-fit:contain;position:absolute;top:0;left:0;">';
+      el.innerHTML += '<img src="dynamike.png" style="width:44px;height:44px;object-fit:contain;position:absolute;top:0;left:0;mix-blend-mode:multiply;">';
       nameLabel.textContent = 'DYNAMIKE';
       enemy.hp = enemy.maxHp = 100;
       enemy.speed = 90;
@@ -788,7 +788,7 @@ function createEnemy(type, x, y) {
       el.style.borderRadius = '0';
       el.style.filter = 'drop-shadow(0 0 12px #76ff03)';
       el.style.animation = 'spikePulse 1.2s ease-in-out infinite';
-      el.innerHTML += '<img src="spike.png" style="width:64px;height:64px;object-fit:contain;position:absolute;top:0;left:0;">';
+      el.innerHTML += '<img src="spike.png" style="width:64px;height:64px;object-fit:contain;position:absolute;top:0;left:0;mix-blend-mode:multiply;">';
       nameLabel.textContent = '⚠ SPIKE';
       nameLabel.style.color = '#76ff03';
       nameLabel.style.fontSize = '10px';
