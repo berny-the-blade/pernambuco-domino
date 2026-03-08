@@ -1,0 +1,298 @@
+{
+  "meta": {
+    "script": "particle_disagreement_eval.py",
+    "model": "checkpoints/domino_gen_0015.pt",
+    "gen": 15,
+    "state_source": "replay",
+    "state_count": 12,
+    "particles": 4,
+    "sims": 5,
+    "phase_buckets": [
+      "early",
+      "mid",
+      "late"
+    ],
+    "seed_base": 9000,
+    "non_forced_only": false,
+    "tag": "smoke",
+    "timestamp": "2026-03-07T10:11:55"
+  },
+  "summary": {
+    "all": {
+      "states": 12,
+      "top1_agreement_mean": 0.7708333333333334,
+      "pairwise_jsd_mean": 0.01159813874209746,
+      "value_std_mean": 0.00790402424048847,
+      "entropy_std_mean": 0.010004719960396537,
+      "top1_histogram": {
+        "100pct": 5,
+        "75_99pct": 3,
+        "50_74pct": 4,
+        "below_50pct": 0
+      }
+    },
+    "non_forced": {
+      "states": 7,
+      "top1_agreement_mean": 0.6071428571428571,
+      "pairwise_jsd_mean": 0.019882523557881362,
+      "value_std_mean": 0.008856471336395288,
+      "entropy_std_mean": 0.017150948503536923,
+      "top1_histogram": {
+        "100pct": 0,
+        "75_99pct": 3,
+        "50_74pct": 4,
+        "below_50pct": 0
+      }
+    },
+    "forced": {
+      "states": 5,
+      "top1_agreement_mean": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_std_mean": 0.0065705983062189265,
+      "entropy_std_mean": 0.0,
+      "top1_histogram": {
+        "100pct": 5,
+        "75_99pct": 0,
+        "50_74pct": 0,
+        "below_50pct": 0
+      }
+    },
+    "by_phase": {
+      "early": {
+        "states": 4,
+        "top1_agreement_mean": 0.6875,
+        "pairwise_jsd_mean": 0.015971165883606142,
+        "value_std_mean": 0.011614605111356554,
+        "entropy_std_mean": 0.011328658328849469,
+        "top1_histogram": {
+          "100pct": 1,
+          "75_99pct": 1,
+          "50_74pct": 2,
+          "below_50pct": 0
+        }
+      },
+      "mid": {
+        "states": 4,
+        "top1_agreement_mean": 0.75,
+        "pairwise_jsd_mean": 0.01546733101477803,
+        "value_std_mean": 0.005146603511297613,
+        "entropy_std_mean": 0.018685501552340143,
+        "top1_histogram": {
+          "100pct": 1,
+          "75_99pct": 2,
+          "50_74pct": 1,
+          "below_50pct": 0
+        }
+      },
+      "late": {
+        "states": 4,
+        "top1_agreement_mean": 0.875,
+        "pairwise_jsd_mean": 0.0033559193279082086,
+        "value_std_mean": 0.006950864098811244,
+        "entropy_std_mean": 0.0,
+        "top1_histogram": {
+          "100pct": 3,
+          "75_99pct": 0,
+          "50_74pct": 1,
+          "below_50pct": 0
+        }
+      }
+    },
+    "by_phase_non_forced": {
+      "early": {
+        "states": 3,
+        "top1_agreement_mean": 0.5833333333333334,
+        "pairwise_jsd_mean": 0.02129488784480819,
+        "value_std_mean": 0.011760532519099249,
+        "entropy_std_mean": 0.015104877771799292,
+        "top1_histogram": {
+          "100pct": 0,
+          "75_99pct": 1,
+          "50_74pct": 2,
+          "below_50pct": 0
+        }
+      },
+      "mid": {
+        "states": 3,
+        "top1_agreement_mean": 0.6666666666666666,
+        "pairwise_jsd_mean": 0.02062310801970404,
+        "value_std_mean": 0.004716140049592442,
+        "entropy_std_mean": 0.024914002069786858,
+        "top1_histogram": {
+          "100pct": 0,
+          "75_99pct": 2,
+          "50_74pct": 1,
+          "below_50pct": 0
+        }
+      },
+      "late": {
+        "states": 1,
+        "top1_agreement_mean": 0.5,
+        "pairwise_jsd_mean": 0.013423677311632834,
+        "value_std_mean": 0.01256528164869194,
+        "entropy_std_mean": 0.0,
+        "top1_histogram": {
+          "100pct": 0,
+          "75_99pct": 0,
+          "50_74pct": 1,
+          "below_50pct": 0
+        }
+      }
+    }
+  },
+  "interpretation": {
+    "verdict": {
+      "label": "BELIEF_INSTABILITY_SEVERE",
+      "detail": "Non-forced top-1 agreement = 60.7% -- policy targets severely smeared. Belief modeling is the primary bottleneck.",
+      "non_forced_top1_agreement": 0.6071,
+      "non_forced_jsd_mean": 0.01988,
+      "jsd_level": "LOW"
+    }
+  },
+  "state_rows": [
+    {
+      "state_id": 0,
+      "phase": "early",
+      "forced": false,
+      "legal_count": 2,
+      "top1_agreement": 0.75,
+      "pairwise_jsd_mean": 0.010067757983724626,
+      "value_mean": -0.011135197302792221,
+      "value_std": 0.014829314780499016,
+      "entropy_mean": 0.6730116605758667,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 1,
+      "phase": "early",
+      "forced": false,
+      "legal_count": 2,
+      "top1_agreement": 0.5,
+      "pairwise_jsd_mean": 0.013423677311632834,
+      "value_mean": -0.029232899891212583,
+      "value_std": 0.014736728333767017,
+      "entropy_mean": 0.6730116605758667,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 2,
+      "phase": "early",
+      "forced": true,
+      "legal_count": 1,
+      "top1_agreement": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_mean": -0.006265679287025705,
+      "value_std": 0.011176822888128466,
+      "entropy_mean": 0.0,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 3,
+      "phase": "early",
+      "forced": false,
+      "legal_count": 3,
+      "top1_agreement": 0.5,
+      "pairwise_jsd_mean": 0.04039322823906711,
+      "value_mean": 0.0003000881406478584,
+      "value_std": 0.005715554443031716,
+      "entropy_mean": 1.028757780790329,
+      "entropy_std": 0.045314633315397874
+    },
+    {
+      "state_id": 4,
+      "phase": "mid",
+      "forced": false,
+      "legal_count": 2,
+      "top1_agreement": 0.75,
+      "pairwise_jsd_mean": 0.010067757983724626,
+      "value_mean": -0.012959351646713912,
+      "value_std": 0.008594061296459263,
+      "entropy_mean": 0.6730116605758667,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 5,
+      "phase": "mid",
+      "forced": false,
+      "legal_count": 3,
+      "top1_agreement": 0.5,
+      "pairwise_jsd_mean": 0.022653204906052965,
+      "value_mean": 0.0023873562458902597,
+      "value_std": 0.0038611782025257395,
+      "entropy_mean": 1.0549201965332031,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 6,
+      "phase": "mid",
+      "forced": false,
+      "legal_count": 2,
+      "top1_agreement": 0.75,
+      "pairwise_jsd_mean": 0.02914836116933453,
+      "value_mean": 0.003966508316807449,
+      "value_std": 0.001693180649792322,
+      "entropy_mean": 0.6298593431711197,
+      "entropy_std": 0.07474200620936057
+    },
+    {
+      "state_id": 7,
+      "phase": "mid",
+      "forced": true,
+      "legal_count": 1,
+      "top1_agreement": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_mean": -0.0018774097261484712,
+      "value_std": 0.006437993896413128,
+      "entropy_mean": 0.0,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 8,
+      "phase": "late",
+      "forced": true,
+      "legal_count": 1,
+      "top1_agreement": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_mean": -0.007414226303808391,
+      "value_std": 0.0036139039288084697,
+      "entropy_mean": 0.0,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 9,
+      "phase": "late",
+      "forced": false,
+      "legal_count": 2,
+      "top1_agreement": 0.5,
+      "pairwise_jsd_mean": 0.013423677311632834,
+      "value_mean": 0.03668997064232826,
+      "value_std": 0.01256528164869194,
+      "entropy_mean": 0.6730116605758667,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 10,
+      "phase": "late",
+      "forced": true,
+      "legal_count": 1,
+      "top1_agreement": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_mean": -0.03410049295052886,
+      "value_std": 0.006540567822275056,
+      "entropy_mean": 0.0,
+      "entropy_std": 0.0
+    },
+    {
+      "state_id": 11,
+      "phase": "late",
+      "forced": true,
+      "legal_count": 1,
+      "top1_agreement": 1.0,
+      "pairwise_jsd_mean": 0.0,
+      "value_mean": 0.05463310331106186,
+      "value_std": 0.00508370299546951,
+      "entropy_mean": 0.0,
+      "entropy_std": 0.0
+    }
+  ]
+}

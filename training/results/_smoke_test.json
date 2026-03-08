@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "script": "search_scaling_eval.py",
+    "model_a": "checkpoints/domino_gen_0015.pt",
+    "model_b": "checkpoints/domino_gen_0046.pt",
+    "gen_a": 15,
+    "gen_b": 46,
+    "sim_list": [
+      5,
+      10
+    ],
+    "duplicate_deals": true,
+    "deal_pairs": 3,
+    "seed_base": 5000,
+    "tag": "smoke",
+    "timestamp": "2026-03-07T10:09:03"
+  },
+  "results": [
+    {
+      "sims": 5,
+      "games_total": 6,
+      "pairs_total": 3,
+      "wins_a": 4,
+      "wins_b": 2,
+      "draws": 0,
+      "winrate_a": 0.66667,
+      "win_pct_a": 66.7,
+      "win_ci95_lo": 30.0,
+      "win_ci95_hi": 90.3,
+      "mean_duplicate_margin_a": 0.0,
+      "std_duplicate_margin_a": 0.8165,
+      "ci95_low_margin_a": -1.0,
+      "ci95_high_margin_a": 0.675,
+      "root_entropy_mean": 0.1927,
+      "root_top1_mass_mean": 0.8931,
+      "root_top2_gap_mean": 0.8206,
+      "forced_move_pct": 0.5064,
+      "avg_game_length": 22.5,
+      "gen_a": 15,
+      "gen_b": 46
+    },
+    {
+      "sims": 10,
+      "games_total": 6,
+      "pairs_total": 3,
+      "wins_a": 4,
+      "wins_b": 2,
+      "draws": 0,
+      "winrate_a": 0.66667,
+      "win_pct_a": 66.7,
+      "win_ci95_lo": 30.0,
+      "win_ci95_hi": 90.3,
+      "mean_duplicate_margin_a": 0.1667,
+      "std_duplicate_margin_a": 1.0274,
+      "ci95_low_margin_a": -1.0,
+      "ci95_high_margin_a": 1.5,
+      "root_entropy_mean": 0.2549,
+      "root_top1_mass_mean": 0.8422,
+      "root_top2_gap_mean": 0.7044,
+      "forced_move_pct": 0.5811,
+      "avg_game_length": 23.17,
+      "gen_a": 15,
+      "gen_b": 46
+    }
+  ],
+  "verdict": {
+    "label": "SEARCH_BOTTLENECK_LIKELY",
+    "detail": "Strength rises materially with more sims -- increase training sims or add reanalysis",
+    "delta_50_200_margin": null,
+    "delta_100_400_margin": null,
+    "spread_margin": 0.1667,
+    "spread_win_pct": 0.0
+  }
+}
