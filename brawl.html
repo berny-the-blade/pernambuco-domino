@@ -307,13 +307,14 @@ body {
 }
 
 #joystick-zone {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
+  position: fixed;
+  bottom: 30px;
+  left: 30px;
   width: 160px;
   height: 160px;
-  z-index: 30;
+  z-index: 200;
   display: none;
+  pointer-events: none;
 }
 
 #joystick-base {
@@ -520,49 +521,49 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
-// Joystick
+// ── JOYSTICK (fixed overlay, pure screen coords) ──────────────
 const joystickZone = document.getElementById('joystick-zone');
 const joystickStick = document.getElementById('joystick-stick');
+const joyBase = document.getElementById('joystick-base');
 let joystickId = null;
+// Joystick center in screen px
+let joyCenterX = 110, joyCenterY = window.innerHeight - 110;
+const JOY_RADIUS = 80;
 
-function isMobile() { return window.matchMedia('(max-width:820px)').matches || 'ontouchstart' in window; }
+function isMobile() { return 'ontouchstart' in window || navigator.maxTouchPoints > 0; }
 
-arena.addEventListener('touchstart', handleTouchStart, {passive:false});
-arena.addEventListener('touchmove', handleTouchMove, {passive:false});
-arena.addEventListener('touchend', handleTouchEnd, {passive:false});
-
-function getTouchArenaPos(t) {
-  const rect = arena.getBoundingClientRect();
-  const scaleX = ARENA_W / rect.width;
-  const scaleY = ARENA_H / rect.height;
-  return {
-    x: (t.clientX - rect.left) * scaleX,
-    y: (t.clientY - rect.top) * scaleY
-  };
-}
+document.addEventListener('touchstart', handleTouchStart, {passive:false});
+document.addEventListener('touchmove', handleTouchMove, {passive:false});
+document.addEventListener('touchend', handleTouchEnd, {passive:false});
+document.addEventListener('touchcancel', handleTouchEnd, {passive:false});
 
 function handleTouchStart(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
-    const {x, y} = getTouchArenaPos(t);
-    if (x < ARENA_W / 2) {
+    const sx = t.clientX, sy = t.clientY;
+    if (sx < window.innerWidth / 2) {
+      // Left half → joystick
       joystickId = t.identifier;
       joystickActive = true;
+      joyCenterX = sx;
+      joyCenterY = sy;
+      // Move joystick base to finger position
+      joystickZone.style.left = (sx - JOY_RADIUS) + 'px';
+      joystickZone.style.top  = (sy - JOY_RADIUS) + 'px';
+      joystickZone.style.bottom = 'auto';
       joystickZone.style.display = 'block';
-      updateJoystick(x, y, true);
+      joystickStick.style.transform = 'translate(0,0)';
+      joystickDx = 0; joystickDy = 0;
     } else {
-      // right side: fire / super
-      const now = Date.now();
+      // Right half → fire / super
       fireBtnHeld = true;
+      const now = Date.now();
       if (now - rightTapTime < 350) {
         rightTapCount++;
         if (rightTapCount >= 2 && superBar >= SUPER_MAX) {
-          activateSuper();
-          rightTapCount = 0;
+          activateSuper(); rightTapCount = 0;
         }
-      } else {
-        rightTapCount = 1;
-      }
+      } else { rightTapCount = 1; }
       rightTapTime = now;
     }
   }
@@ -572,8 +573,16 @@ function handleTouchMove(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (t.identifier === joystickId) {
-      const {x, y} = getTouchArenaPos(t);
-      updateJoystick(x, y, false);
+      let dx = t.clientX - joyCenterX;
+      let dy = t.clientY - joyCenterY;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist > JOY_RADIUS) {
+        dx = dx / dist * JOY_RADIUS;
+        dy = dy / dist * JOY_RADIUS;
+      }
+      joystickDx = dx / JOY_RADIUS;
+      joystickDy = dy / JOY_RADIUS;
+      joystickStick.style.transform = `translate(${dx}px,${dy}px)`;
     }
   }
 }
@@ -586,25 +595,11 @@ function handleTouchEnd(e) {
       joystickDx = 0; joystickDy = 0;
       joystickId = null;
       joystickStick.style.transform = 'translate(0,0)';
+      joystickZone.style.display = 'none';
     } else {
       fireBtnHeld = false;
     }
   }
-}
-
-const joyBase = document.getElementById('joystick-base');
-function updateJoystick(ax, ay, newTouch) {
-  const jrect = joyBase.getBoundingClientRect();
-  const arect = arena.getBoundingClientRect();
-  const cx = jrect.left + 80 - arect.left;
-  const cy = jrect.top + 80 - arect.top;
-  let dx = ax - cx, dy = ay - cy;
-  const dist = Math.sqrt(dx*dx+dy*dy);
-  const maxDist = 80;
-  if (dist > maxDist) { dx = dx/dist*maxDist; dy = dy/dist*maxDist; }
-  joystickDx = dx / maxDist;
-  joystickDy = dy / maxDist;
-  joystickStick.style.transform = `translate(${dx}px,${dy}px)`;
 }
 
 // ─── WALL COLLISION ───────────────────────────────────────────
@@ -915,7 +910,7 @@ function startGame() {
   explosions = [];
   player = createPlayer();
   movePlayerEl();
-  if (isMobile()) joystickZone.style.display = 'block';
+  // Joystick shown on first touch, hidden on touchend
 
   // clear old enemy els
   document.querySelectorAll('.enemy,.bullet,.bomb-div,.fire-zone,.explosion-div,.shadow-circle,.bull-trail').forEach(e=>e.remove());
