@@ -11,9 +11,9 @@ body {
   background: #1a1a2e;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
   min-height: 100vh;
+  height: 100vh;
   font-family: 'Arial Black', Arial, sans-serif;
   overflow: hidden;
   touch-action: none;
@@ -23,12 +23,12 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  transform-origin: top center;
+  flex: 1;
+  height: 100vh;
 }
 
 #hud {
-  width: 800px;
+  width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -103,16 +103,16 @@ body {
 
 #arena-container {
   position: relative;
-  width: 800px;
-  height: 560px;
+  flex: 1;
+  width: 100%;
   overflow: hidden;
-  border: 3px solid #555;
+  border: none;
 }
 
 #arena {
   position: absolute;
-  width: 800px;
-  height: 560px;
+  width: 100%;
+  height: 100%;
   background-color: #4caf50;
   background-image:
     linear-gradient(rgba(0,0,0,0.08) 1px, transparent 1px),
@@ -422,17 +422,7 @@ body {
 
   <div id="arena-container">
     <div id="arena">
-      <!-- Walls -->
-      <div class="wall" style="left:80px;top:120px;width:120px;height:30px;"></div>
-      <div class="wall" style="left:600px;top:120px;width:120px;height:30px;"></div>
-      <div class="wall" style="left:200px;top:30px;width:30px;height:100px;"></div>
-      <div class="wall" style="left:200px;top:430px;width:30px;height:100px;"></div>
-      <div class="wall" style="left:570px;top:30px;width:30px;height:100px;"></div>
-      <div class="wall" style="left:570px;top:430px;width:30px;height:100px;"></div>
-      <div class="wall" style="left:360px;top:200px;width:80px;height:25px;"></div>
-      <div class="wall" style="left:360px;top:335px;width:80px;height:25px;"></div>
-      <div class="wall" style="left:100px;top:250px;width:25px;height:60px;"></div>
-      <div class="wall" style="left:675px;top:250px;width:25px;height:60px;"></div>
+      <!-- Walls (positioned dynamically by JS) -->
 
       <div id="player">
         <img src="shelly.png" alt="Shelly" id="shelly-img" style="mix-blend-mode:multiply;" onerror="document.getElementById('shelly-img').style.display='none';document.getElementById('player-fallback').style.display='block';">
@@ -458,35 +448,42 @@ body {
 
 <script>
 // ─── CONSTANTS ────────────────────────────────────────────────
-const ARENA_W = 800, ARENA_H = 560;
+const HUD_H = 60;
+let ARENA_W = window.innerWidth;
+let ARENA_H = window.innerHeight - HUD_H;
 
-// Scale game to fit screen width on mobile
-function scaleGame() {
-  const wrapper = document.getElementById('game-wrapper');
-  const scaleX = window.innerWidth / 800;
-  const scaleY = window.innerHeight / (560 + 60); // arena + hud
-  const scale = Math.min(scaleX, scaleY, 1);
-  wrapper.style.transform = `scale(${scale})`;
-  wrapper.style.marginBottom = `-${(1 - scale) * (560 + 60)}px`;
+function resizeArena() {
+  ARENA_W = window.innerWidth;
+  ARENA_H = window.innerHeight - HUD_H;
+  const arenaEl = document.getElementById('arena');
+  if (arenaEl) {
+    arenaEl.style.width = ARENA_W + 'px';
+    arenaEl.style.height = ARENA_H + 'px';
+  }
+  const container = document.getElementById('arena-container');
+  if (container) {
+    container.style.height = ARENA_H + 'px';
+  }
 }
-scaleGame();
-window.addEventListener('resize', scaleGame);
+window.addEventListener('resize', resizeArena);
 const PLAYER_HP = 300, PLAYER_SPEED = 180, PLAYER_RADIUS = 24;
 const SUPER_MAX = 100;
 
-// Wall rects [x, y, w, h]
-const WALLS = [
-  [80, 120, 120, 30],
-  [600, 120, 120, 30],
-  [200, 30, 30, 100],
-  [200, 430, 30, 100],
-  [570, 30, 30, 100],
-  [570, 430, 30, 100],
-  [360, 200, 80, 25],
-  [360, 335, 80, 25],
-  [100, 250, 25, 60],
-  [675, 250, 25, 60],
+// Wall rects as % of arena: [x%, y%, w%, h%]
+const WALLS_PCT = [
+  [0.10, 0.21, 0.15, 0.054],
+  [0.75, 0.21, 0.15, 0.054],
+  [0.25, 0.054, 0.038, 0.18],
+  [0.25, 0.77, 0.038, 0.18],
+  [0.71, 0.054, 0.038, 0.18],
+  [0.71, 0.77, 0.038, 0.18],
+  [0.45, 0.36, 0.10, 0.045],
+  [0.45, 0.60, 0.10, 0.045],
+  [0.125, 0.45, 0.031, 0.11],
+  [0.844, 0.45, 0.031, 0.11],
 ];
+// Computed at runtime after arena size is known
+let WALLS = [];
 
 // ─── GAME STATE ───────────────────────────────────────────────
 let gameRunning = false;
@@ -682,7 +679,7 @@ function updateHUD() {
 // ─── PLAYER ───────────────────────────────────────────────────
 function createPlayer() {
   return {
-    x: 400, y: 280,
+    x: ARENA_W/2, y: ARENA_H/2,
     hp: PLAYER_HP,
     speed: PLAYER_SPEED,
     radius: PLAYER_RADIUS,
@@ -847,33 +844,37 @@ function spawnBomb(enemy) {
 }
 
 // ─── WAVE DEFINITIONS ─────────────────────────────────────────
-const WAVE_CONFIGS = [
-  // Wave 1
-  [
-    { type:'colt', x:50, y:50 },
-    { type:'colt', x:750, y:510 },
-    { type:'bull', x:50, y:510 },
-  ],
-  // Wave 2
-  [
-    { type:'colt', x:50, y:50 },
-    { type:'colt', x:750, y:50 },
-    { type:'elprimo', x:50, y:510 },
-    { type:'elprimo', x:750, y:510 },
-    { type:'dynamike', x:400, y:30 },
-  ],
-  // Wave 3
-  [
-    { type:'bull', x:50, y:280 },
-    { type:'dynamike', x:50, y:50 },
-    { type:'dynamike', x:750, y:50 },
-    { type:'elprimo', x:750, y:280 },
-    // spike spawned later
-  ],
-];
+function getWaveConfigs() {
+  const W = ARENA_W, H = ARENA_H;
+  return [
+    // Wave 1
+    [
+      { type:'colt',     x:50,   y:50 },
+      { type:'colt',     x:W-50, y:H-50 },
+      { type:'bull',     x:50,   y:H-50 },
+    ],
+    // Wave 2
+    [
+      { type:'colt',     x:50,   y:50 },
+      { type:'colt',     x:W-50, y:50 },
+      { type:'elprimo',  x:50,   y:H-50 },
+      { type:'elprimo',  x:W-50, y:H-50 },
+      { type:'dynamike', x:W/2,  y:30 },
+    ],
+    // Wave 3
+    [
+      { type:'bull',     x:50,   y:H/2 },
+      { type:'dynamike', x:50,   y:50 },
+      { type:'dynamike', x:W-50, y:50 },
+      { type:'elprimo',  x:W-50, y:H/2 },
+      // spike spawned later
+    ],
+  ];
+}
+const WAVE_CONFIGS = null; // replaced by getWaveConfigs()
 
 function spawnWave(waveIdx) {
-  const configs = WAVE_CONFIGS[waveIdx];
+  const configs = getWaveConfigs()[waveIdx];
   for (const cfg of configs) {
     enemies.push(createEnemy(cfg.type, cfg.x, cfg.y));
   }
@@ -881,8 +882,28 @@ function spawnWave(waveIdx) {
 }
 
 // ─── GAME LOOP ────────────────────────────────────────────────
+function buildWalls() {
+  // Remove old walls
+  document.querySelectorAll('.wall').forEach(w => w.remove());
+  WALLS = [];
+  const arena = document.getElementById('arena');
+  WALLS_PCT.forEach(([px, py, pw, ph]) => {
+    const x = Math.round(px * ARENA_W);
+    const y = Math.round(py * ARENA_H);
+    const w = Math.round(pw * ARENA_W);
+    const h = Math.round(ph * ARENA_H);
+    WALLS.push([x, y, w, h]);
+    const div = document.createElement('div');
+    div.className = 'wall';
+    div.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+    arena.appendChild(div);
+  });
+}
+
 function startGame() {
   overlay.style.display = 'none';
+  resizeArena();
+  buildWalls();
   gameRunning = true;
   waveNum = 1;
   reviveUsed = false;
@@ -1339,7 +1360,7 @@ function checkWaveComplete() {
       setTimeout(() => {
         showAnnouncement('⚠ BOSS INCOMING! ⚠', 2000, '#f44336');
         setTimeout(() => {
-          const spike = createEnemy('spike', 400, 30);
+          const spike = createEnemy('spike', ARENA_W/2, 30);
           enemies.push(spike);
         }, 2000);
       }, 500);
