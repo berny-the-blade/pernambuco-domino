@@ -238,6 +238,405 @@
       "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
     },
     {
+      "id": "PARTNER_NEW_END_004",
+      "theme": "preserve_new_end",
+      "description": "After 66 is opened and opponent plays 63, partner should usually continue 3 rather than reconnect 6.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 6, "right_end": 3, "board_length": 2,
+        "history": [{ "player": 0, "tile": [6,6], "side": "open" }, { "player": 1, "tile": [6,3], "side": "left" }] },
+      "hands": { "player_0": [[6,6]], "player_1": [[6,3]], "player_2": [[3,4],[3,5],[6,1],[0,0],[1,2],[4,5]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [3,4], "side": "right" }, { "tile": [3,5], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [6,1], "side": "left", "reason": "collapses newly opened 3 end" }]
+      },
+      "tags": ["partner-play", "new-end-preservation"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_NEW_END_005",
+      "theme": "preserve_new_end",
+      "description": "Opponent opens 0 after double-2 opening; partner should continue 0 if possible.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 2, "right_end": 0, "board_length": 2,
+        "history": [{ "player": 0, "tile": [2,2], "side": "open" }, { "player": 1, "tile": [2,0], "side": "left" }] },
+      "hands": { "player_0": [[2,2]], "player_1": [[2,0]], "player_2": [[0,4],[0,6],[2,5],[1,1],[3,4],[5,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [0,4], "side": "right" }, { "tile": [0,6], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [2,5], "side": "left", "reason": "collapses newly opened 0 end" }]
+      },
+      "tags": ["partner-play", "new-end-preservation"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_NEW_END_006",
+      "theme": "preserve_new_end",
+      "description": "Opponent opens 4 from a 33 anchor; partner should continue 4 if available.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 3, "right_end": 4, "board_length": 2,
+        "history": [{ "player": 0, "tile": [3,3], "side": "open" }, { "player": 1, "tile": [3,4], "side": "left" }] },
+      "hands": { "player_0": [[3,3]], "player_1": [[3,4]], "player_2": [[4,1],[4,6],[3,5],[0,0],[1,2],[2,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [4,1], "side": "right" }, { "tile": [4,6], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [3,5], "side": "left", "reason": "collapses newly opened 4 end" }]
+      },
+      "tags": ["partner-play", "new-end-preservation"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_SUIT_STEAL_003",
+      "theme": "dont_steal_partner_suit",
+      "description": "Partner signaled 2 strength; current player should continue 5 instead of immediately consuming the 2 line.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 2, "right_end": 5, "board_length": 6,
+        "history": [{ "player": 2, "tile": [2,6], "side": "left" }] },
+      "hands": { "player_0": [[5,1],[5,4],[2,3],[0,0],[4,4],[1,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [5,1], "side": "right" }, { "tile": [5,4], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [2,3], "side": "left", "reason": "steals partner-signaled 2 line" }]
+      },
+      "tags": ["partner-play", "suit-stealing"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_SUIT_STEAL_004",
+      "theme": "dont_steal_partner_suit",
+      "description": "Partner just strengthened the 6 line; avoid closing it if a healthy 1 continuation exists.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 6, "right_end": 1, "board_length": 7,
+        "history": [{ "player": 2, "tile": [6,4], "side": "left" }] },
+      "hands": { "player_0": [[1,5],[1,6],[6,2],[0,3],[2,4],[5,5]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [1,5], "side": "right" }],
+        "acceptable_moves": [{ "tile": [1,6], "side": "right" }],
+        "discouraged_moves": [{ "tile": [6,2], "side": "left", "reason": "closes partner-strengthened 6 line" }]
+      },
+      "tags": ["partner-play", "signaling", "suit-stealing"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PRESSURE_END_002",
+      "theme": "preserve_pressure",
+      "description": "Opponents are likely weak in 3; preserving 3 pressure is better than switching away.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 3, "right_end": 6, "board_length": 5,
+        "history": [{ "player": 1, "tile": [6,3], "side": "right" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[3,1],[3,4],[6,5],[0,0],[2,2],[4,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [3], "2": [], "3": [3] },
+      "expected": {
+        "preferred_moves": [{ "tile": [3,1], "side": "left" }, { "tile": [3,4], "side": "left" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [6,5], "side": "right", "reason": "removes pressure from the weaker end" }]
+      },
+      "tags": ["pressure", "void-inference", "partnership"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PRESSURE_END_003",
+      "theme": "preserve_pressure",
+      "description": "If the right end is likely painful for opponents, keep it alive instead of pivoting back to comfort.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 5, "right_end": 0, "board_length": 8,
+        "history": [{ "player": 3, "tile": [5,0], "side": "left" }] },
+      "hands": { "player_0": [[0,2],[0,6],[5,4],[2,2],[3,4],[1,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [0], "2": [0], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [0,2], "side": "right" }, { "tile": [0,6], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [5,4], "side": "left", "reason": "lets opponents off the weak 0 end" }]
+      },
+      "tags": ["pressure", "weak-end", "partnership"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PROBE_VOID_002",
+      "theme": "information_probe",
+      "description": "Prefer the move that is more likely to reveal whether opponents hold 4.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 4, "right_end": 2, "board_length": 6,
+        "history": [{ "player": 1, "tile": [2,4], "side": "right" }] },
+      "hands": { "player_0": [[4,1],[2,6],[2,5],[0,0],[1,3],[3,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [4], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [4,1], "side": "left" }],
+        "acceptable_moves": [{ "tile": [2,6], "side": "right" }],
+        "discouraged_moves": [{ "tile": [2,5], "side": "right", "reason": "comfortable but less informative continuation" }]
+      },
+      "tags": ["information", "probing", "void-detection"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PROBE_VOID_003",
+      "theme": "information_probe",
+      "description": "Keep the less-certain end alive to gain information, instead of snapping back to the settled side.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 1, "right_end": 5, "board_length": 7,
+        "history": [{ "player": 1, "tile": [5,1], "side": "left" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[1,3],[1,6],[5,2],[0,0],[2,4],[4,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [1], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [1,3], "side": "left" }, { "tile": [1,6], "side": "left" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [5,2], "side": "right", "reason": "removes the uncertain information-rich end" }]
+      },
+      "tags": ["information", "new-end-preservation", "probing"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "LOCK_BUILD_001",
+      "theme": "sacrifice_to_lock",
+      "description": "A slightly ugly move is preferred because it keeps both pressure and lock potential alive.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 2, "right_end": 4, "board_length": 9,
+        "history": [{ "player": 2, "tile": [4,0], "side": "right" }] },
+      "hands": { "player_0": [[2,1],[2,6],[4,5],[0,0],[1,5],[3,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [2], "2": [], "3": [4] },
+      "expected": {
+        "preferred_moves": [{ "tile": [2,1], "side": "left" }],
+        "acceptable_moves": [{ "tile": [2,6], "side": "left" }],
+        "discouraged_moves": [{ "tile": [4,5], "side": "right", "reason": "abandons lock-building pressure" }]
+      },
+      "tags": ["lock", "structure", "sacrifice"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "LOCK_BUILD_002",
+      "theme": "sacrifice_to_lock",
+      "description": "Preserving the left-side squeeze is stronger than taking the easier right-side dump.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 6, "right_end": 3, "board_length": 11,
+        "history": [{ "player": 3, "tile": [3,0], "side": "right" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[6,1],[6,5],[3,4],[0,0],[2,4],[1,2]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [6], "2": [], "3": [3] },
+      "expected": {
+        "preferred_moves": [{ "tile": [6,1], "side": "left" }, { "tile": [6,5], "side": "left" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [3,4], "side": "right", "reason": "lets go of the stronger squeeze side" }]
+      },
+      "tags": ["lock", "pressure", "structure"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "DAMAGE_CONTROL_002",
+      "theme": "ad_hoc_teamplay",
+      "description": "Partner has likely broken the intended line; shift to safer damage-control instead of doubling down.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 2, "right_end": 6, "board_length": 8,
+        "history": [{ "player": 2, "tile": [6,6], "side": "right" }] },
+      "hands": { "player_0": [[2,4],[6,1],[6,5],[0,0],[3,4],[1,5]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [2], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [2,4], "side": "left" }],
+        "acceptable_moves": [{ "tile": [6,1], "side": "right" }],
+        "discouraged_moves": [{ "tile": [6,5], "side": "right", "reason": "blindly doubles down on a broken partner line" }]
+      },
+      "tags": ["ad-hoc", "damage-control", "partner-error"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "DAMAGE_CONTROL_003",
+      "theme": "ad_hoc_teamplay",
+      "description": "Partner likely lacks 4 despite previous line; current player should pivot rather than overtrust convention.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 4, "right_end": 1, "board_length": 9,
+        "history": [{ "player": 0, "tile": [1,4], "side": "right" }, { "player": 1, "tile": [4,6], "side": "left" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[1,5],[1,2],[4,3],[0,0],[3,6],[2,5]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [4], "1": [], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [1,5], "side": "right" }, { "tile": [1,2], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [4,3], "side": "left", "reason": "overtrusts broken/invalid partner line" }]
+      },
+      "tags": ["ad-hoc", "damage-control", "belief-correction"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_OPTIONS_001",
+      "theme": "maintain_partner_options",
+      "description": "Prefer the move that leaves partner more plausible continuations.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 0, "right_end": 2, "board_length": 8,
+        "history": [{ "player": 2, "tile": [2,4], "side": "right" }] },
+      "hands": { "player_0": [[0,5],[2,6],[2,1],[0,0],[3,4],[1,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [0], "2": [], "3": [2] },
+      "expected": {
+        "preferred_moves": [{ "tile": [0,5], "side": "left" }],
+        "acceptable_moves": [{ "tile": [2,6], "side": "right" }],
+        "discouraged_moves": [{ "tile": [2,1], "side": "right", "reason": "narrows likely partner replies more than necessary" }]
+      },
+      "tags": ["partner-options", "coordination"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "PARTNER_OPTIONS_002",
+      "theme": "maintain_partner_options",
+      "description": "When one side is more compatible with partner's likely holdings, keep that side available.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 5, "right_end": 2, "board_length": 7,
+        "history": [{ "player": 0, "tile": [2,5], "side": "right" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[2,4],[2,6],[5,1],[0,0],[3,4],[1,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [5], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [2,4], "side": "right" }, { "tile": [2,6], "side": "right" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [5,1], "side": "left", "reason": "removes the side more likely useful to partner" }]
+      },
+      "tags": ["partner-options", "belief", "coordination"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "DONT_RESCUE_001",
+      "theme": "dont_rescue_opponent",
+      "description": "Avoid reopening the end opponents are more likely to welcome.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 6, "right_end": 3, "board_length": 9,
+        "history": [{ "player": 1, "tile": [6,3], "side": "left" }] },
+      "hands": { "player_0": [[3,1],[3,5],[6,4],[0,0],[1,4],[2,5]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [], "2": [3], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [6,4], "side": "left" }],
+        "acceptable_moves": [{ "tile": [3,1], "side": "right" }],
+        "discouraged_moves": [{ "tile": [3,5], "side": "right", "reason": "reopens the side opponents likely prefer" }]
+      },
+      "tags": ["pressure", "dont-rescue", "opponent-awareness"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "DONT_RESCUE_002",
+      "theme": "dont_rescue_opponent",
+      "description": "Maintain the awkward end instead of restoring the comfortable one for opponents.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 1, "right_end": 6, "board_length": 8,
+        "history": [{ "player": 3, "tile": [6,1], "side": "right" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[1,4],[1,5],[6,2],[0,0],[2,4],[3,5]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [1], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [1,4], "side": "left" }, { "tile": [1,5], "side": "left" }],
+        "acceptable_moves": [],
+        "discouraged_moves": [{ "tile": [6,2], "side": "right", "reason": "restores a more comfortable opponent end" }]
+      },
+      "tags": ["pressure", "dont-rescue", "weak-end"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "SIGNAL_CONFIRM_002",
+      "theme": "confirm_partner_signal",
+      "description": "Partner's recent action suggests comfort on 5; confirming that line is preferred over drifting away.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 5, "right_end": 2, "board_length": 7,
+        "history": [{ "player": 2, "tile": [5,0], "side": "left" }] },
+      "hands": { "player_0": [[5,4],[2,6],[2,3],[0,0],[1,1],[4,6]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [5], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [5,4], "side": "left" }],
+        "acceptable_moves": [{ "tile": [2,6], "side": "right" }],
+        "discouraged_moves": [{ "tile": [2,3], "side": "right", "reason": "ignores a live partner signal without tactical need" }]
+      },
+      "tags": ["signal-confirmation", "duplas", "partnership"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "SIGNAL_CONFIRM_003",
+      "theme": "confirm_partner_signal",
+      "description": "Partner's continuation on 0 should usually be respected if a matching reply exists.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 0, "right_end": 4, "board_length": 6,
+        "history": [{ "player": 0, "tile": [0,3], "side": "left" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[0,5],[4,6],[4,1],[1,1],[2,5],[3,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [0], "2": [], "3": [] },
+      "expected": {
+        "preferred_moves": [{ "tile": [0,5], "side": "left" }],
+        "acceptable_moves": [{ "tile": [4,6], "side": "right" }],
+        "discouraged_moves": [{ "tile": [4,1], "side": "right", "reason": "ignores a fresh partner line for no tactical reason" }]
+      },
+      "tags": ["signal-confirmation", "partnership"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "TACTICAL_OVERRIDE_002",
+      "theme": "tactical_override",
+      "description": "Normally preserving the new end is preferred, but here collapsing it is right because it forces a block line.",
+      "player_to_move": 2,
+      "team_to_move": 0,
+      "board": { "left_end": 4, "right_end": 1, "board_length": 11,
+        "history": [{ "player": 0, "tile": [4,4], "side": "open" }, { "player": 1, "tile": [4,1], "side": "left" }] },
+      "hands": { "player_0": [], "player_1": [], "player_2": [[4,6],[1,5],[0,0],[2,2],[3,6],[5,6]], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [1], "2": [], "3": [1] },
+      "expected": {
+        "preferred_moves": [{ "tile": [4,6], "side": "left" }],
+        "acceptable_moves": [{ "tile": [1,5], "side": "right" }],
+        "discouraged_moves": []
+      },
+      "tags": ["override", "tactics", "block"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
+      "id": "TACTICAL_OVERRIDE_003",
+      "theme": "tactical_override",
+      "description": "Stealing partner's line is acceptable here because it immediately cashes a winning tempo.",
+      "player_to_move": 0,
+      "team_to_move": 0,
+      "board": { "left_end": 2, "right_end": 6, "board_length": 12,
+        "history": [{ "player": 2, "tile": [2,5], "side": "left" }] },
+      "hands": { "player_0": [[2,6],[6,1],[0,0],[1,1],[3,4],[4,5]], "player_1": [], "player_2": [], "player_3": [] },
+      "hidden_info_mode": "partial",
+      "cant_have": { "0": [], "1": [6], "2": [], "3": [6] },
+      "expected": {
+        "preferred_moves": [{ "tile": [2,6], "side": "left" }],
+        "acceptable_moves": [{ "tile": [6,1], "side": "right" }],
+        "discouraged_moves": []
+      },
+      "tags": ["override", "tempo", "tactics"],
+      "scoring": { "preferred_score": 1.0, "acceptable_score": 0.5, "discouraged_score": 0.0 }
+    },
+    {
       "id": "PARTNER_SIGNAL_CONFIRM_001",
       "theme": "confirm_partner_signal",
       "description": "Partner has just indicated comfort on 3; confirming that line is preferred over pivoting to a less informative side.",
