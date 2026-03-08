@@ -9,11 +9,95 @@ Usage:
 """
 
 import json
+import math
 import sys
 import os
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ─── Policy validation helpers (visit-count targets) ───────────────────────────
+
+NN_NUM_ACTIONS = 57
+
+
+def entropy(p: np.ndarray, eps: float = 1e-12) -> float:
+    p = np.clip(p, eps, 1.0)
+    return float(-(p * np.log(p)).sum())
+
+
+def validate_policy_row(pi, mask, row_idx=None, eps: float = 1e-6) -> dict:
+    """
+    Validate one exported 57-dim policy target row.
+
+    Returns dict with: illegal_mass, entropy, top1_idx, top1_prob, legal_count
+    Raises ValueError on malformed rows.
+    """
+    pi   = np.asarray(pi,   dtype=np.float32)
+    mask = np.asarray(mask, dtype=np.float32)
+
+    if pi.shape != (NN_NUM_ACTIONS,):
+        raise ValueError(f"row {row_idx}: pi shape {pi.shape} != (57,)")
+    if mask.shape != (NN_NUM_ACTIONS,):
+        raise ValueError(f"row {row_idx}: mask shape {mask.shape} != (57,)")
+
+    if not np.isfinite(pi).all():
+        raise ValueError(f"row {row_idx}: pi contains non-finite values")
+    if not np.isfinite(mask).all():
+        raise ValueError(f"row {row_idx}: mask contains non-finite values")
+
+    if (pi < -eps).any():
+        bad = np.where(pi < -eps)[0][:10]
+        raise ValueError(f"row {row_idx}: pi contains negative mass at {bad.tolist()}")
+
+    # Clamp floating-point noise
+    pi = np.maximum(pi, 0.0)
+
+    legal       = mask > 0.5
+    legal_count = int(legal.sum())
+
+    if legal_count == 0:
+        raise ValueError(f"row {row_idx}: no legal actions in mask")
+
+    total = float(pi.sum())
+    if abs(total - 1.0) > 1e-4:
+        raise ValueError(f"row {row_idx}: pi sums to {total:.8f}, expected ~1.0")
+
+    illegal_mass = float(pi[~legal].sum())
+    if illegal_mass > 1e-6:
+        bad = np.where((~legal) & (pi > 1e-9))[0][:10]
+        raise ValueError(
+            f"row {row_idx}: illegal policy mass {illegal_mass:.8e} on actions {bad.tolist()}"
+        )
+
+    top1_idx = int(np.argmax(pi))
+    if not legal[top1_idx]:
+        raise ValueError(f"row {row_idx}: top-1 action {top1_idx} is illegal")
+
+    return {
+        "illegal_mass": illegal_mass,
+        "entropy":      entropy(pi),
+        "top1_idx":     top1_idx,
+        "top1_prob":    float(pi[top1_idx]),
+        "legal_count":  legal_count,
+    }
+
+
+def summarize_bad_row(row: dict, idx: int) -> None:
+    """Print compact debug info for a malformed policy row."""
+    pi   = np.asarray(row.get("policy_57", row.get("pi", [])))
+    mask = np.asarray(row.get("mask", []))
+    if pi.size == 0:
+        print(f"\nBad row {idx}: no pi data available")
+        return
+    top  = np.argsort(-pi)[:5]
+    print(f"\nBad row {idx}")
+    print(f"  top-5 actions : {top.tolist()}")
+    print(f"  top-5 probs   : {[float(pi[t]) for t in top]}")
+    if mask.size > 0:
+        print(f"  legal(top-5)  : {[bool(mask[t] > 0.5) for t in top]}")
+
+# ───────────────────────────────────────────────────────────────────────────────
 
 from match_equity import ME3D, get_match_equity, delta_me, MATCH_TARGET, DOB_VALUES
 from domino_encoder import DominoEncoder
@@ -162,33 +246,67 @@ def validate_data_quality(data):
         count = np.sum((abs_v >= lo) & (abs_v < hi))
         print(f"    [{lo:.2f}, {hi:.2f}): {count} ({count/total*100:.1f}%)")
 
-    # Policy quality
-    policies = [np.array(d['policy_57']) for d in data]
-    p_arr = np.stack(policies)
-    nonzero_per_row = (p_arr > 0.001).sum(axis=1)
-    print(f"\nPolicy distribution:")
-    print(f"  Mean legal actions: {nonzero_per_row.mean():.1f}")
-    print(f"  Pass-only samples: {np.sum(p_arr[:, 56] > 0.99)}")
-
-    # Policy sums should be ~1.0
-    p_sums = p_arr.sum(axis=1)
-    bad_sums = np.sum(np.abs(p_sums - 1.0) > 0.01)
-    print(f"  Policy sum check (within 0.01 of 1.0): "
-          f"{'PASS' if bad_sums == 0 else f'FAIL ({bad_sums} bad)'}")
-
-    # PI legality mass: pi should be zero on illegal actions
+    # ── Per-row policy validation using validate_policy_row ──────────────────
+    entropy_values  = []
+    top1_probs      = []
+    legal_counts    = []
     illegal_mass_violations = 0
+    bad_sums        = 0
+    row_errors      = 0
+
     for i, d in enumerate(data):
         snap = d['snapshot']
-        mask = nn_action_mask(snap)
-        pi = np.array(d['policy_57'])
-        illegal_mass = pi[mask < 0.5].sum()
-        if illegal_mass > 1e-6:
-            illegal_mass_violations += 1
-            if illegal_mass_violations <= 5:
-                print(f"  ILLEGAL MASS snap {i}: sum(pi[illegal])={illegal_mass:.6f}")
-    print(f"  PI legality check (no mass on illegal actions): "
-          f"{'PASS' if illegal_mass_violations == 0 else f'FAIL ({illegal_mass_violations} bad)'}")
+        pi   = np.array(d['policy_57'], dtype=np.float32)
+        mask = nn_action_mask(snap).astype(np.float32)
+
+        try:
+            stats = validate_policy_row(pi, mask, row_idx=i)
+            entropy_values.append(stats["entropy"])
+            top1_probs.append(stats["top1_prob"])
+            legal_counts.append(stats["legal_count"])
+            if stats["illegal_mass"] > 1e-6:
+                illegal_mass_violations += 1
+                if illegal_mass_violations <= 5:
+                    print(f"  ILLEGAL MASS snap {i}: {stats['illegal_mass']:.6e}")
+        except ValueError as e:
+            row_errors += 1
+            if row_errors <= 5:
+                summarize_bad_row(d, i)
+                print(f"  ERROR: {e}")
+            bad_sums += 1
+
+    p_arr = np.stack([np.array(d['policy_57']) for d in data])
+    nonzero_per_row = (p_arr > 0.001).sum(axis=1)
+
+    print(f"\nPolicy distribution:")
+    print(f"  Mean legal actions  : {nonzero_per_row.mean():.1f}")
+    print(f"  Pass-only samples   : {np.sum(p_arr[:, 56] > 0.99)}")
+    print(f"  Policy sum check    : {'PASS' if bad_sums == 0 else f'FAIL ({bad_sums} bad)'}")
+    print(f"  PI legality check   : {'PASS' if illegal_mass_violations == 0 else f'FAIL ({illegal_mass_violations} bad)'}")
+
+    if entropy_values:
+        mean_ent  = np.mean(entropy_values)
+        mean_top1 = np.mean(top1_probs)
+        mean_legal= np.mean(legal_counts)
+        min_legal = np.min(legal_counts)
+        max_legal = np.max(legal_counts)
+        print(f"\nPolicy target stats (visit-count quality):")
+        print(f"  mean entropy      : {mean_ent:.4f}")
+        print(f"  mean top1 prob    : {mean_top1:.4f}")
+        print(f"  mean legal count  : {mean_legal:.2f}")
+        print(f"  min  legal count  : {min_legal}")
+        print(f"  max  legal count  : {max_legal}")
+
+        # Quality sanity warnings
+        if mean_top1 < 0.05:
+            print("  WARNING: policy targets look unusually flat (mean_top1 < 0.05)")
+        if mean_top1 > 0.95:
+            print("  WARNING: policy targets look unusually sharp / nearly deterministic")
+        if mean_ent < 0.05:
+            print("  WARNING: very low entropy — too few MCTS visits or overconfident search")
+        max_uniform = math.log(mean_legal) if mean_legal > 1 else 1.0
+        if mean_ent > max_uniform * 0.95:
+            print("  WARNING: very high entropy — targets barely better than uniform")
 
     # Team POV stability: v_target POV must match snapshot player's team
     pov_violations = 0
@@ -255,6 +373,9 @@ def validate_data_quality(data):
         issues.append(f"{pov_violations} dME POV sign flips")
     if non_tie > 0 and correct_sign / non_tie < 0.99:
         issues.append("dME sign mismatches")
+
+    if row_errors > 0:
+        issues.append(f"{row_errors} malformed policy rows")
 
     if issues:
         print(f"ISSUES: {', '.join(issues)}")
