@@ -314,11 +314,26 @@ class Orchestrator:
     Value targets: ΔME (match equity delta) or legacy points/4.
     Arena: sequential SPRT-style duplicate-deal matches with side-swap.
     Starts with 100 seeds, extends to 400 if inconclusive.
+
+    Budget-specific checkpoint tracking:
+      After each generation, a quick eval is run at each deployment budget.
+      The best checkpoint per budget is saved as checkpoints/best_{N}sims.pt.
+      This decouples "best for deployment" from "latest" (which auto-promotes).
+
+    Live browser context:
+      index.html ismctsEval uses MAX_ITERATIONS=600 with TIME_LIMIT=300ms.
+      This is wall-clock limited, equivalent to ~100-200 Python fixed-count sims
+      depending on hardware. Deploy best_100sims.pt or best_200sims.pt.
     """
 
     ARENA_SEEDS_MIN = 100    # start with 100 seeds (200 matches)
     ARENA_SEEDS_MAX = 600    # extend up to 600 seeds (1200 matches)
     ARENA_SEEDS_STEP = 100   # add 100 seeds per extension
+
+    # Sim budgets to track for deployment-specific best checkpoints.
+    # Browser equivalent: ~100-200 sims (TIME_LIMIT=300ms, MAX_ITERATIONS=600).
+    BUDGET_EVAL_SIMS = [50, 100, 200]
+    BUDGET_EVAL_PAIRS = 50   # 50 pairs = 100 games, fast enough per-gen
 
     # Graduated gating: after N consecutive rejections, relax the promote threshold.
     # This prevents stalling when the model improves by small increments (52-53%).
@@ -362,6 +377,11 @@ class Orchestrator:
         self.rejections = 0  # count of failed arena challenges
         self.consecutive_rejections = 0  # resets on promotion
 
+        # Budget-specific best checkpoint tracking.
+        # Maps: sim_budget -> {"gen": int, "win_rate": float, "path": str}
+        self.budget_best: dict = {}
+        self._enable_budget_tracking = True  # set False to skip budget evals
+
     def _get_promote_threshold(self):
         """Get the current minimum win rate for promotion based on consecutive rejections."""
         threshold = self.GATING_SCHEDULE[0][1]  # default
@@ -369,6 +389,110 @@ class Orchestrator:
             if self.consecutive_rejections >= min_rejections:
                 threshold = min_wr
         return threshold
+
+    # ── Budget-specific checkpoint tracking ──────────────────────────────────
+
+    def _budget_eval_at(self, challenger_weights, ref_weights, num_sims, num_pairs, seed_base):
+        """Quick duplicate-deal eval at a fixed sim budget. Returns challenger win rate."""
+        from domino_mcts import DominoMCTS as _MCTS
+        device = torch.device("cpu")
+
+        chall_model = DominoNet().to(device)
+        chall_model.load_state_dict(challenger_weights, strict=False)
+        chall_model.eval()
+
+        ref_model = DominoNet().to(device)
+        ref_model.load_state_dict(ref_weights, strict=False)
+        ref_model.eval()
+
+        mcts_c = _MCTS(chall_model, num_simulations=num_sims)
+        mcts_r = _MCTS(ref_model,   num_simulations=num_sims)
+
+        wins_c = 0
+        total  = 0
+        enc_c = DominoEncoder()
+        enc_r = DominoEncoder()
+
+        with torch.no_grad():
+            for i in range(num_pairs):
+                seed = seed_base + i
+                for c_side in [0, 1]:
+                    env = DominoEnv()
+                    enc_c.reset(); enc_r.reset()
+                    obs = env.reset(seed=seed)
+                    step = 0
+                    while not env.is_over() and step < 200:
+                        mask = env.get_legal_moves_mask()
+                        if mask.sum() == 0:
+                            break
+                        team = env.current_player % 2
+                        # c_side=0: challenger plays team0; c_side=1: challenger plays team1
+                        if team == c_side:
+                            state = enc_c.encode(obs)
+                            pi = mcts_c.get_action_probs(env, enc_c, temperature=0.1)
+                        else:
+                            state = enc_r.encode(obs)
+                            pi = mcts_r.get_action_probs(env, enc_r, temperature=0.1)
+                        action = int(np.argmax(pi * mask))
+                        obs, _, done, _ = env.step(action)
+                        step += 1
+                    if env.game_over:
+                        if env.winner_team == c_side:
+                            wins_c += 1
+                    total += 1
+        return wins_c / total if total > 0 else 0.5
+
+    def _track_budget_checkpoints(self, gen, ckpt_path_current):
+        """
+        Run quick evals at each BUDGET_EVAL_SIMS budget.
+        Update checkpoints/best_{N}sims.pt if the current gen wins.
+
+        Uses the previous best as reference (or gen1 if no prior best).
+        Runs in-process (no subprocess) since it's a small eval.
+        """
+        if not self._enable_budget_tracking:
+            return
+        import shutil
+
+        current_weights = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+        seed_base = 90000 + gen * 100  # dedicated seed range, away from arena/training
+
+        for num_sims in self.BUDGET_EVAL_SIMS:
+            best_info = self.budget_best.get(num_sims)
+            if best_info is None:
+                # No prior best → current gen is automatically the best at this budget
+                best_path = os.path.join("checkpoints", f"best_{num_sims}sims.pt")
+                shutil.copy2(ckpt_path_current, best_path)
+                self.budget_best[num_sims] = {
+                    "gen": gen, "win_rate": 0.5, "path": best_path
+                }
+                print(f"  [Budget {num_sims}sims] Initialized best → gen {gen}")
+                continue
+
+            # Load reference (previous best at this budget)
+            ref_ckpt = torch.load(best_info["path"], map_location="cpu", weights_only=True)
+            ref_weights = ref_ckpt.get("model_state_dict", ref_ckpt)
+
+            wr = self._budget_eval_at(
+                current_weights, ref_weights,
+                num_sims=num_sims,
+                num_pairs=self.BUDGET_EVAL_PAIRS,
+                seed_base=seed_base + num_sims,
+            )
+            if wr >= 0.50:
+                best_path = os.path.join("checkpoints", f"best_{num_sims}sims.pt")
+                shutil.copy2(ckpt_path_current, best_path)
+                prev_gen = best_info["gen"]
+                self.budget_best[num_sims] = {
+                    "gen": gen, "win_rate": wr, "path": best_path
+                }
+                print(f"  [Budget {num_sims}sims] New best: gen {gen} "
+                      f"(wr={wr:.1%} vs gen {prev_gen})")
+            else:
+                print(f"  [Budget {num_sims}sims] No improvement: gen {gen} "
+                      f"wr={wr:.1%} vs gen {best_info['gen']} — keeping existing best")
+
+    # ── Main training loop ────────────────────────────────────────────────────
 
     def run(self, total_generations=100, games_per_worker=250):
         """Run the full generational training loop."""
@@ -502,6 +626,12 @@ class Orchestrator:
                     'partnership_score': partnership_score,
                 }, ckpt_path)
                 print(f"Auto-promoted gen {gen}. Saved: {ckpt_path}")
+
+                # Track budget-specific best checkpoints.
+                # best_{N}sims.pt = best checkpoint at that deployment sim budget.
+                # Browser uses TIME_LIMIT=300ms ≈ 100-200 Python sims.
+                if self._enable_budget_tracking and self.use_mcts:
+                    self._track_budget_checkpoints(gen, ckpt_path)
             else:
                 print(f"Buffer too small ({len(self.replay_buffer)}/{min_buffer}). "
                       f"Gathering more data...")
@@ -722,6 +852,8 @@ def main():
                         help='Enable 21-output auxiliary pip-belief head')
     parser.add_argument('--belief-weight', type=float, default=0.2,
                         help='Auxiliary belief loss weight')
+    parser.add_argument('--no-budget-tracking', action='store_true',
+                        help='Disable per-gen budget-specific checkpoint tracking')
     args = parser.parse_args()
 
     orch = Orchestrator(
@@ -739,6 +871,9 @@ def main():
 
     if args.resume:
         orch.load_checkpoint(args.resume)
+
+    if args.no_budget_tracking:
+        orch._enable_budget_tracking = False
 
     orch.run(
         total_generations=args.generations,
