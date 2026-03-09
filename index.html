@@ -2818,8 +2818,7 @@
         for (let i = 0; i < pi.length; i++) { cum += pi[i]; if (r <= cum) return i; }
         return pi.length - 1;
       };
-      // Alias for backward compat with exportTrainingData
-      const sampleFromPolicy = sampleActionIdxFromPolicy;
+      // Note: sampleFromPolicy is defined above (first declaration)
 
       /**
        * Convert a sampled actionIdx back to a fully-formed move object.
