@@ -2700,6 +2700,56 @@
       };
 
       /**
+       * Heuristic-softmax 57-dim policy (legacy / ablation path).
+       * Uses smartAI scores as logits, softmax over legal actions.
+       * tau=1.0 → proportional to exp(score); lower = sharper.
+       */
+      const buildHeuristicPolicy57 = (hand, lE, rE, bLen, player, knowledge, tau = 1.0) => {
+        const mask   = _nnActionMask(hand, lE, rE, bLen);
+        const scores = new Float32Array(57).fill(-1e9);
+        const ranked = smartAI(hand, lE, rE, bLen, player, knowledge, null, /*returnAll=*/true);
+        if (ranked && ranked.length > 0) {
+          for (const r of ranked) {
+            const a = _moveToActionIdx(r);
+            if (a >= 0 && a < 57 && mask[a]) scores[a] = typeof r.score === 'number' ? r.score : 0;
+          }
+        } else {
+          // Fallback: uniform over legal
+          const moves = ismctsGetLegalMoves(hand, lE, rE, bLen);
+          for (const m of moves) { const a = _moveToActionIdx(m); if (a >= 0 && a < 57) scores[a] = 0; }
+        }
+        let maxScore = -1e9;
+        for (let i = 0; i < 57; i++) if (mask[i] && scores[i] > maxScore) maxScore = scores[i];
+        const pi = new Float32Array(57);
+        let sum = 0;
+        for (let i = 0; i < 57; i++) {
+          if (!mask[i]) continue;
+          const w = Math.exp((scores[i] - maxScore) / tau);
+          pi[i] = w; sum += w;
+        }
+        if (sum > 0) for (let i = 0; i < 57; i++) pi[i] /= sum;
+        return pi;
+      };
+
+      /**
+       * JS-side policy row assertion — mirrors Python validate_policy_row.
+       * Throws immediately if the row is malformed.
+       */
+      const assertPolicyRow = (pi, mask) => {
+        if (pi.length !== 57 || mask.length !== 57)
+          throw new Error(`Bad policy row shape: pi=${pi.length}, mask=${mask.length}`);
+        let sum = 0, illegalMass = 0;
+        for (let i = 0; i < 57; i++) {
+          if (!Number.isFinite(pi[i])) throw new Error(`pi[${i}] is not finite`);
+          if (pi[i] < -1e-8)          throw new Error(`pi[${i}] negative: ${pi[i]}`);
+          sum += pi[i];
+          if (!mask[i]) illegalMass += pi[i];
+        }
+        if (Math.abs(sum - 1) > 1e-4)  throw new Error(`Policy sum != 1: ${sum}`);
+        if (illegalMass > 1e-6)         throw new Error(`Illegal policy mass: ${illegalMass}`);
+      };
+
+      /**
        * Clamp illegal actions to 0, renormalize to sum=1.
        * Falls back to uniform-over-legal if sum==0.
        * Mutates pi in place and returns it.
@@ -2768,6 +2818,7 @@
             // ── build policy target ──
             let policy57;
             if (TRAIN_POLICY_TARGET === 'visits') {
+              // NOTE: out.pi comes from rootVisitPolicy() on raw visit counts BEFORE dedup
               const out = await ismctsEval(
                 hand, lE, rE, bLen, player, knowledge,
                 matchScore, scoreMultiplier,
@@ -2775,14 +2826,16 @@
               );
               policy57 = Array.from(out ? out.pi : new Float32Array(57));
             } else if (TRAIN_POLICY_TARGET === 'heuristic') {
-              // Stub: replace with heuristic softmax builder when implemented
-              throw new Error('heuristic policy builder not yet implemented in JS export');
+              policy57 = Array.from(buildHeuristicPolicy57(hand, lE, rE, bLen, player, knowledge, tau));
             } else {
               throw new Error(`Unknown TRAIN_POLICY_TARGET=${TRAIN_POLICY_TARGET}`);
             }
 
             // Safety: clamp illegal + renormalize
             normalizePolicyWithMask(policy57, legalMask);
+
+            // JS-side assert — mirrors Python validate_policy_row, fails fast
+            assertPolicyRow(policy57, legalMask);
 
             gameHistory.push({
               x:                  state185,
@@ -2793,7 +2846,7 @@
               my_score_before:    matchScore[player % 2],
               opp_score_before:   matchScore[1 - (player % 2)],
               multiplier_before:  scoreMultiplier,
-              // v_target backfilled below
+              v:                  0, // backfilled after game ends
             });
 
             // ── choose & apply move (sample from pi for training diversity) ──
@@ -2803,10 +2856,12 @@
             gameOver = true; // placeholder — replace with real env step
           }
 
-          // ── backfill v_target once game outcome is known ──
-          // Placeholder: real backfill needs actual winner_team + base_points from env
+          // ── backfill v once game outcome is known ──
+          // Placeholder: replace with deltaMe(winner_team, base_points, row.team,
+          //   row.my_score_before, row.opp_score_before, row.multiplier_before)
+          // when real env step integration is wired in.
           for (const row of gameHistory) {
-            row.v_target = 0; // replace with delta_me(winner_team, points, row)
+            row.v = 0; // TODO: real ΔME backfill
           }
           rows.push(...gameHistory);
         }
