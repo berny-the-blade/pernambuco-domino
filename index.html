@@ -410,6 +410,36 @@
             osc.start(now + i * 0.08);
             osc.stop(now + i * 0.08 + 0.1);
           });
+        } else if (type === 'win') {
+          // Victory fanfare — ascending 5-note chord burst
+          const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+          notes.forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            const t = now + i * 0.07;
+            gain.gain.setValueAtTime(0.0, t);
+            gain.gain.linearRampToValueAtTime(0.22, t + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t);
+            osc.stop(t + 0.4);
+          });
+        } else if (type === 'lose') {
+          // Descending two-note thud
+          [392, 261.63].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.value = freq;
+            const t = now + i * 0.18;
+            gain.gain.setValueAtTime(0.18, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t);
+            osc.stop(t + 0.35);
+          });
         }
       } catch (e) { /* ignore audio errors */ }
     }
@@ -4449,10 +4479,12 @@
         const score1 = gameState.teamScores?.[1] || 0;
         const mt = gameState.matchTarget || 6;
 
-        // Trigger confetti on game end
+        // Trigger confetti + sound on game end
         if (gameState.gameEnded && !window._confettiFired) {
           window._confettiFired = true;
+          const myTeamWon = (gameState.teamScores?.[playerSlot % 2] || 0) >= (gameState.matchTarget || 6);
           setTimeout(launchConfetti, 200);
+          setTimeout(() => playSound(myTeamWon ? 'win' : 'lose'), 300);
         }
         if (!gameState.gameEnded) window._confettiFired = false;
 
