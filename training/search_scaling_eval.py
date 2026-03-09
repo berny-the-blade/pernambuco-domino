@@ -30,6 +30,8 @@ import os
 import sys
 import time
 import glob
+import multiprocessing as mp
+from functools import partial
 
 import numpy as np
 import torch
@@ -191,21 +193,58 @@ def play_duplicate_pair(mcts_a: DominoMCTS, mcts_b: DominoMCTS,
 # Eval at one sim level
 # ============================================================
 
+def _run_pair_worker(args):
+    """Worker function for parallel pair evaluation."""
+    path_a, path_b, num_sims, seed, collect_root_stats = args
+    m_a = load_model(path_a)
+    m_b = load_model(path_b)
+    mcts_a = DominoMCTS(m_a, num_simulations=num_sims)
+    mcts_b = DominoMCTS(m_b, num_simulations=num_sims)
+    return play_duplicate_pair(mcts_a, mcts_b, seed, collect_root_stats)
+
+
 def eval_at_sims(model_a: DominoNet, model_b: DominoNet,
                  num_sims: int, num_pairs: int, seed_base: int,
-                 verbose: bool = True) -> dict:
-    mcts_a = DominoMCTS(model_a, num_simulations=num_sims)
-    mcts_b = DominoMCTS(model_b, num_simulations=num_sims)
+                 verbose: bool = True, num_workers: int = 1,
+                 path_a: str = None, path_b: str = None) -> dict:
 
     total_games = num_pairs * 2
     a_wins = 0
     pair_margins, game_lengths, forced_pcts = [], [], []
     entropies, top1s, top2_gaps = [], [], []
 
-    for i in range(num_pairs):
-        seed = seed_base + i
-        result = play_duplicate_pair(mcts_a, mcts_b, seed,
-                                      collect_root_stats=(i < 100))
+    if num_workers > 1 and path_a and path_b:
+        # Parallel mode: each worker loads its own model copy
+        worker_args = [
+            (path_a, path_b, num_sims, seed_base + i, i < 100)
+            for i in range(num_pairs)
+        ]
+        with mp.Pool(processes=num_workers) as pool:
+            results = []
+            for idx, result in enumerate(pool.imap_unordered(_run_pair_worker, worker_args)):
+                results.append(result)
+                if verbose and (idx + 1) % 50 == 0:
+                    wins_so_far = sum(r["a_wins"] for r in results)
+                    mg = float(np.mean([r["pair_margin"] for r in results]))
+                    wr = wins_so_far / ((idx + 1) * 2)
+                    print(f"    [{num_sims} sims] Pair {idx+1}/{num_pairs}  "
+                          f"win%={wr*100:.1f}  margin={mg:+.3f}", flush=True)
+    else:
+        # Sequential fallback
+        mcts_a = DominoMCTS(model_a, num_simulations=num_sims)
+        mcts_b = DominoMCTS(model_b, num_simulations=num_sims)
+        results = []
+        for i in range(num_pairs):
+            result = play_duplicate_pair(mcts_a, mcts_b, seed_base + i, i < 100)
+            results.append(result)
+            if verbose and (i + 1) % 50 == 0:
+                wins_so_far = sum(r["a_wins"] for r in results)
+                mg = float(np.mean([r["pair_margin"] for r in results]))
+                wr = wins_so_far / ((i + 1) * 2)
+                print(f"    [{num_sims} sims] Pair {i+1}/{num_pairs}  "
+                      f"win%={wr*100:.1f}  margin={mg:+.3f}", flush=True)
+
+    for result in results:
         a_wins += result["a_wins"]
         pair_margins.append(result["pair_margin"])
         game_lengths.append(result["game_length_mean"])
@@ -214,12 +253,6 @@ def eval_at_sims(model_a: DominoNet, model_b: DominoNet,
             entropies.append(ent)
             top1s.append(t1)
             top2_gaps.append(t2g)
-
-        if verbose and (i + 1) % 50 == 0:
-            wr = a_wins / ((i + 1) * 2)
-            mg = float(np.mean(pair_margins))
-            print(f"    [{num_sims} sims] Pair {i+1}/{num_pairs}  "
-                  f"win%={wr*100:.1f}  margin={mg:+.3f}", flush=True)
 
     win_rate = a_wins / total_games
     ci_lo, ci_hi = wilson_ci(a_wins, total_games)
@@ -396,6 +429,8 @@ def main():
     parser.add_argument("--output-json", type=str, default=None)
     parser.add_argument("--output-csv",  type=str, default=None)
     parser.add_argument("--tag", type=str, default=None)
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Parallel workers for game evaluation (default: 1)")
     args = parser.parse_args()
 
     sim_levels = [int(x) for x in args.sim_list.split(",")]
@@ -441,8 +476,9 @@ def main():
 
     all_results = []
     for sims in sim_levels:
-        print(f"--- {sims} sims ({args.deal_pairs} pairs = {args.deal_pairs*2} games) ---")
-        r = eval_at_sims(model_a, model_b, sims, args.deal_pairs, args.seed_base)
+        print(f"--- {sims} sims ({args.deal_pairs} pairs = {args.deal_pairs*2} games, workers={args.workers}) ---")
+        r = eval_at_sims(model_a, model_b, sims, args.deal_pairs, args.seed_base,
+                         num_workers=args.workers, path_a=path_a, path_b=path_b)
         r["gen_a"] = gen_a
         r["gen_b"] = gen_b
         all_results.append(r)
