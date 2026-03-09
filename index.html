@@ -2767,53 +2767,93 @@
 
       /**
        * Heuristic-softmax 57-dim policy (legacy / ablation path).
-       * Uses smartAI scores as logits, softmax over legal actions.
-       * tau=1.0 → proportional to exp(score); lower = sharper.
+       * Enumerates canonical moves, scores via smartAI, softmax over legal actions.
+       * tau=1.0 → proportional to exp(score); lower tau = sharper.
        */
       const buildHeuristicPolicy57 = (hand, lE, rE, bLen, player, knowledge, tau = 1.0) => {
-        const mask   = _nnActionMask(hand, lE, rE, bLen);
-        const scores = new Float32Array(57).fill(-1e9);
+        const moves = enumerateLegalMoves(hand, lE, rE, bLen);
+        const pi = new Float32Array(NN_NUM_ACTIONS);
+
+        // PASS-only: fast path
+        if (moves.length === 1 && moves[0].pass) { pi[56] = 1.0; return pi; }
+
+        // Build a score lookup keyed by tileId+side from smartAI batch scores
+        // smartAI returns [{tile, score, side}] — map to actionIdx
+        const scoreMap = new Map(); // actionIdx → score
         const ranked = smartAI(hand, lE, rE, bLen, player, knowledge, null, /*returnAll=*/true);
         if (ranked && ranked.length > 0) {
           for (const r of ranked) {
             const a = _moveToActionIdx(r);
-            if (a >= 0 && a < 57 && mask[a]) scores[a] = typeof r.score === 'number' ? r.score : 0;
+            if (a >= 0 && a < 57) {
+              // Keep highest score if action appears more than once
+              if (!scoreMap.has(a) || r.score > scoreMap.get(a)) scoreMap.set(a, r.score);
+            }
           }
-        } else {
-          // Fallback: uniform over legal
-          const moves = enumerateLegalMoves(hand, lE, rE, bLen);
-          for (const m of moves) { if (m.actionIdx >= 0 && m.actionIdx < 57) scores[m.actionIdx] = 0; }
         }
-        let maxScore = -1e9;
-        for (let i = 0; i < 57; i++) if (mask[i] && scores[i] > maxScore) maxScore = scores[i];
-        const pi = new Float32Array(57);
+
+        // Softmax over canonical legal moves
+        let maxScore = -1e100;
+        for (const m of moves) {
+          const s = scoreMap.has(m.actionIdx) ? scoreMap.get(m.actionIdx) : 0;
+          if (s > maxScore) maxScore = s;
+        }
         let sum = 0;
-        for (let i = 0; i < 57; i++) {
-          if (!mask[i]) continue;
-          const w = Math.exp((scores[i] - maxScore) / tau);
-          pi[i] = w; sum += w;
+        for (const m of moves) {
+          if (m.actionIdx < 0) continue;
+          const s = scoreMap.has(m.actionIdx) ? scoreMap.get(m.actionIdx) : 0;
+          const w = Math.exp((s - maxScore) / tau);
+          pi[m.actionIdx] = w;
+          sum += w;
         }
-        if (sum > 0) for (let i = 0; i < 57; i++) pi[i] /= sum;
+        if (sum > 0) for (let i = 0; i < NN_NUM_ACTIONS; i++) pi[i] /= sum;
         return pi;
       };
 
       /**
-       * JS-side policy row assertion — mirrors Python validate_policy_row.
-       * Throws immediately if the row is malformed.
+       * Sample an action index from a 57-dim probability distribution.
+       * Named clearly to distinguish from policy construction.
        */
-      const assertPolicyRow = (pi, mask) => {
+      const sampleActionIdxFromPolicy = (pi) => {
+        let r = Math.random(), cum = 0;
+        for (let i = 0; i < pi.length; i++) { cum += pi[i]; if (r <= cum) return i; }
+        return pi.length - 1;
+      };
+      // Alias for backward compat with exportTrainingData
+      const sampleFromPolicy = sampleActionIdxFromPolicy;
+
+      /**
+       * Convert a sampled actionIdx back to a fully-formed move object.
+       * Returns null if the tile is not in hand (shouldn't happen in valid games).
+       */
+      const actionIdxToMove = (hand, actionIdx, lE, rE, bLen) => {
+        if (actionIdx === 56) return _buildMoveObject(null, 'pass', lE, rE, bLen);
+        const decoded = _actionIdxToTileSide(actionIdx);
+        if (!decoded) return null;
+        const tile = hand.find(t => TILE_INDEX[t.id] === decoded.tileIdx);
+        if (!tile) return null;
+        return _buildMoveObject(tile, decoded.side, lE, rE, bLen);
+      };
+
+      /**
+       * Canonical policy + mask consistency assertion.
+       * Mirrors Python validate_policy_row / _validate_policy_targets_np.
+       * Throws immediately on any violation — call before pushing any training row.
+       */
+      const assertPolicyAndMaskConsistency = (pi, mask) => {
         if (pi.length !== 57 || mask.length !== 57)
-          throw new Error(`Bad policy row shape: pi=${pi.length}, mask=${mask.length}`);
+          throw new Error(`Bad shapes: pi=${pi.length}, mask=${mask.length}`);
         let sum = 0, illegalMass = 0;
         for (let i = 0; i < 57; i++) {
-          if (!Number.isFinite(pi[i])) throw new Error(`pi[${i}] is not finite`);
+          if (!Number.isFinite(pi[i])) throw new Error(`pi[${i}] not finite`);
           if (pi[i] < -1e-8)          throw new Error(`pi[${i}] negative: ${pi[i]}`);
           sum += pi[i];
           if (!mask[i]) illegalMass += pi[i];
         }
-        if (Math.abs(sum - 1) > 1e-4)  throw new Error(`Policy sum != 1: ${sum}`);
-        if (illegalMass > 1e-6)         throw new Error(`Illegal policy mass: ${illegalMass}`);
+        if (Math.abs(sum - 1.0) > 1e-4) throw new Error(`Policy sum != 1: ${sum}`);
+        if (illegalMass > 1e-6)          throw new Error(`Illegal policy mass: ${illegalMass}`);
       };
+      // Alias for backward compat
+      const assertPolicyRow = assertPolicyAndMaskConsistency;
 
       /**
        * Clamp illegal actions to 0, renormalize to sum=1.
@@ -2901,7 +2941,7 @@
             normalizePolicyWithMask(policy57, legalMask);
 
             // JS-side assert — mirrors Python validate_policy_row, fails fast
-            assertPolicyRow(policy57, legalMask);
+            assertPolicyAndMaskConsistency(policy57, legalMask);
 
             gameHistory.push({
               x:                  state185,
@@ -2916,7 +2956,7 @@
             });
 
             // ── choose & apply move (sample from pi for training diversity) ──
-            const actionIdx = sampleFromPolicy(policy57);
+            const actionIdx = sampleActionIdxFromPolicy(policy57);
             // TODO: apply actionIdx to game state; currently ends game after one step
             // This requires game-step integration with the domino env
             gameOver = true; // placeholder — replace with real env step
