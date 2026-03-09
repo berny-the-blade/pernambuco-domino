@@ -5319,5 +5319,22 @@
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   </script>
+  <script>
+    // Screen Wake Lock — keeps screen alive while game is open
+    let _wakeLock = null;
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try {
+        _wakeLock = await navigator.wakeLock.request('screen');
+      } catch (e) {
+        // Permission denied or not supported — silent fail
+      }
+    }
+    // Re-acquire after tab becomes visible again (lock is released on hide)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    });
+    requestWakeLock();
+  </script>
 </body>
 </html>
