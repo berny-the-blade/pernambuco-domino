@@ -4850,15 +4850,28 @@
                         </div>
                       );
                     })()}
-                    {/* Dormidas badge — tiny corner indicator */}
-                    {gameState.dormidas && gameState.currentPlayer !== -1 && (
-                      <div style={{ position: 'absolute', bottom: 4, left: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.4 }}>
-                        <div style={{ display: 'flex', gap: 2 }}>
-                          {[0,1,2,3].map(i => (
-                            <div key={i} style={{ width: 6, height: 10, borderRadius: 1, background: '#5a4a3a', border: '1px solid rgba(255,255,255,0.15)' }} />
-                          ))}
+                    {/* Dormidas — bottom-left overlay: tiny badge during play, tiles revealed after round */}
+                    {gameState.dormidas && gameState.dormidas.length > 0 && (
+                      gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice ? (
+                        <div style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 20,
+                          background: 'rgba(0,0,0,0.55)', borderRadius: 8, padding: '4px 6px',
+                          backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <div style={{ fontSize: 8, fontWeight: 700, color: 'rgba(255,255,255,0.35)', marginBottom: 3, textAlign: 'center' }}>Dormidas</div>
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {gameState.dormidas.map(tile => (
+                              <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} hw={36} vw={18} />
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div style={{ position: 'absolute', bottom: 4, left: 6, display: 'flex', alignItems: 'center', gap: 3, opacity: 0.35 }}>
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {[0,1,2,3].map(i => (
+                              <div key={i} style={{ width: 6, height: 10, borderRadius: 1, background: '#5a4a3a', border: '1px solid rgba(255,255,255,0.15)' }} />
+                            ))}
+                          </div>
+                        </div>
+                      )
                     )}
                     {/* Flying tile animation */}
                     {flyingTile && (() => {
@@ -5082,19 +5095,7 @@
                 </div>
               </div>
 
-              {/* Dormidas indicator — subtle inline during play */}
-
-              {/* Dormidas revealed after round ends */}
-              {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.dormidas && gameState.dormidas.length > 0 && (
-                <div className="px-2 py-1.5 rounded-lg mb-1" style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="text-[9px] text-white/40 font-bold text-center mb-0.5">Dormidas</div>
-                  <div className="flex gap-1 justify-center flex-wrap">
-                    {gameState.dormidas.map(tile => (
-                      <BoardTile key={tile.id} tile={tile} orientation="vertical" flipped={false} hw={48} vw={24} />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Dormidas: moved to bottom-left overlay inside board area */}
 
               {/* Blocked game reveal — show all players' remaining tiles face-up */}
               {gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && gameState.blockedReveal && (
