@@ -58,7 +58,7 @@ def load_model(path: str) -> DominoNet:
     sd = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
     input_dim = sd["input_fc.weight"].shape[1]
     m = DominoNet(input_dim=input_dim, hidden_dim=256, num_actions=57, num_blocks=4)
-    m.load_state_dict(sd)
+    m.load_state_dict(sd, strict=False)
     m.eval()
     return m
 
