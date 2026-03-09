@@ -2644,6 +2644,10 @@
 
       // Convert a move object → canonical 57-action index
       // 0..27 = tile-left, 28..55 = tile-right, 56 = pass
+      // ── 57-action canonical bridge ────────────────────────────────────────
+      // Convention: 0..27 = play tile on LEFT, 28..55 = play tile on RIGHT, 56 = PASS
+      // Every move/action helper below shares this mapping exactly.
+
       const _moveToActionIdx = (move) => {
         if (!move) return -1;
         if (move.pass) return 56;
@@ -2653,6 +2657,68 @@
         if (move.side === 'right') return 28 + tileIdx;
         return tileIdx;
       };
+
+      // Inverse of _moveToActionIdx — returns {pass} | {tileIdx, side} | null
+      const _actionIdxToTileSide = (actionIdx) => {
+        if (actionIdx === 56) return { pass: true };
+        if (actionIdx < 0 || actionIdx >= 56) return null;
+        if (actionIdx < 28) return { tileIdx: actionIdx, side: 'left' };
+        return { tileIdx: actionIdx - 28, side: 'right' };
+      };
+
+      // Build a fully-formed move object (tile, side, pass, newLE, newRE, actionIdx)
+      const _buildMoveObject = (tile, side, lE, rE, bLen) => {
+        if (side === 'pass') {
+          return { pass: true, tile: null, side: 'pass', newLE: lE, newRE: rE, actionIdx: 56 };
+        }
+        const idx = TILE_INDEX[tile.id];
+        if (bLen === 0) {
+          return { pass: false, tile, side: 'left', newLE: tile.left, newRE: tile.right, actionIdx: idx };
+        }
+        if (side === 'left') {
+          return { pass: false, tile, side: 'left',
+            newLE: (tile.left === lE) ? tile.right : tile.left, newRE: rE, actionIdx: idx };
+        }
+        return { pass: false, tile, side: 'right',
+          newLE: lE, newRE: (tile.left === rE) ? tile.right : tile.left, actionIdx: 28 + idx };
+      };
+
+      // Canonical legal move enumeration in 57-action space.
+      // Opening → left-only. Equal ends → left-only. No playable tile → PASS.
+      const enumerateLegalMoves = (hand, lE, rE, bLen) => {
+        const moves = [];
+        if (bLen === 0) {
+          for (const tile of hand) moves.push(_buildMoveObject(tile, 'left', lE, rE, bLen));
+          return moves;
+        }
+        const equalEnds = (lE === rE);
+        let anyPlayable = false;
+        for (const tile of hand) {
+          const canLeft  = (tile.left === lE || tile.right === lE);
+          const canRight = (tile.left === rE || tile.right === rE);
+          if (!canLeft && !canRight) continue;
+          anyPlayable = true;
+          if (equalEnds) {
+            moves.push(_buildMoveObject(tile, 'left', lE, rE, bLen));
+          } else {
+            if (canLeft)  moves.push(_buildMoveObject(tile, 'left',  lE, rE, bLen));
+            if (canRight) moves.push(_buildMoveObject(tile, 'right', lE, rE, bLen));
+          }
+        }
+        if (!anyPlayable) moves.push(_buildMoveObject(null, 'pass', lE, rE, bLen));
+        return moves;
+      };
+
+      // Build a legal mask from enumerated moves — useful for parity checks vs _nnActionMask
+      const legalMaskFromEnumeratedMoves = (hand, lE, rE, bLen) => {
+        const mask = new Float32Array(NN_NUM_ACTIONS);
+        for (const m of enumerateLegalMoves(hand, lE, rE, bLen)) {
+          if (m.actionIdx >= 0) mask[m.actionIdx] = 1.0;
+        }
+        return mask;
+      };
+
+      // ─────────────────────────────────────────────────────────────────────
 
       // Extract 57-dim visit-count policy from ISMCTS root (for training export).
       // legalMask is optional. Falls back to uniform over legal if no root visits.
@@ -2715,8 +2781,8 @@
           }
         } else {
           // Fallback: uniform over legal
-          const moves = ismctsGetLegalMoves(hand, lE, rE, bLen);
-          for (const m of moves) { const a = _moveToActionIdx(m); if (a >= 0 && a < 57) scores[a] = 0; }
+          const moves = enumerateLegalMoves(hand, lE, rE, bLen);
+          for (const m of moves) { if (m.actionIdx >= 0 && m.actionIdx < 57) scores[m.actionIdx] = 0; }
         }
         let maxScore = -1e9;
         for (let i = 0; i < 57; i++) if (mask[i] && scores[i] > maxScore) maxScore = scores[i];
