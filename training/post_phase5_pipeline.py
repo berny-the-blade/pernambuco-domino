@@ -65,7 +65,7 @@ def main():
         '--model-b', GEN50_PT,
         '--gen-a', '20',
         '--gen-b', '50',
-        '--sim-list', '50', '100', '200', '400',
+        '--sim-list', '50,100,200,400',
         '--deal-pairs', '200',
         '--duplicate-deals',
         '--output-json', scaling_out,
@@ -136,7 +136,7 @@ def main():
         f"- [ ] If non-monotone → diagnose (PUCT priors, more gens)",
     ]
 
-    with open(RESULTS_MD, 'w') as f:
+    with open(RESULTS_MD, 'w', encoding='utf-8') as f:
         f.write('\n'.join(summary_lines) + '\n')
 
     print(f"\n{'='*60}")

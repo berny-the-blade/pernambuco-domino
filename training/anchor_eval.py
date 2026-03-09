@@ -80,7 +80,7 @@ def load_model(path: str) -> DominoNet:
     )
     input_dim = state_dict["input_fc.weight"].shape[1]
     model = DominoNet(input_dim=input_dim, hidden_dim=256, num_actions=57, num_blocks=4)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     return model
 
