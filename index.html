@@ -417,6 +417,11 @@
     // === Neural Network Model (globals — must be outside App for loadNeuralModel call) ===
     const NN_STATE_DIM = 185;
     const NN_NUM_ACTIONS = 57;
+
+    // === Training export config ===
+    // 'visits'    → use ISMCTS visit-count pi (aligns with trainer assertions)
+    // 'heuristic' → use heuristic-softmax pi (legacy, for ablation only)
+    let TRAIN_POLICY_TARGET = 'visits';
     let _nnModel = null;
     let USE_NN_LEAF_VALUE = false;
     let _nnLeafStats = { calls: 0, totalMs: 0 };
@@ -2678,6 +2683,152 @@
         }
         return pi;
       };
+
+      // ── Training export helpers ────────────────────────────────────────────
+
+      /**
+       * Sample an action index from a 57-dim probability distribution.
+       * For deterministic choice use: pi.indexOf(Math.max(...pi))
+       */
+      const sampleFromPolicy = (pi) => {
+        let r = Math.random(), cum = 0;
+        for (let i = 0; i < pi.length; i++) {
+          cum += pi[i];
+          if (r <= cum) return i;
+        }
+        return pi.length - 1;
+      };
+
+      /**
+       * Clamp illegal actions to 0, renormalize to sum=1.
+       * Falls back to uniform-over-legal if sum==0.
+       * Mutates pi in place and returns it.
+       */
+      const normalizePolicyWithMask = (pi, legalMask) => {
+        let s = 0;
+        for (let i = 0; i < 57; i++) {
+          if (!legalMask[i]) pi[i] = 0;
+          s += pi[i];
+        }
+        if (s > 0) {
+          for (let i = 0; i < 57; i++) pi[i] /= s;
+        } else {
+          let nLegal = 0;
+          for (let i = 0; i < 57; i++) if (legalMask[i]) nLegal++;
+          const u = nLegal > 0 ? 1 / nLegal : 0;
+          for (let i = 0; i < 57; i++) pi[i] = legalMask[i] ? u : 0;
+        }
+        return pi;
+      };
+
+      /**
+       * exportTrainingData(nGames, ismctsOpts)
+       *
+       * Plays nGames complete games via ISMCTS self-play, records one row per
+       * decision point (state185, mask57, pi57, team, scores, multiplier),
+       * backfills v_target (ΔME) after each game, then triggers a JSONL download.
+       *
+       * TRAIN_POLICY_TARGET controls whether pi comes from visit counts ('visits')
+       * or a heuristic fallback ('heuristic'). Trainer assertions expect 'visits'.
+       */
+      const exportTrainingData = async (nGames = 10, ismctsOpts = {}) => {
+        const { sims = 100, tau = 1.0 } = ismctsOpts;
+        const rows = [];
+        const timestamp = Date.now();
+
+        for (let g = 0; g < nGames; g++) {
+          const gameHistory = []; // rows for this game
+          // ── init a fresh game ──
+          const shuffled = [...TILES].sort(() => Math.random() - 0.5);
+          const hands = [
+            shuffled.slice(0, 7),
+            shuffled.slice(7, 14),
+            shuffled.slice(14, 21),
+            shuffled.slice(21, 28),
+          ];
+          let lE = [], rE = [], bLen = 0;
+          let player = Math.floor(Math.random() * 4);
+          const matchScore = [0, 0];
+          const scoreMultiplier = 1;
+          const knowledge = {};
+
+          let stepLimit = 200, step = 0, gameOver = false;
+          while (!gameOver && step++ < stepLimit) {
+            const hand = hands[player];
+            if (!hand || hand.length === 0) { player = (player + 1) % 4; continue; }
+
+            const legalMask = Array.from(_nnActionMask(hand, lE, rE, bLen));
+            const hasLegal = legalMask.some(Boolean);
+            if (!hasLegal) { player = (player + 1) % 4; continue; }
+
+            const state185 = Array.from(_nnEncodeState(
+              hand, lE, rE, bLen, player, knowledge, matchScore, scoreMultiplier
+            ));
+
+            // ── build policy target ──
+            let policy57;
+            if (TRAIN_POLICY_TARGET === 'visits') {
+              const out = await ismctsEval(
+                hand, lE, rE, bLen, player, knowledge,
+                matchScore, scoreMultiplier,
+                /*returnPolicy=*/true, /*policyTau=*/tau
+              );
+              policy57 = Array.from(out ? out.pi : new Float32Array(57));
+            } else if (TRAIN_POLICY_TARGET === 'heuristic') {
+              // Stub: replace with heuristic softmax builder when implemented
+              throw new Error('heuristic policy builder not yet implemented in JS export');
+            } else {
+              throw new Error(`Unknown TRAIN_POLICY_TARGET=${TRAIN_POLICY_TARGET}`);
+            }
+
+            // Safety: clamp illegal + renormalize
+            normalizePolicyWithMask(policy57, legalMask);
+
+            gameHistory.push({
+              x:                  state185,
+              mask:               legalMask,
+              pi:                 policy57,
+              team:               player % 2,
+              player,
+              my_score_before:    matchScore[player % 2],
+              opp_score_before:   matchScore[1 - (player % 2)],
+              multiplier_before:  scoreMultiplier,
+              // v_target backfilled below
+            });
+
+            // ── choose & apply move (sample from pi for training diversity) ──
+            const actionIdx = sampleFromPolicy(policy57);
+            // TODO: apply actionIdx to game state; currently ends game after one step
+            // This requires game-step integration with the domino env
+            gameOver = true; // placeholder — replace with real env step
+          }
+
+          // ── backfill v_target once game outcome is known ──
+          // Placeholder: real backfill needs actual winner_team + base_points from env
+          for (const row of gameHistory) {
+            row.v_target = 0; // replace with delta_me(winner_team, points, row)
+          }
+          rows.push(...gameHistory);
+        }
+
+        // ── download as JSONL ──
+        const jsonl = rows.map(r => JSON.stringify(r)).join('\n');
+        const blob = new Blob([jsonl], { type: 'application/jsonl' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `training_js_${timestamp}.jsonl`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log(`exportTrainingData: exported ${rows.length} rows from ${nGames} games`);
+        return rows.length;
+      };
+
+      // expose to browser console for manual invocation
+      window.exportTrainingData = exportTrainingData;
+      window.TRAIN_POLICY_TARGET = () => TRAIN_POLICY_TARGET;
+
+      // ──────────────────────────────────────────────────────────────────────
 
       // === ISMCTS (Information Set Monte Carlo Tree Search) ===
       class ISMCTSNode {
