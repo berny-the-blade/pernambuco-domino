@@ -82,11 +82,15 @@ def main():
     ], "STEP 3: Anchor eval (Gen20 vs Gen1/5/10/46/50)")
 
     # ── Step 4: Backward-compat validation ───────────────────────────────────
+    # Quick smoke test: load Gen50, 1 worker × 5 games = 5 games total.
+    # Verifies strict=False loading + belief-head additions don't break old ckpts.
     run([
         sys.executable, os.path.join(TRAINING_DIR, 'orchestrator.py'),
         '--resume', GEN50_PT,
         '--generations', '1',
-    ], "STEP 4: Backward-compat validation (resume Gen50 for 1 gen)")
+        '--workers', '1',
+        '--games-per-worker', '5',
+    ], "STEP 4: Backward-compat smoke test (load Gen50, 5 games)")
 
     # ── Step 5: Write results summary ─────────────────────────────────────────
     summary_lines = [
