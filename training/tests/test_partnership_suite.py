@@ -261,7 +261,7 @@ def main():
             state_dict = ckpt.get("model_state_dict", ckpt)
             input_dim  = state_dict["input_fc.weight"].shape[1]
             model      = DominoNet(input_dim=input_dim, hidden_dim=256, num_actions=57, num_blocks=4)
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
             model.to(args.device).eval()
             print(f"Loaded checkpoint: {args.checkpoint} (dim={input_dim})")
         engine_fn = make_engine_fn(model, args.sims, args.device)
