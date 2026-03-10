@@ -1,16 +1,16 @@
-"""
-Phase 6.5 Day 2 Probe — 3-variant sweep
+﻿"""
+Phase 6.5 Day 2 Probe - 3-variant sweep
 
 Runs three 3-gen probes from the same starting checkpoint, all with
 aux_detach=True and the Phase 6.5 conditioned architecture.
 
-Probe A — support-only conditioning
+Probe A - support-only conditioning
   belief_weight=0.0, support_weight=0.1
 
-Probe B — belief + support, balanced (main candidate)
+Probe B - belief + support, balanced (main candidate)
   belief_weight=0.1, support_weight=0.1
 
-Probe C — belief + support, stronger support signal
+Probe C - belief + support, stronger support signal
   belief_weight=0.1, support_weight=0.2
 
 After each probe, runs:
@@ -27,6 +27,7 @@ Usage:
 import argparse
 import json
 import os
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 import sys
 import shutil
 import time
@@ -52,9 +53,9 @@ LOG_PATH   = Path(__file__).parent / "logs" / "phase65_probe_results.json"
 BASELINE_SUITE_SCORE = 0.684   # Phase 5 Gen20 baseline
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Probe configuration
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 PROBES = [
     {
@@ -87,9 +88,9 @@ PROBES = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Partnership suite evaluation
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def run_suite(model, device, sims=0):
     """Run the partnership suite against model. Returns full report dict."""
@@ -116,9 +117,9 @@ def suite_summary(report):
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Quick arena: probe checkpoint vs Gen50 reference at fixed sims
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def quick_arena(probe_weights, ref_weights, num_pairs=50, sims=100, seed_base=70000):
     """Duplicate-deal arena. Returns challenger win rate."""
@@ -167,9 +168,9 @@ def quick_arena(probe_weights, ref_weights, num_pairs=50, sims=100, seed_base=70
     return round(wins_p / total, 4) if total > 0 else 0.5
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Run a single probe variant
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def run_probe(probe_cfg, start_checkpoint, generations, workers, games_per_worker,
               mcts_sims, ref_weights, device):
@@ -192,7 +193,7 @@ def run_probe(probe_cfg, start_checkpoint, generations, workers, games_per_worke
         mcts_sims=mcts_sims,
         value_target="me",
         policy_target="visits",
-        high_sim_fraction=0.0,   # no high-sim games in probes — keep it fast
+        high_sim_fraction=0.0,   # no high-sim games in probes - keep it fast
         use_belief_head=probe_cfg["belief_head"],
         belief_weight=probe_cfg["belief_weight"],
         use_support_head=probe_cfg["support_head"],
@@ -220,7 +221,7 @@ def run_probe(probe_cfg, start_checkpoint, generations, workers, games_per_worke
             shutil.copy2(ckpts[-1], probe_ckpt)
             print(f"  Saved probe checkpoint (latest): {probe_ckpt}")
 
-    # ── Evaluate ──────────────────────────────────────────────────────────
+    # -- Evaluate ----------------------------------------------------------
     orch.model.eval()
     probe_weights = {k: v.cpu().clone() for k, v in orch.model.state_dict().items()}
 
@@ -235,7 +236,7 @@ def run_probe(probe_cfg, start_checkpoint, generations, workers, games_per_worke
     arena_wr = quick_arena(probe_weights, ref_weights, num_pairs=50, sims=100)
     print(f"  Arena win rate vs Gen50: {arena_wr:.1%}")
 
-    # ── Pass gate ─────────────────────────────────────────────────────────
+    # -- Pass gate ---------------------------------------------------------
     suite_ok     = suite["avg"] is not None and suite["avg"] >= BASELINE_SUITE_SCORE - 0.05
     signal_ok    = (suite["confirm_partner_signal"] or 0.0) > 0.0
     pressure_ok  = (suite["preserve_pressure"] or 0.0) > 0.0
@@ -264,9 +265,9 @@ def run_probe(probe_cfg, start_checkpoint, generations, workers, games_per_worke
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Phase 6.5 Day 2 Probe Sweep")
@@ -326,7 +327,7 @@ def main():
         )
         results.append(result)
 
-    # ── Final summary ──────────────────────────────────────────────────────
+    # -- Final summary ------------------------------------------------------
     print(f"\n{'='*60}")
     print("  PHASE 6.5 DAY 2 PROBE SUMMARY")
     print(f"{'='*60}")
@@ -359,3 +360,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

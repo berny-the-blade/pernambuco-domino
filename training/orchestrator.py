@@ -1,9 +1,9 @@
-"""
+﻿"""
 Self-Play Orchestrator for Pernambuco Domino AI training.
 Uses torch.multiprocessing to spawn parallel CPU workers for data generation,
 then trains the master network on GPU with the collected replay buffer.
 
-Value targets: ΔME (match equity delta) instead of raw points/4.
+Value targets: deltaME (match equity delta) instead of raw points/4.
 Arena: duplicate deals with side-swap for fair evaluation.
 
 Usage:
@@ -13,6 +13,7 @@ Usage:
 """
 
 import os
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 import sys
 import time
 import argparse
@@ -91,9 +92,9 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
 
     Each data point: (state_np, mask_np, pi_np, v_target)
 
-    value_target: 'me' for ΔME (match equity), 'points' for points/4 (legacy)
+    value_target: 'me' for deltaME (match equity), 'points' for points/4 (legacy)
     high_sim_fraction: fraction of games using high sim count (default 10%)
-    high_sim_multiplier: multiplier for high-quality games (default 4×)
+    high_sim_multiplier: multiplier for high-quality games (default 4x)
     """
     device = torch.device("cpu")
     model = DominoNet().to(device)
@@ -111,7 +112,7 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     if policy_target == 'visits' and not use_mcts:
         raise ValueError("policy_target='visits' requires use_mcts=True")
 
-    # Mixed sim budget: 90% at base sims, 10% at 4× base sims
+    # Mixed sim budget: 90% at base sims, 10% at 4x base sims
     mcts_base = DominoMCTS(model, num_simulations=mcts_sims) if use_mcts else None
     mcts_high = DominoMCTS(model, num_simulations=mcts_sims * high_sim_multiplier) if use_mcts else None
     worker_data = []
@@ -131,7 +132,7 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
             obs = match.new_game()
             encoder.reset()
 
-            # Capture match state BEFORE this game (for ΔME)
+            # Capture match state BEFORE this game (for deltaME)
             scores_before = list(match.scores)
             multiplier_before = match.multiplier
 
@@ -182,10 +183,12 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                     'pi': target_pi,
                     'team': current_team,
                 }
-                if use_belief_head:
+                if use_belief_head or use_support_head:
+                    # Always generate belief labels when support head is on -
+                    # 6-tuple requires both slots even if belief_weight=0
                     record['belief_target'] = build_belief_target(env.hands, obs['player'])
                 if use_support_head:
-                    # Support labels meaningless at board_length==0 — use zeros
+                    # Support labels meaningless at board_length==0 - use zeros
                     if len(env.board) == 0:
                         record['support_target'] = np.zeros(6, dtype=np.float32)
                     else:
@@ -218,7 +221,7 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
 
                 # Compute value targets
                 if value_target == 'me':
-                    # ΔME: match equity change from this game
+                    # deltaME: match equity change from this game
                     for step in game_history:
                         team = step['team']
                         my_s = scores_before[team]
@@ -354,7 +357,7 @@ def arena_worker(worker_id, champion_weights, challenger_weights,
 class Orchestrator:
     """Manages the generational self-play + training loop with arena gatekeeper.
 
-    Value targets: ΔME (match equity delta) or legacy points/4.
+    Value targets: deltaME (match equity delta) or legacy points/4.
     Arena: sequential SPRT-style duplicate-deal matches with side-swap.
     Starts with 100 seeds, extends to 400 if inconclusive.
 
@@ -443,7 +446,7 @@ class Orchestrator:
                 threshold = min_wr
         return threshold
 
-    # ── Budget-specific checkpoint tracking ──────────────────────────────────
+    # -- Budget-specific checkpoint tracking ----------------------------------
 
     def _budget_eval_at(self, challenger_weights, ref_weights, num_sims, num_pairs, seed_base):
         """Quick duplicate-deal eval at a fixed sim budget. Returns challenger win rate."""
@@ -513,13 +516,13 @@ class Orchestrator:
         for num_sims in self.BUDGET_EVAL_SIMS:
             best_info = self.budget_best.get(num_sims)
             if best_info is None:
-                # No prior best → current gen is automatically the best at this budget
+                # No prior best -> current gen is automatically the best at this budget
                 best_path = os.path.join("checkpoints", f"best_{num_sims}sims.pt")
                 shutil.copy2(ckpt_path_current, best_path)
                 self.budget_best[num_sims] = {
                     "gen": gen, "win_rate": 0.5, "path": best_path
                 }
-                print(f"  [Budget {num_sims}sims] Initialized best → gen {gen}")
+                print(f"  [Budget {num_sims}sims] Initialized best -> gen {gen}")
                 continue
 
             # Load reference (previous best at this budget)
@@ -543,9 +546,9 @@ class Orchestrator:
                       f"(wr={wr:.1%} vs gen {prev_gen})")
             else:
                 print(f"  [Budget {num_sims}sims] No improvement: gen {gen} "
-                      f"wr={wr:.1%} vs gen {best_info['gen']} — keeping existing best")
+                      f"wr={wr:.1%} vs gen {best_info['gen']} - keeping existing best")
 
-    # ── Main training loop ────────────────────────────────────────────────────
+    # -- Main training loop ----------------------------------------------------
 
     def run(self, total_generations=100, games_per_worker=250):
         """Run the full generational training loop."""
@@ -588,7 +591,7 @@ class Orchestrator:
                 p.start()
                 processes.append(p)
 
-            # Collect results — timeout scales with games and MCTS sims
+            # Collect results - timeout scales with games and MCTS sims
             # ~60s per MCTS game (50 sims), ~1s per no-MCTS game
             per_game_s = 90 if self.use_mcts else 3  # generous estimate
             worker_timeout = max(3600, games_per_worker * per_game_s)
@@ -646,10 +649,10 @@ class Orchestrator:
 
                 # Arena gate REMOVED (per Gemini recommendation):
                 # 50-game SPRT has 40% false rejection rate at 52% true edge.
-                # Always promote latest checkpoint — unfreezes training.
+                # Always promote latest checkpoint - unfreezes training.
 
                 # === PARTNERSHIP SUITE REGRESSION GUARD ===
-                # Soft check only — does not block promotion.
+                # Soft check only - does not block promotion.
                 # Logs a warning if partnership score drops vs baseline.
                 partnership_score = None
                 try:
@@ -663,7 +666,7 @@ class Orchestrator:
                     if partnership_score < PARTNER_BASELINE - 0.05:
                         print(f"  [PARTNERSHIP WARNING] score={partnership_score:.3f} "
                               f"< baseline {PARTNER_BASELINE:.3f} - 0.05 "
-                              f"(regression detected — consider rejecting)")
+                              f"(regression detected - consider rejecting)")
                     else:
                         print(f"  [PARTNERSHIP] score={partnership_score:.3f} "
                               f"(baseline={PARTNER_BASELINE:.3f})")
@@ -683,7 +686,7 @@ class Orchestrator:
 
                 # Track budget-specific best checkpoints.
                 # best_{N}sims.pt = best checkpoint at that deployment sim budget.
-                # Browser uses TIME_LIMIT=300ms ≈ 100-200 Python sims.
+                # Browser uses TIME_LIMIT=300ms ~ 100-200 Python sims.
                 if self._enable_budget_tracking and self.use_mcts:
                     self._track_budget_checkpoints(gen, ckpt_path)
             else:
@@ -741,12 +744,12 @@ class Orchestrator:
 
         Protocol:
           1. Run 100 seeds (200 matches)
-          2. If win_rate < 47% → early reject (clearly worse)
-          3. If win_rate > 55% AND CI lower > 50% → early promote
-          4. If CI lower > 50% → promote (strong statistical evidence)
-          5. Otherwise → extend by 100 seeds, repeat up to ARENA_SEEDS_MAX
+          2. If win_rate < 47% -> early reject (clearly worse)
+          3. If win_rate > 55% AND CI lower > 50% -> early promote
+          4. If CI lower > 50% -> promote (strong statistical evidence)
+          5. Otherwise -> extend by 100 seeds, repeat up to ARENA_SEEDS_MAX
           6. Final decision: graduated threshold based on consecutive rejections
-             (relaxes from 52% → 51.5% → 51% → 50.5% as rejections accumulate)
+             (relaxes from 52% -> 51.5% -> 51% -> 50.5% as rejections accumulate)
         """
         t0 = time.time()
         challenger_wins = 0
@@ -756,7 +759,7 @@ class Orchestrator:
 
         promote_threshold = self._get_promote_threshold()
         print(f"Arena: sequential SPRT (min {self.ARENA_SEEDS_MIN}, "
-              f"max {self.ARENA_SEEDS_MAX} seeds, ×2 sides each, "
+              f"max {self.ARENA_SEEDS_MAX} seeds, x2 sides each, "
               f"gate={promote_threshold:.1%} after {self.consecutive_rejections} "
               f"consecutive rejections)...")
 
@@ -810,9 +813,9 @@ class Orchestrator:
 
             # If more seeds available and result is inconclusive, extend
             if seeds_used < self.ARENA_SEEDS_MAX:
-                print(f"  Inconclusive — extending arena...")
+                print(f"  Inconclusive - extending arena...")
 
-        # Final decision after max seeds — use graduated threshold
+        # Final decision after max seeds - use graduated threshold
         elapsed = time.time() - t0
         if matches_played > 0:
             win_rate = challenger_wins / matches_played
@@ -894,7 +897,7 @@ def main():
                         help='Multiplier for high-quality games (default 4x)')
     parser.add_argument('--value-target', type=str, default='me',
                         choices=['me', 'points'],
-                        help='Value target: "me" for ΔME (default), '
+                        help='Value target: "me" for deltaME (default), '
                              '"points" for legacy points/4')
     parser.add_argument('--policy-target', type=str, default='visits',
                         choices=['visits', 'heuristic'],
@@ -949,3 +952,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
