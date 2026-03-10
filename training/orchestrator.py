@@ -35,6 +35,29 @@ from domino_trainer import Trainer, ReplayDataset
 from match_equity import get_match_equity, delta_me, DOB_VALUES
 
 
+def build_support_target(hidden_hands_by_player, me, left_end, right_end):
+    """
+    6-dim end-support target:
+      [partner_can_left, partner_can_right,
+       lho_can_left,     lho_can_right,
+       rho_can_left,     rho_can_right]
+
+    For each non-self player: can they play the current left/right board end?
+    hidden_hands_by_player: dict/list keyed by absolute player id (tile indices)
+    """
+    target = np.zeros(6, dtype=np.float32)
+    partner = (me + 2) % 4
+    lho     = (me + 1) % 4
+    rho     = (me + 3) % 4
+    for rel_idx, abs_player in enumerate([partner, lho, rho]):
+        tiles = hidden_hands_by_player[abs_player]
+        can_left  = any(TILES[t][0] == left_end  or TILES[t][1] == left_end  for t in tiles)
+        can_right = any(TILES[t][0] == right_end or TILES[t][1] == right_end for t in tiles)
+        target[rel_idx * 2]     = float(can_left)
+        target[rel_idx * 2 + 1] = float(can_right)
+    return target
+
+
 def build_belief_target(hidden_hands_by_player, me):
     """
     21-dim target:
@@ -62,7 +85,7 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                      mcts_sims, result_queue, value_target='me',
                      policy_target='visits',
                      high_sim_fraction=0.1, high_sim_multiplier=4,
-                     use_belief_head=False):
+                     use_belief_head=False, use_support_head=False):
     """
     Isolated CPU process. Plays games against itself and pipes training data back.
 
@@ -161,6 +184,11 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                 }
                 if use_belief_head:
                     record['belief_target'] = build_belief_target(env.hands, obs['player'])
+                if use_support_head:
+                    record['support_target'] = build_support_target(
+                        env.hands, obs['player'],
+                        env.left_end, env.right_end
+                    )
                 game_history.append(record)
 
                 # Execute action
@@ -198,7 +226,12 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                             opp_score=opp_s,
                             multiplier=multiplier_before
                         )
-                        if use_belief_head:
+                        if use_support_head:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v,
+                                step['belief_target'], step['support_target'],
+                            ))
+                        elif use_belief_head:
                             worker_data.append((
                                 step['state'], step['mask'], step['pi'], v,
                                 step['belief_target'],
@@ -216,7 +249,12 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                             v_target = reward_magnitude
                         else:
                             v_target = -reward_magnitude
-                        if use_belief_head:
+                        if use_support_head:
+                            worker_data.append((
+                                step['state'], step['mask'], step['pi'], v_target,
+                                step['belief_target'], step['support_target'],
+                            ))
+                        elif use_belief_head:
                             worker_data.append((
                                 step['state'], step['mask'], step['pi'], v_target,
                                 step['belief_target'],
@@ -348,7 +386,8 @@ class Orchestrator:
     def __init__(self, num_workers=4, buffer_size=200000, use_mcts=True,
                  mcts_sims=200, value_target='me', policy_target='visits',
                  high_sim_fraction=0.1, high_sim_multiplier=4,
-                 use_belief_head=False, belief_weight=0.2):
+                 use_belief_head=False, belief_weight=0.1,
+                 use_support_head=False, support_weight=0.1):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
@@ -358,15 +397,20 @@ class Orchestrator:
               f"MCTS: {use_mcts} ({mcts_sims} sims, "
               f"{high_sim_fraction:.0%} at {mcts_sims * high_sim_multiplier}), "
               f"Value: {value_target}, Policy: {policy_target}, "
-              f"BeliefHead: {use_belief_head}, BeliefWeight: {belief_weight}")
+              f"BeliefHead: {use_belief_head}, BeliefWeight: {belief_weight}, "
+              f"SupportHead: {use_support_head}, SupportWeight: {support_weight}")
 
         self.model = DominoNet().to(self.device)
         self.champion_weights = {
             k: v.cpu().clone() for k, v in self.model.state_dict().items()
         }
-        self.use_belief_head = use_belief_head
-        self.belief_weight   = belief_weight
-        self.trainer = Trainer(self.model, lr=1e-3, belief_weight=belief_weight)
+        self.use_belief_head  = use_belief_head
+        self.use_support_head = use_support_head
+        self.belief_weight    = belief_weight
+        self.support_weight   = support_weight
+        self.trainer = Trainer(self.model, lr=1e-3,
+                               belief_weight=belief_weight,
+                               support_weight=support_weight)
 
         self.num_workers = num_workers
         self.use_mcts = use_mcts
@@ -530,7 +574,7 @@ class Orchestrator:
                           self.use_mcts, self.mcts_sims, result_queue,
                           self.value_target, self.policy_target,
                           self.high_sim_fraction, self.high_sim_multiplier,
-                          self.use_belief_head)
+                          self.use_belief_head, self.use_support_head)
                 )
                 p.start()
                 processes.append(p)
@@ -580,10 +624,11 @@ class Orchestrator:
                 )
 
                 for epoch in range(5):
-                    loss, v_loss, p_loss, b_loss = self.trainer.train_epoch(dataloader)
+                    loss, v_loss, p_loss, b_loss, s_loss = self.trainer.train_epoch(dataloader)
                     print(f"  Epoch {epoch+1}/5 | "
                           f"Loss: {loss:.4f} "
-                          f"(V: {v_loss:.4f}, P: {p_loss:.4f}, B: {b_loss:.4f})")
+                          f"(V: {v_loss:.4f}, P: {p_loss:.4f}, "
+                          f"B: {b_loss:.4f}, S: {s_loss:.4f})")
 
                 # === PHASE 3: ARENA EVALUATION ===
                 challenger_weights = {
@@ -850,8 +895,12 @@ def main():
                         help='Resume from checkpoint path')
     parser.add_argument('--belief-head', action='store_true',
                         help='Enable 21-output auxiliary pip-belief head')
-    parser.add_argument('--belief-weight', type=float, default=0.2,
-                        help='Auxiliary belief loss weight')
+    parser.add_argument('--belief-weight', type=float, default=0.1,
+                        help='Auxiliary belief loss weight (default 0.1)')
+    parser.add_argument('--support-head', action='store_true',
+                        help='Enable 6-output end-support auxiliary head (Phase 6.5)')
+    parser.add_argument('--support-weight', type=float, default=0.1,
+                        help='Auxiliary support loss weight (default 0.1)')
     parser.add_argument('--no-budget-tracking', action='store_true',
                         help='Disable per-gen budget-specific checkpoint tracking')
     args = parser.parse_args()
@@ -867,6 +916,8 @@ def main():
         high_sim_multiplier=args.high_sim_multiplier,
         use_belief_head=args.belief_head,
         belief_weight=args.belief_weight,
+        use_support_head=args.support_head,
+        support_weight=args.support_weight,
     )
 
     if args.resume:

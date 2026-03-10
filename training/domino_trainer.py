@@ -1,10 +1,12 @@
 """
-Training loop for Pernambuco Domino neural network.
-Composite loss: policy + value + optional auxiliary belief loss.
-Supports replay tuples:
-    (state, mask, pi, value_target)
-or
-    (state, mask, pi, value_target, belief_target)
+Training loop for Pernambuco Domino neural network — Phase 6.5
+
+Composite loss: policy + value + belief (pip-presence) + support (end-playability)
+
+Replay tuple formats accepted:
+    4-elem: (state, mask, pi, value)
+    5-elem: (state, mask, pi, value, belief_target)
+    6-elem: (state, mask, pi, value, belief_target, support_target)
 """
 
 import torch
@@ -78,7 +80,6 @@ def _validate_policy_targets_torch(target_pis, masks, atol=1e-4):
     row_sums = target_pis.sum(dim=1)
     if torch.max(torch.abs(row_sums - 1.0)) > atol:
         bad_idx = int(torch.argmax(torch.abs(row_sums - 1.0)).item())
-        # Print debug summary for worst row before raising
         summary = _summarize_bad_policy_row(target_pis[bad_idx], masks[bad_idx])
         print(f"  [DEBUG] bad row {bad_idx}: {summary}")
         raise ValueError(
@@ -112,10 +113,10 @@ def _summarize_bad_policy_row(pi_row, mask_row) -> dict:
 class ReplayDataset(Dataset):
     """PyTorch dataset wrapping replay buffer.
 
-    Supports tuples of:
+    Supports tuples of length 4, 5, or 6:
         (state, mask, pi, value)
-    or
         (state, mask, pi, value, belief_target)
+        (state, mask, pi, value, belief_target, support_target)
     """
 
     def __init__(self, buffer):
@@ -123,14 +124,15 @@ class ReplayDataset(Dataset):
         self.masks  = np.array([b[1] for b in buffer], dtype=np.float32)
         self.pis    = np.array([b[2] for b in buffer], dtype=np.float32)
 
-        # Fail fast on malformed policy targets / masks before dataloader starts
         _validate_policy_targets_np(self.pis, self.masks)
+
         self.values = np.array([b[3] for b in buffer], dtype=np.float32).reshape(-1, 1)
 
-        self.has_belief = len(buffer[0]) >= 5
+        self.has_belief  = len(buffer[0]) >= 5
+        self.has_support = len(buffer[0]) >= 6
+
         if self.has_belief:
             self.beliefs = np.array([b[4] for b in buffer], dtype=np.float32)
-            # Belief target guard: shape [N,21], values in [0,1]
             if self.beliefs.shape[1] != 21:
                 raise ValueError(
                     f"ReplayDataset: expected belief shape [N,21], got {self.beliefs.shape}"
@@ -142,33 +144,53 @@ class ReplayDataset(Dataset):
         else:
             self.beliefs = None
 
+        if self.has_support:
+            self.supports = np.array([b[5] for b in buffer], dtype=np.float32)
+            if self.supports.shape[1] != 6:
+                raise ValueError(
+                    f"ReplayDataset: expected support shape [N,6], got {self.supports.shape}"
+                )
+            if not np.isfinite(self.supports).all():
+                raise ValueError("ReplayDataset: support_target contains NaN/Inf")
+            if ((self.supports < -1e-6) | (self.supports > 1.0 + 1e-6)).any():
+                raise ValueError("ReplayDataset: support_target outside [0,1]")
+        else:
+            self.supports = None
+
     def __len__(self):
         return len(self.states)
 
     def __getitem__(self, idx):
-        if self.has_belief:
-            return (
-                torch.tensor(self.states[idx]),
-                torch.tensor(self.masks[idx]),
-                torch.tensor(self.pis[idx]),
-                torch.tensor(self.values[idx]),
-                torch.tensor(self.beliefs[idx]),
-            )
-        return (
+        base = (
             torch.tensor(self.states[idx]),
             torch.tensor(self.masks[idx]),
             torch.tensor(self.pis[idx]),
             torch.tensor(self.values[idx]),
         )
+        if self.has_support:
+            return base + (
+                torch.tensor(self.beliefs[idx]),
+                torch.tensor(self.supports[idx]),
+            )
+        if self.has_belief:
+            return base + (torch.tensor(self.beliefs[idx]),)
+        return base
 
 
 class Trainer:
-    """AlphaZero-style trainer with composite loss."""
+    """AlphaZero-style trainer with composite loss.
 
-    def __init__(self, model, lr=1e-3, weight_decay=1e-4, belief_weight=0.2):
-        self.model = model
-        self.device = next(model.parameters()).device
-        self.belief_weight = belief_weight
+    Loss = policy_loss + value_loss
+           + belief_weight  * belief_loss    (pip-presence BCE)
+           + support_weight * support_loss   (end-playability BCE)
+    """
+
+    def __init__(self, model, lr=1e-3, weight_decay=1e-4,
+                 belief_weight=0.1, support_weight=0.1):
+        self.model          = model
+        self.device         = next(model.parameters()).device
+        self.belief_weight  = belief_weight
+        self.support_weight = support_weight
         self.optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
@@ -177,62 +199,78 @@ class Trainer:
         """Train for one epoch.
 
         Returns:
-            total_loss, value_loss, policy_loss, belief_loss
+            total_loss, value_loss, policy_loss, belief_loss, support_loss
         """
         self.model.train()
-        total_loss = total_v = total_p = total_b = 0.0
+        total_loss = total_v = total_p = total_b = total_s = 0.0
         n_batches = 0
 
         for batch in dataloader:
-            if len(batch) == 5:
+            use_belief  = len(batch) >= 5
+            use_support = len(batch) >= 6
+
+            if use_support:
+                states, masks, target_pis, target_vs, target_beliefs, target_supports = batch
+                target_beliefs  = target_beliefs.to(self.device)
+                target_supports = target_supports.to(self.device)
+            elif use_belief:
                 states, masks, target_pis, target_vs, target_beliefs = batch
-                target_beliefs = target_beliefs.to(self.device)
-                use_belief = True
+                target_beliefs  = target_beliefs.to(self.device)
+                target_supports = None
             else:
                 states, masks, target_pis, target_vs = batch
-                target_beliefs = None
-                use_belief = False
+                target_beliefs  = None
+                target_supports = None
 
             states     = states.to(self.device)
             masks      = masks.to(self.device)
             target_pis = target_pis.to(self.device)
             target_vs  = target_vs.to(self.device)
 
-            # Fail fast on first batch only — cheap and sufficient
             if n_batches == 0:
                 _validate_policy_targets_torch(target_pis, masks)
 
-            if use_belief:
-                pred_policy, pred_value, pred_belief_logits = self.model(
+            if use_belief or use_support:
+                pred_policy, pred_value, pred_belief_logits, pred_support_logits = self.model(
                     states, valid_actions_mask=masks, return_belief=True
                 )
             else:
                 pred_policy, pred_value = self.model(states, valid_actions_mask=masks)
-                pred_belief_logits = None
+                pred_belief_logits  = None
+                pred_support_logits = None
 
-            v_loss = F.mse_loss(pred_value, target_vs)
+            v_loss   = F.mse_loss(pred_value, target_vs)
             log_pred = torch.log(pred_policy + 1e-8)
-            p_loss = -torch.mean(torch.sum(target_pis * log_pred, dim=1))
+            p_loss   = -torch.mean(torch.sum(target_pis * log_pred, dim=1))
 
-            if use_belief:
-                b_loss = F.binary_cross_entropy_with_logits(
-                    pred_belief_logits, target_beliefs
-                )
-            else:
-                b_loss = torch.tensor(0.0, device=self.device)
+            b_loss = (
+                F.binary_cross_entropy_with_logits(pred_belief_logits, target_beliefs)
+                if use_belief else torch.tensor(0.0, device=self.device)
+            )
+            s_loss = (
+                F.binary_cross_entropy_with_logits(pred_support_logits, target_supports)
+                if use_support else torch.tensor(0.0, device=self.device)
+            )
 
-            loss = v_loss + p_loss + self.belief_weight * b_loss
+            loss = (v_loss + p_loss
+                    + self.belief_weight  * b_loss
+                    + self.support_weight * s_loss)
 
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
-            total_loss += loss.item(); total_v += v_loss.item()
-            total_p += p_loss.item();  total_b += b_loss.item()
-            n_batches += 1
+            total_loss += loss.item()
+            total_v    += v_loss.item()
+            total_p    += p_loss.item()
+            total_b    += b_loss.item()
+            total_s    += s_loss.item()
+            n_batches  += 1
 
         if n_batches == 0:
-            return 0.0, 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0, 0.0
 
-        return total_loss/n_batches, total_v/n_batches, total_p/n_batches, total_b/n_batches
+        return (total_loss / n_batches, total_v / n_batches,
+                total_p / n_batches,    total_b / n_batches,
+                total_s / n_batches)
