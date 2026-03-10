@@ -511,7 +511,7 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
-      const COL_MARGIN = 6; // extra px margin to prevent visual overlap
+      const COL_MARGIN = 4; // extra px margin to prevent visual overlap (must be < gap)
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
           if (x < p.x + p.w + COL_MARGIN && x + w + COL_MARGIN > p.x &&
@@ -4717,7 +4717,7 @@
                         // tiny landscape boards can accommodate all 28 tiles.
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
-                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 5,
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 8,
                             SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
