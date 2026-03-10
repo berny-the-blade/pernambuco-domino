@@ -1259,6 +1259,60 @@
         return 0;
       };
 
+      // === FEATURE: Preserve pressure on opponent-weak ends ===
+      // When opponents are known void in pip X (cantHave), and X is a current board end,
+      // prefer playing your X-tiles NOW on that end rather than switching to the other side.
+      // Rationale: drain X-tiles efficiently while the end is available; they may strand later.
+      const scorePreservePressure = ({ move, player, knowledge, lE, rE }) => {
+        if (move.pass || !knowledge.cantHave) return 0;
+        const opp1 = (player + 1) % 4;
+        const opp2 = (player + 3) % 4;
+        const BONUS_PER_VOID  = 15;
+        const PENALTY_PER_VOID = 8;
+
+        let delta = 0;
+        for (const [end, endSide] of [[lE, 'left'], [rE, 'right']]) {
+          if (lE === rE && endSide === 'right') continue; // avoid double-counting when ends equal
+          const voids = (knowledge.cantHave[opp1].has(end) ? 1 : 0) +
+                        (knowledge.cantHave[opp2].has(end) ? 1 : 0);
+          if (voids === 0) continue;
+          if (move.side === endSide) {
+            delta += BONUS_PER_VOID * voids;      // playing ON the pressure end — good
+          } else {
+            delta -= PENALTY_PER_VOID * voids;    // playing away, leaving pressure end idle
+          }
+        }
+        return delta;
+      };
+
+      // === FEATURE: Confirm partner's signal ===
+      // If partner's most recent tile has a pip that matches exactly ONE current board end,
+      // that's their signal — prefer playing on that same end.
+      const scoreConfirmPartnerSignal = ({ move, player, knowledge, lE, rE }) => {
+        if (move.pass || !knowledge.playsBy) return 0;
+        const partner = (player + 2) % 4;
+        const partnerPlays = knowledge.playsBy[partner];
+        if (!partnerPlays || partnerPlays.length === 0) return 0;
+
+        const lastTile = partnerPlays[partnerPlays.length - 1];
+        const matchesLeft  = lastTile.left === lE || lastTile.right === lE;
+        const matchesRight = lastTile.left === rE || lastTile.right === rE;
+
+        // Unambiguous signal: exactly one current end matches partner's last tile
+        if (matchesLeft === matchesRight) return 0;
+
+        // Check signal is still fresh — opponents shouldn't have played much since partner
+        const opp1 = (player + 1) % 4;
+        const opp2 = (player + 3) % 4;
+        const oppPlaysAfter = (knowledge.playsBy[opp1].length - partnerPlays.length) +
+                              (knowledge.playsBy[opp2].length - partnerPlays.length);
+        if (oppPlaysAfter > 2) return 0; // signal is stale
+
+        const signalSide = matchesLeft ? 'left' : 'right';
+        if (move.side === signalSide) return 12;   // confirming partner's signal
+        return -5;                                  // ignoring a fresh partner signal
+      };
+
       // === Full smartAI — ported from simulator with all strategic features ===
       const smartAI = (hand, lE, rE, bLen, player, knowledge, matchScores, returnAll = false) => {
         const canPlay = (t) => bLen === 0 || t.left === lE || t.right === lE || t.left === rE || t.right === rE;
@@ -1638,6 +1692,11 @@
               move: moveObj, legalMoves: allLegalMoves, player,
               knowledge, curLE: lE, curRE: rE, bLen
             });
+
+            // Partnership convention: preserve pressure + confirm partner signal
+            const moveSided = { pass: false, side, newLE: moveObj.newLE, newRE: moveObj.newRE };
+            ss += scorePreservePressure({ move: moveSided, player, knowledge, lE, rE });
+            ss += scoreConfirmPartnerSignal({ move: moveSided, player, knowledge, lE, rE });
 
             options.push({ tile, score: ss, side });
           }
