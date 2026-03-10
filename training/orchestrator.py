@@ -185,11 +185,15 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                 if use_belief_head:
                     record['belief_target'] = build_belief_target(env.hands, obs['player'])
                 if use_support_head:
-                    record['support_target'] = build_support_target(
-                        env.hands, obs['player'],
-                        obs.get('left_end', env.left_end),
-                        obs.get('right_end', env.right_end),
-                    )
+                    # Support labels meaningless at board_length==0 — use zeros
+                    if len(env.board) == 0:
+                        record['support_target'] = np.zeros(6, dtype=np.float32)
+                    else:
+                        record['support_target'] = build_support_target(
+                            env.hands, obs['player'],
+                            obs.get('left_end', env.left_end),
+                            obs.get('right_end', env.right_end),
+                        )
                 game_history.append(record)
 
                 # Execute action
