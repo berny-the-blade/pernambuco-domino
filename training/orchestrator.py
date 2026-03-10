@@ -33,6 +33,7 @@ from domino_net import DominoNet
 from domino_encoder import DominoEncoder
 from domino_mcts import DominoMCTS
 from domino_trainer import Trainer, ReplayDataset
+from vectorized_mcts import VectorizedMCTS
 from match_equity import get_match_equity, delta_me, DOB_VALUES
 
 
@@ -396,7 +397,7 @@ class Orchestrator:
                  high_sim_fraction=0.1, high_sim_multiplier=4,
                  use_belief_head=False, belief_weight=0.1,
                  use_support_head=False, support_weight=0.1,
-                 aux_detach=True):
+                 aux_detach=True, vectorized=False, vec_games=256):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
@@ -419,6 +420,8 @@ class Orchestrator:
         self.belief_weight    = belief_weight
         self.support_weight   = support_weight
         self.aux_detach       = aux_detach
+        self.vectorized       = vectorized
+        self.vec_games        = vec_games
         self.trainer = Trainer(self.model, lr=1e-3,
                                belief_weight=belief_weight,
                                support_weight=support_weight,
@@ -567,63 +570,88 @@ class Orchestrator:
 
             # === PHASE 1: PARALLEL DATA GENERATION ===
             t0 = time.time()
-            print(f"Spawning {self.num_workers} workers "
-                  f"({games_per_worker} games each)...", flush=True)
 
-            # Extract weights for CPU workers
-            shared_weights = {
-                k: v.cpu().clone() for k, v in self.model.state_dict().items()
-            }
-
-            ctx = mp.get_context('spawn')
-            result_queue = ctx.Queue()
-            processes = []
-
-            for w_id in range(self.num_workers):
-                p = ctx.Process(
-                    target=self_play_worker,
-                    args=(w_id, shared_weights, games_per_worker,
-                          self.use_mcts, self.mcts_sims, result_queue,
-                          self.value_target, self.policy_target,
-                          self.high_sim_fraction, self.high_sim_multiplier,
-                          self.use_belief_head, self.use_support_head)
+            if self.vectorized:
+                # --- GPU vectorised self-play (fast path) ---
+                total_games = self.num_workers * games_per_worker
+                print(f"VectorizedMCTS: {total_games} games "
+                      f"({self.vec_games} parallel slots, {self.mcts_sims} sims)...",
+                      flush=True)
+                vmcts = VectorizedMCTS(
+                    model=self.model,
+                    device=self.device,
+                    num_games=self.vec_games,
+                    sims_per_move=self.mcts_sims,
+                    use_belief_head=self.use_belief_head,
+                    use_support_head=self.use_support_head,
                 )
-                p.start()
-                processes.append(p)
+                new_data = vmcts.run_generation(games_per_batch=total_games)
+                self.replay_buffer.extend(new_data)
+                total_samples = len(new_data)
+                elapsed = time.time() - t0
+                gps = total_games / elapsed if elapsed > 0 else 0
+                print(f"Self-play: {total_games} games in {elapsed:.1f}s "
+                      f"({gps:.1f} games/s) [{total_samples} samples]", flush=True)
+                print(f"Buffer: {len(self.replay_buffer)} samples "
+                      f"(+{total_samples} new)", flush=True)
+            else:
+                # --- CPU multi-process self-play (original path) ---
+                print(f"Spawning {self.num_workers} workers "
+                      f"({games_per_worker} games each)...", flush=True)
 
-            # Collect results - timeout scales with games and MCTS sims
-            # ~60s per MCTS game (50 sims), ~1s per no-MCTS game
-            per_game_s = 90 if self.use_mcts else 3  # generous estimate
-            worker_timeout = max(3600, games_per_worker * per_game_s)
-            collected = 0
-            total_samples = 0
-            while collected < self.num_workers:
-                try:
-                    worker_data = result_queue.get(timeout=worker_timeout)
-                    self.replay_buffer.extend(worker_data)
-                    total_samples += len(worker_data)
-                    collected += 1
-                    print(f"  Worker {collected}/{self.num_workers} done: "
-                          f"{len(worker_data)} samples", flush=True)
-                except Exception as e:
-                    alive = sum(1 for p in processes if p.is_alive())
-                    print(f"  Worker collection error: {type(e).__name__}: {e} "
-                          f"({alive} workers still alive)", flush=True)
-                    if alive == 0:
-                        print("  All workers dead, stopping collection.",
-                              flush=True)
-                        break
-                    collected += 1
+                # Extract weights for CPU workers
+                shared_weights = {
+                    k: v.cpu().clone() for k, v in self.model.state_dict().items()
+                }
 
-            for p in processes:
-                p.join(timeout=30)
+                ctx = mp.get_context('spawn')
+                result_queue = ctx.Queue()
+                processes = []
 
-            elapsed = time.time() - t0
-            total_games = self.num_workers * games_per_worker
-            print(f"Self-play: {total_games} games in {elapsed:.1f}s "
-                  f"({total_games/elapsed:.0f} games/s)")
-            print(f"Buffer: {len(self.replay_buffer)} samples "
-                  f"(+{total_samples} new)")
+                for w_id in range(self.num_workers):
+                    p = ctx.Process(
+                        target=self_play_worker,
+                        args=(w_id, shared_weights, games_per_worker,
+                              self.use_mcts, self.mcts_sims, result_queue,
+                              self.value_target, self.policy_target,
+                              self.high_sim_fraction, self.high_sim_multiplier,
+                              self.use_belief_head, self.use_support_head)
+                    )
+                    p.start()
+                    processes.append(p)
+
+                # Collect results - timeout scales with games and MCTS sims
+                # ~60s per MCTS game (50 sims), ~1s per no-MCTS game
+                per_game_s = 90 if self.use_mcts else 3  # generous estimate
+                worker_timeout = max(3600, games_per_worker * per_game_s)
+                collected = 0
+                total_samples = 0
+                while collected < self.num_workers:
+                    try:
+                        worker_data = result_queue.get(timeout=worker_timeout)
+                        self.replay_buffer.extend(worker_data)
+                        total_samples += len(worker_data)
+                        collected += 1
+                        print(f"  Worker {collected}/{self.num_workers} done: "
+                              f"{len(worker_data)} samples", flush=True)
+                    except Exception as e:
+                        alive = sum(1 for p in processes if p.is_alive())
+                        print(f"  Worker collection error: {type(e).__name__}: {e} "
+                              f"({alive} workers still alive)", flush=True)
+                        if alive == 0:
+                            print("  All workers dead, stopping collection.",
+                                  flush=True)
+                            break
+
+                for p in processes:
+                    p.join(timeout=30)
+
+                elapsed = time.time() - t0
+                total_games = self.num_workers * games_per_worker
+                print(f"Self-play: {total_games} games in {elapsed:.1f}s "
+                      f"({total_games/elapsed:.0f} games/s)")
+                print(f"Buffer: {len(self.replay_buffer)} samples "
+                      f"(+{total_samples} new)")
 
             # === PHASE 2: TRAINING ===
             min_buffer = 2000
@@ -918,6 +946,11 @@ def main():
                              'policy/value heads (default: True, safer for Phase 6.5 probe)')
     parser.add_argument('--no-aux-detach', dest='aux_detach', action='store_false',
                         help='Allow full gradients through aux conditioning path')
+    parser.add_argument('--vectorized', action='store_true', default=False,
+                        help='Use GPU-batched VectorizedMCTS instead of CPU workers '
+                             '(faster self-play; GPU stays active during self-play)')
+    parser.add_argument('--vec-games', type=int, default=256,
+                        help='Number of parallel game slots in VectorizedMCTS (default 256)')
     parser.add_argument('--no-budget-tracking', action='store_true',
                         help='Disable per-gen budget-specific checkpoint tracking')
     args = parser.parse_args()
@@ -936,6 +969,8 @@ def main():
         use_support_head=args.support_head,
         support_weight=args.support_weight,
         aux_detach=args.aux_detach,
+        vectorized=args.vectorized,
+        vec_games=args.vec_games,
     )
 
     if args.resume:

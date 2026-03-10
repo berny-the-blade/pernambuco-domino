@@ -29,6 +29,34 @@ from domino_env import DominoEnv, DominoMatch
 from domino_encoder import DominoEncoder
 from match_equity import delta_me
 
+# Tile lookup (28 tiles: (a, b) with a <= b)
+TILES = [(a, b) for a in range(7) for b in range(a, 7)]
+
+
+def _build_belief_target(hidden_hands_by_player, me):
+    """21-dim: partner/LHO/RHO each have pip 0-6 (1 if any tile with that pip)."""
+    target = np.zeros(21, dtype=np.float32)
+    for rel_idx, abs_player in enumerate([(me + 2) % 4, (me + 1) % 4, (me + 3) % 4]):
+        seen = np.zeros(7, dtype=np.float32)
+        for tile_idx in hidden_hands_by_player[abs_player]:
+            a, b = TILES[tile_idx]
+            seen[a] = 1.0
+            seen[b] = 1.0
+        target[rel_idx * 7: rel_idx * 7 + 7] = seen
+    return target
+
+
+def _build_support_target(hidden_hands_by_player, me, left_end, right_end):
+    """6-dim: [partner_L, partner_R, lho_L, lho_R, rho_L, rho_R]."""
+    target = np.zeros(6, dtype=np.float32)
+    for rel_idx, abs_player in enumerate([(me + 2) % 4, (me + 1) % 4, (me + 3) % 4]):
+        tiles = hidden_hands_by_player[abs_player]
+        can_left  = any(TILES[t][0] == left_end  or TILES[t][1] == left_end  for t in tiles)
+        can_right = any(TILES[t][0] == right_end or TILES[t][1] == right_end for t in tiles)
+        target[rel_idx * 2]     = float(can_left)
+        target[rel_idx * 2 + 1] = float(can_right)
+    return target
+
 
 # ---------------------------------------------------------------------------
 # Tree node
@@ -58,7 +86,9 @@ class MCTSNode:
 class _Slot:
     """Holds all state for one parallel game/match."""
 
-    def __init__(self):
+    def __init__(self, use_belief_head=False, use_support_head=False):
+        self.use_belief_head = use_belief_head
+        self.use_support_head = use_support_head
         self.match = DominoMatch(target_points=6)
         self.encoder = DominoEncoder()
 
@@ -115,12 +145,23 @@ class _Slot:
 
     def record_move(self, state_np, mask_np, pi_np):
         """Append a move to the game history (value filled in at game end)."""
-        self.game_history.append({
+        env = self.env
+        me = env.current_player
+        step = {
             'state': state_np,
             'mask': mask_np,
             'pi': pi_np,
-            'team': self.env.current_team,
-        })
+            'team': env.current_team,
+        }
+        if self.use_belief_head or self.use_support_head:
+            step['belief_target'] = _build_belief_target(env.hands, me)
+        if self.use_support_head:
+            if len(env.board) == 0:
+                step['support_target'] = np.zeros(6, dtype=np.float32)
+            else:
+                step['support_target'] = _build_support_target(
+                    env.hands, me, env.left_end, env.right_end)
+        self.game_history.append(step)
 
     def flush_game_data(self, training_list: list):
         """
@@ -141,7 +182,18 @@ class _Slot:
                 opp_score=self.scores_before[1 - team],
                 multiplier=self.mult_before,
             )
-            training_list.append((step['state'], step['mask'], step['pi'], float(v)))
+            if self.use_support_head:
+                training_list.append((
+                    step['state'], step['mask'], step['pi'], float(v),
+                    step['belief_target'], step['support_target'],
+                ))
+            elif self.use_belief_head:
+                training_list.append((
+                    step['state'], step['mask'], step['pi'], float(v),
+                    step['belief_target'],
+                ))
+            else:
+                training_list.append((step['state'], step['mask'], step['pi'], float(v)))
             n += 1
         return n
 
@@ -173,12 +225,16 @@ class VectorizedMCTS:
     def __init__(self, model, device,
                  num_games: int = 64,
                  sims_per_move: int = 800,
-                 c_puct: float = 1.5):
+                 c_puct: float = 1.5,
+                 use_belief_head: bool = False,
+                 use_support_head: bool = False):
         self.model = model
         self.device = device
         self.num_games = num_games
         self.sims_per_move = sims_per_move
         self.c_puct = c_puct
+        self.use_belief_head = use_belief_head
+        self.use_support_head = use_support_head
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -198,7 +254,8 @@ class VectorizedMCTS:
 
         # Create N parallel slots — no more than the target number.
         n = min(self.num_games, matches_target)
-        slots = [_Slot() for _ in range(n)]
+        slots = [_Slot(use_belief_head=self.use_belief_head,
+                       use_support_head=self.use_support_head) for _ in range(n)]
         # Track how many matches each slot has completed.
         slot_matches = [0] * n
 
@@ -457,7 +514,9 @@ class VectorizedMCTS:
         with torch.no_grad():
             x = torch.tensor(states_np, dtype=torch.float32, device=self.device)
             m = torch.tensor(masks_np, dtype=torch.float32, device=self.device)
-            policy_t, value_t = self.model(x, valid_actions_mask=m)
+            out = self.model(x, valid_actions_mask=m)
+            # Model may return (policy, value) or (policy, value, belief, support)
+            policy_t, value_t = out[0], out[1]
         return (
             policy_t.cpu().numpy(),
             value_t.squeeze(-1).cpu().numpy(),
