@@ -511,7 +511,10 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
-      const COL_MARGIN = 4; // extra px margin to prevent visual overlap (must be < gap)
+      // INVARIANT: COL_MARGIN must always be < gap (currently 8).
+      // If COL_MARGIN >= gap, every consecutive tile fails the overlap check
+      // and the auto-scale loop shrinks tiles to minimum, breaking the board.
+      const COL_MARGIN = 4;
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
           if (x < p.x + p.w + COL_MARGIN && x + w + COL_MARGIN > p.x &&
