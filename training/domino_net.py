@@ -87,17 +87,22 @@ class DominoNet(nn.Module):
         # Gradually learns to open the gate as aux heads improve
         self.aux_gate = nn.Parameter(torch.tensor(0.0))
 
-    def forward(self, x, valid_actions_mask=None, return_belief=False):
+    def forward(self, x, valid_actions_mask=None, return_aux=False, aux_detach=True):
         """
         Args:
             x:                  (B, input_dim) state tensor
             valid_actions_mask: (B, num_actions) binary mask of legal actions
-            return_belief:      if True, also return (belief_logits, support_logits)
+            return_aux:         if True, also return belief_logits and support_logits
+            aux_detach:         if True (default), stop-gradient through aux features
+                                before conditioning policy/value heads.
+                                Safe for first probe: aux heads learn from their own
+                                supervised loss; policy/value can USE aux predictions
+                                without distorting them through their gradients.
 
         Returns:
             policy:  (B, num_actions) masked softmax probabilities
             value:   (B, 1) scalar in [-1, 1]
-        or (if return_belief=True):
+        or (if return_aux=True):
             policy, value, belief_logits (B,21), support_logits (B,6)
         """
         # BatchNorm requires B>1 in train mode — switch to eval for single samples
@@ -117,12 +122,17 @@ class DominoNet(nn.Module):
         support_logits = self.support_fc2(s)                    # (B, 6)
 
         # ── Auxiliary conditioning ────────────────────────────────────
-        # Combine aux predictions and project back into trunk space
-        aux = torch.cat(
-            [torch.sigmoid(belief_logits), torch.sigmoid(support_logits)],
-            dim=-1
-        )                                                        # (B, 27)
-        h_cond = h + torch.tanh(self.aux_gate) * F.gelu(self.aux_proj(aux))
+        belief_probs  = torch.sigmoid(belief_logits)
+        support_probs = torch.sigmoid(support_logits)
+        aux = torch.cat([belief_probs, support_probs], dim=-1)  # (B, 27)
+
+        # Stop-gradient: aux probs inform policy/value but don't receive
+        # gradients from policy/value loss — auxiliary heads train cleanly
+        if aux_detach:
+            aux = aux.detach()
+
+        aux_feat = F.relu(self.aux_proj(aux))
+        h_cond = h + torch.tanh(self.aux_gate) * aux_feat
 
         # ── Policy head (conditioned) ────────────────────────────────
         p = F.relu(self.policy_bn(self.policy_fc1(h_cond)))
@@ -133,12 +143,12 @@ class DominoNet(nn.Module):
 
         # ── Value head (conditioned) ─────────────────────────────────
         v = F.relu(self.value_bn(self.value_fc1(h_cond)))
-        v = torch.tanh(self.value_fc2(v))
+        value = torch.tanh(self.value_fc2(v))
 
-        if return_belief:
-            return policy, v, belief_logits, support_logits
+        if return_aux:
+            return policy, value, belief_logits, support_logits
 
-        return policy, v
+        return policy, value
 
     def predict(self, state_np, mask_np, device=None):
         """Convenience: numpy in, numpy out. For single-state inference."""

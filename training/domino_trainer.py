@@ -183,14 +183,18 @@ class Trainer:
     Loss = policy_loss + value_loss
            + belief_weight  * belief_loss    (pip-presence BCE)
            + support_weight * support_loss   (end-playability BCE)
+
+    aux_detach: passed to model.forward() — if True (default for Phase 6.5 probe),
+    auxiliary probs are stop-gradiented before conditioning policy/value heads.
     """
 
     def __init__(self, model, lr=1e-3, weight_decay=1e-4,
-                 belief_weight=0.1, support_weight=0.1):
+                 belief_weight=0.1, support_weight=0.1, aux_detach=True):
         self.model          = model
         self.device         = next(model.parameters()).device
         self.belief_weight  = belief_weight
         self.support_weight = support_weight
+        self.aux_detach     = aux_detach
         self.optimizer = torch.optim.Adam(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
@@ -232,10 +236,13 @@ class Trainer:
 
             if use_belief or use_support:
                 pred_policy, pred_value, pred_belief_logits, pred_support_logits = self.model(
-                    states, valid_actions_mask=masks, return_belief=True
+                    states, valid_actions_mask=masks,
+                    return_aux=True, aux_detach=self.aux_detach
                 )
             else:
-                pred_policy, pred_value = self.model(states, valid_actions_mask=masks)
+                pred_policy, pred_value = self.model(
+                    states, valid_actions_mask=masks, aux_detach=self.aux_detach
+                )
                 pred_belief_logits  = None
                 pred_support_logits = None
 

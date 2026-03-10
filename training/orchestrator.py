@@ -187,7 +187,8 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                 if use_support_head:
                     record['support_target'] = build_support_target(
                         env.hands, obs['player'],
-                        env.left_end, env.right_end
+                        obs.get('left_end', env.left_end),
+                        obs.get('right_end', env.right_end),
                     )
                 game_history.append(record)
 
@@ -387,7 +388,8 @@ class Orchestrator:
                  mcts_sims=200, value_target='me', policy_target='visits',
                  high_sim_fraction=0.1, high_sim_multiplier=4,
                  use_belief_head=False, belief_weight=0.1,
-                 use_support_head=False, support_weight=0.1):
+                 use_support_head=False, support_weight=0.1,
+                 aux_detach=True):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
@@ -398,7 +400,8 @@ class Orchestrator:
               f"{high_sim_fraction:.0%} at {mcts_sims * high_sim_multiplier}), "
               f"Value: {value_target}, Policy: {policy_target}, "
               f"BeliefHead: {use_belief_head}, BeliefWeight: {belief_weight}, "
-              f"SupportHead: {use_support_head}, SupportWeight: {support_weight}")
+              f"SupportHead: {use_support_head}, SupportWeight: {support_weight}, "
+              f"AuxDetach: {aux_detach}")
 
         self.model = DominoNet().to(self.device)
         self.champion_weights = {
@@ -408,9 +411,11 @@ class Orchestrator:
         self.use_support_head = use_support_head
         self.belief_weight    = belief_weight
         self.support_weight   = support_weight
+        self.aux_detach       = aux_detach
         self.trainer = Trainer(self.model, lr=1e-3,
                                belief_weight=belief_weight,
-                               support_weight=support_weight)
+                               support_weight=support_weight,
+                               aux_detach=aux_detach)
 
         self.num_workers = num_workers
         self.use_mcts = use_mcts
@@ -901,6 +906,11 @@ def main():
                         help='Enable 6-output end-support auxiliary head (Phase 6.5)')
     parser.add_argument('--support-weight', type=float, default=0.1,
                         help='Auxiliary support loss weight (default 0.1)')
+    parser.add_argument('--aux-detach', action='store_true', default=True,
+                        help='Stop-gradient through aux probs before conditioning '
+                             'policy/value heads (default: True, safer for Phase 6.5 probe)')
+    parser.add_argument('--no-aux-detach', dest='aux_detach', action='store_false',
+                        help='Allow full gradients through aux conditioning path')
     parser.add_argument('--no-budget-tracking', action='store_true',
                         help='Disable per-gen budget-specific checkpoint tracking')
     args = parser.parse_args()
@@ -918,6 +928,7 @@ def main():
         belief_weight=args.belief_weight,
         use_support_head=args.support_head,
         support_weight=args.support_weight,
+        aux_detach=args.aux_detach,
     )
 
     if args.resume:
