@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Domino Pernambucano</string>
+    <string name="start_url">https://berny-the-blade.github.io/pernambuco-domino/</string>
+    <string name="asset_statements">
+        [{
+            \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+            \"target\": {
+                \"namespace\": \"web\",
+                \"site\": \"https://berny-the-blade.github.io\"
+            }
+        }]
+    </string>
+</resources>
