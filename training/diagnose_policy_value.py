@@ -149,8 +149,10 @@ def value_only_move(model, pos, device):
 
 
 def search_move(model, pos, sims):
-    mcts  = DominoMCTS(model, num_simulations=sims)
-    probs = mcts.get_action_probs(pos["env"], pos["encoder"], temperature=0.01)
+    mcts     = DominoMCTS(model, num_simulations=sims)
+    env_copy = copy.deepcopy(pos["env"])
+    enc_copy = copy.deepcopy(pos["encoder"])
+    probs    = mcts.get_action_probs(env_copy, enc_copy, temperature=0.01)
     return int(np.argmax(probs)), probs
 
 
