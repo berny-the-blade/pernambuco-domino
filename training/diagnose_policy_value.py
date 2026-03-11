@@ -129,7 +129,6 @@ def value_only_move(model, pos, device):
         enc_copy = copy.deepcopy(encoder)
 
         obs_next, reward, done, info = env_copy.step(int(action_idx))
-        enc_copy.update(obs_next)
 
         state_next = enc_copy.encode(obs_next, my_score, opp_score, multiplier)
         mask_next  = env_copy.get_legal_moves_mask()

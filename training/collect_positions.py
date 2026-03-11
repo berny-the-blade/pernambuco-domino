@@ -98,7 +98,6 @@ def collect(model, device, n_positions=1000, sample_every=3, seed=42):
             probs, _ = model.predict(state_np, mask, device)
             action   = int(np.random.choice(len(probs), p=probs))
             obs, _, done, _ = env.step(action)
-            encoder.update(obs)
             step += 1
             if done:
                 break
@@ -151,7 +150,7 @@ def main():
 
     with open(args.out, "wb") as f:
         pickle.dump(records, f)
-    print(f"Saved → {args.out}")
+    print(f"Saved: {args.out}")
 
 
 if __name__ == "__main__":
