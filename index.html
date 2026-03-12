@@ -4672,7 +4672,7 @@
               <div className="felt-bg rounded-xl p-2 mb-1 relative" style={{ border: '1px solid rgba(255,255,255,0.08)', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
                 {/* Partner (top) — same team = blue */}
-                <div className={'player-panel px-2 py-1.5 mb-1 mx-8 flex items-center justify-center gap-2 flex-wrap ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')}>
+                <div className={'player-panel px-1 py-1 mb-1 mx-1 flex items-center justify-center gap-1 flex-wrap ' + (gameState.currentPlayer === topSlot ? 'active-turn turn-pulse' : '')}>
                   <div style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', padding: 2, background: 'rgba(59,130,246,0.7)', boxShadow: '0 0 6px rgba(59,130,246,0.4)' }}>
                     <Avatar profile={profileFromPlayer(gameState.players?.[topSlot])} size={28} noBorder />
                     {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -4680,16 +4680,11 @@
                     </div>}
                     {passedSlot === topSlot && <div className="animate-bounce-in" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)', background: '#ef4444', color: '#fff', fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(239,68,68,0.5)' }}>Toquei!</div>}
                   </div>
-                  <span className="text-[11px] font-bold text-white/80">{gameState.players?.[topSlot]?.name}</span>
-                  {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && (isBot(topSlot)
-                    ? <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">BOT</span>
-                    : <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/30 text-green-200 font-bold">PARCEIRO</span>
-                  )}
                   {gameState.currentPlayer === topSlot && <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-500/30 text-yellow-200 font-bold">VEZ</span>}
                   {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) ? (
-                    <div className="flex gap-0.5 ml-1">
+                    <div className="flex gap-0.5">
                       {Array.from({ length: (gameState.hands?.[topSlot] || []).length }).map((_, i) => (
-                        <div key={i} className="tile-back" style={{ width: 10, height: 18 }}></div>
+                        <div key={i} className="tile-back" style={{ width: 9, height: 16 }}></div>
                       ))}
                     </div>
                   ) : (gameState.hands?.[topSlot] || []).length > 0 ? (
