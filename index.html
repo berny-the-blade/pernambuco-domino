@@ -4774,7 +4774,7 @@
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
                           out = layoutSpiral(board, W, H, spiralHW, spiralVW, 0,
-                            SPIRAL_PADS, 0, 0); // dials are transparent overlays — no avoidance needed
+                            SPIRAL_PADS, 0, DIAL_CORNER); // TL dial transparent; protect BR corner
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
                           spiralVW = Math.max(9, Math.round(spiralVW * 0.88));
