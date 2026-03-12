@@ -511,9 +511,8 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
-      // INVARIANT: COL_MARGIN must always be < gap (currently gap=1, COL_MARGIN=0).
-      // If COL_MARGIN >= gap, every consecutive tile fails the overlap check
-      // and the auto-scale loop shrinks tiles to minimum, breaking the board.
+      // COL_MARGIN=0 with gap=0: standard AABB collision, tiles placed exactly adjacent.
+      // Overlap check: tile at prev.x+prev.w vs tile ending at prev.x+prev.w → false (< not <=).
       const COL_MARGIN = 0;
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
@@ -4767,14 +4766,14 @@
                         // The CornerDial SVG is transparent, so tiles placed beneath it
                         // remain visible through the overlay.
                         const DIAL_CORNER = Math.min(110, Math.round(Math.min(W, H) * 0.27));
-                        const SPIRAL_PADS = { top: 2, right: 6, bottom: 8, left: 2 };
+                        const SPIRAL_PADS = { top: 2, right: 16, bottom: 8, left: 2 };
 
                         // Auto-scale: try current size, shrink until all tiles fit.
                         // Use 12 attempts and lower minimums (hw≥18, vw≥9) so even
                         // tiny landscape boards can accommodate all 28 tiles.
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
-                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 1,
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 0,
                             SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
