@@ -34,7 +34,26 @@ from domino_encoder import DominoEncoder
 from domino_mcts import DominoMCTS
 from domino_trainer import Trainer, ReplayDataset
 from vectorized_mcts import VectorizedMCTS
+from gpu_inference_server import GPUInferenceServer, RemoteModel
 from match_equity import get_match_equity, delta_me, DOB_VALUES
+
+
+def safe_load_state_dict(model, state_dict, strict=False):
+    """
+    Load state_dict into model, silently dropping keys whose tensor shape has
+    changed (e.g. aux_proj after support-summary expansion 27→31).
+    Those layers will random-init; all other weights are preserved.
+    Returns the IncompatibleKeys named-tuple from load_state_dict.
+    """
+    own = model.state_dict()
+    filtered = {
+        k: v for k, v in state_dict.items()
+        if k not in own or v.shape == own[k].shape
+    }
+    dropped = [k for k in state_dict if k in own and state_dict[k].shape != own[k].shape]
+    if dropped:
+        print(f"[safe_load] Dropping shape-mismatched keys (will random-init): {dropped}")
+    return model.load_state_dict(filtered, strict=strict)
 
 
 def build_support_target(hidden_hands_by_player, me, left_end, right_end):
@@ -87,7 +106,8 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
                      mcts_sims, result_queue, value_target='me',
                      policy_target='visits',
                      high_sim_fraction=0.1, high_sim_multiplier=4,
-                     use_belief_head=False, use_support_head=False):
+                     use_belief_head=False, use_support_head=False,
+                     gpu_request_queue=None, gpu_response_queue=None):
     """
     Isolated CPU process. Plays games against itself and pipes training data back.
 
@@ -96,15 +116,21 @@ def self_play_worker(worker_id, model_state_dict, num_games, use_mcts,
     value_target: 'me' for deltaME (match equity), 'points' for points/4 (legacy)
     high_sim_fraction: fraction of games using high sim count (default 10%)
     high_sim_multiplier: multiplier for high-quality games (default 4x)
+    gpu_request_queue / gpu_response_queue: when set, use GPU inference server
+      instead of loading the model locally on CPU.
     """
     device = torch.device("cpu")
-    model = DominoNet().to(device)
-    incompat = model.load_state_dict(model_state_dict, strict=False)
-    if incompat.missing_keys:
-        print(f"[worker {worker_id}] Missing keys: {incompat.missing_keys}")
-    if incompat.unexpected_keys:
-        print(f"[worker {worker_id}] Unexpected keys: {incompat.unexpected_keys}")
-    model.eval()
+    if gpu_request_queue is not None:
+        # GPU server path: use proxy model, no local weights needed
+        model = RemoteModel(worker_id, gpu_request_queue, gpu_response_queue)
+    else:
+        model = DominoNet().to(device)
+        incompat = safe_load_state_dict(model, model_state_dict, strict=False)
+        if incompat.missing_keys:
+            print(f"[worker {worker_id}] Missing keys: {incompat.missing_keys}")
+        if incompat.unexpected_keys:
+            print(f"[worker {worker_id}] Unexpected keys: {incompat.unexpected_keys}")
+        model.eval()
     torch.set_grad_enabled(False)
 
     # Unique seed per worker
@@ -283,11 +309,11 @@ def arena_match(champion_weights, challenger_weights, seed, challenger_team=0):
     """
     device = torch.device("cpu")
     champion = DominoNet().to(device)
-    champion.load_state_dict(champion_weights, strict=False)
+    safe_load_state_dict(champion, champion_weights, strict=False)
     champion.eval()
 
     challenger = DominoNet().to(device)
-    challenger.load_state_dict(challenger_weights, strict=False)
+    safe_load_state_dict(challenger, challenger_weights, strict=False)
     challenger.eval()
 
     match = DominoMatch(target_points=6)
@@ -397,7 +423,9 @@ class Orchestrator:
                  high_sim_fraction=0.1, high_sim_multiplier=4,
                  use_belief_head=False, belief_weight=0.1,
                  use_support_head=False, support_weight=0.1,
-                 aux_detach=True, vectorized=False, vec_games=256):
+                 aux_detach=True, vectorized=False, vec_games=256,
+                 use_gpu_server=False, gpu_batch_size=28,
+                 phase2_gen=None, belief_weight_phase2=None, support_weight_phase2=None):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.high_sim_fraction = high_sim_fraction
         self.high_sim_multiplier = high_sim_multiplier
@@ -422,6 +450,11 @@ class Orchestrator:
         self.aux_detach       = aux_detach
         self.vectorized       = vectorized
         self.vec_games        = vec_games
+        self.use_gpu_server   = use_gpu_server
+        self.gpu_batch_size   = gpu_batch_size
+        self.phase2_gen              = phase2_gen
+        self.belief_weight_phase2    = belief_weight_phase2  if belief_weight_phase2  is not None else belief_weight  * 0.5
+        self.support_weight_phase2   = support_weight_phase2 if support_weight_phase2 is not None else support_weight * 0.5
         self.trainer = Trainer(self.model, lr=1e-3,
                                belief_weight=belief_weight,
                                support_weight=support_weight,
@@ -457,11 +490,11 @@ class Orchestrator:
         device = torch.device("cpu")
 
         chall_model = DominoNet().to(device)
-        chall_model.load_state_dict(challenger_weights, strict=False)
+        safe_load_state_dict(chall_model, challenger_weights, strict=False)
         chall_model.eval()
 
         ref_model = DominoNet().to(device)
-        ref_model.load_state_dict(ref_weights, strict=False)
+        safe_load_state_dict(ref_model, ref_weights, strict=False)
         ref_model.eval()
 
         mcts_c = _MCTS(chall_model, num_simulations=num_sims)
@@ -564,6 +597,14 @@ class Orchestrator:
 
         for gen in range(1, total_generations + 1):
             self.generation = gen
+
+            # Two-stage aux loss schedule
+            if self.phase2_gen and gen == self.phase2_gen:
+                new_b = self.belief_weight_phase2
+                new_s = self.support_weight_phase2
+                self.trainer.belief_weight  = new_b
+                self.trainer.support_weight = new_s
+                print(f'  [Phase2 Switch @ gen {gen}] belief={new_b:.3f} support={new_s:.3f}')
             print(f"\n{'='*50}")
             print(f"  GENERATION {gen}/{total_generations}")
             print(f"{'='*50}")
@@ -597,9 +638,11 @@ class Orchestrator:
             else:
                 # --- CPU multi-process self-play (original path) ---
                 print(f"Spawning {self.num_workers} workers "
-                      f"({games_per_worker} games each)...", flush=True)
+                      f"({games_per_worker} games each)"
+                      f"{' [GPU server]' if self.use_gpu_server else ''}...",
+                      flush=True)
 
-                # Extract weights for CPU workers
+                # Extract weights (needed for GPU server or CPU workers)
                 shared_weights = {
                     k: v.cpu().clone() for k, v in self.model.state_dict().items()
                 }
@@ -608,6 +651,25 @@ class Orchestrator:
                 result_queue = ctx.Queue()
                 processes = []
 
+                # --- Optional GPU inference server ---
+                gpu_req_queue = None
+                gpu_resp_queues = None
+                gpu_server_proc = None
+                if self.use_gpu_server:
+                    gpu_req_queue = ctx.Queue()
+                    gpu_resp_queues = [ctx.Queue() for _ in range(self.num_workers)]
+                    server = GPUInferenceServer(
+                        model_state_dict=shared_weights,
+                        request_queue=gpu_req_queue,
+                        response_queues=gpu_resp_queues,
+                        batch_size=self.gpu_batch_size,
+                        timeout_ms=5,
+                    )
+                    gpu_server_proc = ctx.Process(target=server.run, daemon=True)
+                    gpu_server_proc.start()
+                    print(f"  [GPU Server] Started (pid={gpu_server_proc.pid}, "
+                          f"batch={self.gpu_batch_size})", flush=True)
+
                 for w_id in range(self.num_workers):
                     p = ctx.Process(
                         target=self_play_worker,
@@ -615,7 +677,9 @@ class Orchestrator:
                               self.use_mcts, self.mcts_sims, result_queue,
                               self.value_target, self.policy_target,
                               self.high_sim_fraction, self.high_sim_multiplier,
-                              self.use_belief_head, self.use_support_head)
+                              self.use_belief_head, self.use_support_head,
+                              gpu_req_queue,
+                              gpu_resp_queues[w_id] if gpu_resp_queues else None)
                     )
                     p.start()
                     processes.append(p)
@@ -645,6 +709,10 @@ class Orchestrator:
 
                 for p in processes:
                     p.join(timeout=30)
+
+                if gpu_server_proc and gpu_server_proc.is_alive():
+                    gpu_server_proc.terminate()
+                    gpu_server_proc.join(timeout=5)
 
                 elapsed = time.time() - t0
                 total_games = self.num_workers * games_per_worker
@@ -887,8 +955,8 @@ class Orchestrator:
 
     def load_checkpoint(self, path):
         """Resume training from a checkpoint."""
-        ckpt = torch.load(path, map_location=self.device, weights_only=True)
-        incompat = self.model.load_state_dict(ckpt['model_state_dict'], strict=False)
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
+        incompat = safe_load_state_dict(self.model, ckpt['model_state_dict'], strict=False)
         if incompat.missing_keys:
             print(f"[load_checkpoint] Missing keys: {incompat.missing_keys}")
         if incompat.unexpected_keys:
@@ -946,6 +1014,17 @@ def main():
                              'policy/value heads (default: True, safer for Phase 6.5 probe)')
     parser.add_argument('--no-aux-detach', dest='aux_detach', action='store_false',
                         help='Allow full gradients through aux conditioning path')
+    parser.add_argument('--phase2-gen', type=int, default=None,
+                        help='Generation at which to halve aux weights (Phase A->B). e.g. 10')
+    parser.add_argument('--belief-weight-phase2', type=float, default=None,
+                        help='belief_weight after phase2-gen (default: half of --belief-weight)')
+    parser.add_argument('--support-weight-phase2', type=float, default=None,
+                        help='support_weight after phase2-gen (default: half of --support-weight)')
+    parser.add_argument('--gpu-server', action='store_true', default=False,
+                        help='Use GPU inference server: workers do pure Python MCTS, '
+                             'all NN inference batched on GPU (maximises CPU+GPU usage)')
+    parser.add_argument('--gpu-batch-size', type=int, default=28,
+                        help='Max requests per GPU inference batch (default=num_workers)')
     parser.add_argument('--vectorized', action='store_true', default=False,
                         help='Use GPU-batched VectorizedMCTS instead of CPU workers '
                              '(faster self-play; GPU stays active during self-play)')
@@ -971,6 +1050,11 @@ def main():
         aux_detach=args.aux_detach,
         vectorized=args.vectorized,
         vec_games=args.vec_games,
+        use_gpu_server=args.gpu_server,
+        gpu_batch_size=args.gpu_batch_size,
+        phase2_gen=args.phase2_gen,
+        belief_weight_phase2=args.belief_weight_phase2,
+        support_weight_phase2=args.support_weight_phase2,
     )
 
     if args.resume:
@@ -987,6 +1071,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

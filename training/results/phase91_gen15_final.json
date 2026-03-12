@@ -1,0 +1,33 @@
+{
+  "challenger": "C:\\Users\\bernd\\pernambuco-domino\\training\\checkpoints\\domino_gen_0015.pt",
+  "production": "C:\\Users\\bernd\\pernambuco-domino\\training\\checkpoints\\domino_gen_0050.pt",
+  "pairs": 400,
+  "seed": 42,
+  "results": {
+    "50": {
+      "wr": 0.515,
+      "wr_lo": 0.46611266795606887,
+      "wr_hi": 0.5636019528259407,
+      "margin": 0.009126764777306649,
+      "margin_lo": -0.006853048667090876,
+      "margin_hi": 0.025106578221704173
+    },
+    "100": {
+      "wr": 0.53,
+      "wr_lo": 0.48103525950149856,
+      "wr_hi": 0.5783939820625206,
+      "margin": 0.013056399157886662,
+      "margin_lo": -0.0016051881322049644,
+      "margin_hi": 0.027717986447978286
+    },
+    "200": {
+      "wr": 0.475,
+      "wr_lo": 0.4265318481465433,
+      "wr_hi": 0.5239437838834407,
+      "margin": -0.01057244928102797,
+      "margin_lo": -0.025700250588418294,
+      "margin_hi": 0.004555352026362355
+    }
+  },
+  "verdict": "[WIN] PROMOTE -- WR>=52%% and margin positive (CI borderline)"
+}

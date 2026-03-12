@@ -5,14 +5,24 @@ _Do not rename, move, or overwrite these files._
 
 ## 1. Production Champion
 
-**Currently live in game. Do NOT replace until Phase 8 promotion gate passes.**
+**Promoted 2026-03-12 after Phase 9.1 playoff.**
 
 | Label | Path | Note |
 |-------|------|------|
-| `best_prod_current` | `training/checkpoints/domino_gen_0050.pt` | Phase 4/5 MCTS champion; used as gen50 anchor in all scaling tests |
-| Deployed binary | `domino_model.bin` | Browser export of Phase 5 champion |
+| `best_prod_current` | `training/checkpoints/domino_gen_0015.pt` | Phase 7 gen15, belief-head λ=0.1 |
+| Deployed binary | `domino_model.bin` | Exported 2026-03-12 |
+| Previous champion | `domino_model_gen50_backup.bin` | Phase 4/5 MCTS gen50 — keep as fallback |
 
-**This is the bar.** Every new checkpoint must beat this at the live deployment budget to be promoted.
+**Playoff result (Phase 9.1, 400 duplicate pairs, fixed seed 42):**
+
+| Budget | WR vs gen50 | Pair margin | Verdict |
+|--------|-------------|-------------|---------|
+| 50 sims | 51.5% | +0.009 | OK |
+| 100 sims | **53.0%** | **+0.013** | **PROMOTE** ✅ |
+| 200 sims | 47.5% | −0.011 | loses (expected) |
+
+Deployment budget = 100 sims. Gen15 wins at deployment budget.
+Gen50 still beats at 200 sims — search compensates for weaker heuristics at high compute.
 
 ---
 
