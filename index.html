@@ -4766,7 +4766,7 @@
                         // The CornerDial SVG is transparent, so tiles placed beneath it
                         // remain visible through the overlay.
                         const DIAL_CORNER = Math.min(110, Math.round(Math.min(W, H) * 0.27));
-                        const SPIRAL_PADS = { top: 2, right: 20, bottom: 8, left: 2 };
+                        const SPIRAL_PADS = { top: 0, right: 20, bottom: 2, left: 2 };
 
                         // Auto-scale: try current size, shrink until all tiles fit.
                         // Use 12 attempts and lower minimums (hw≥18, vw≥9) so even
