@@ -511,8 +511,7 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
-      // COL_MARGIN=0 with gap=0: standard AABB collision, tiles placed exactly adjacent.
-      // Overlap check: tile at prev.x+prev.w vs tile ending at prev.x+prev.w → false (< not <=).
+      // COL_MARGIN=0, gap=1: 1px spacing prevents rendering overlap; invariant 0 < 1 holds.
       const COL_MARGIN = 0;
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
@@ -4773,7 +4772,7 @@
                         // tiny landscape boards can accommodate all 28 tiles.
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
-                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 0,
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 1,
                             SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
