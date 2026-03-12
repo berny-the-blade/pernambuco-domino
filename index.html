@@ -4200,23 +4200,26 @@
         return () => clearTimeout(timeout);
       }, [gameState?.waitingForStarterChoice, gameState?.starterChoiceDeadline]);
 
-      /* Lock board dimensions: measure ONCE when entering game, then never change */
+      /* Measure board dimensions on game entry and keep in sync via ResizeObserver */
       useEffect(() => {
         if (screen !== 'game') return;
         if (!boardRef.current) return;
         let cancelled = false;
         let tries = 0;
-        const measureAndLock = () => {
+        const measure = () => {
           if (cancelled) return;
           const el = boardRef.current;
           if (!el) return;
           const w = Math.floor(el.clientWidth);
           const h = Math.floor(el.clientHeight);
-          if ((w < 50 || h < 50) && tries < 30) { tries++; requestAnimationFrame(measureAndLock); return; }
+          if ((w < 50 || h < 50) && tries < 30) { tries++; requestAnimationFrame(measure); return; }
           setBoardBox(prev => (prev.w === w && prev.h === h) ? prev : { w, h });
         };
-        requestAnimationFrame(() => requestAnimationFrame(measureAndLock));
-        return () => { cancelled = true; };
+        requestAnimationFrame(() => requestAnimationFrame(measure));
+        // Keep updating if layout changes (e.g. panel resize)
+        const ro = new ResizeObserver(() => { if (!cancelled) measure(); });
+        ro.observe(boardRef.current);
+        return () => { cancelled = true; ro.disconnect(); };
       }, [screen]);
 
       // Domino dots pattern
