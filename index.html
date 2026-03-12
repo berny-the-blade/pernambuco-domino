@@ -4701,7 +4701,7 @@
                 <div className="flex items-stretch mb-1 gap-1" style={{ flex: 1, minHeight: 0 }}>
 
                   {/* Left opponent — opposing team = red */}
-                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center overflow-hidden ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[leftSlot] || []).length > 0 ? 72 : 40 }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center overflow-hidden ' + (gameState.currentPlayer === leftSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[leftSlot])} size={28} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -4981,7 +4981,7 @@
                   </div>
 
                   {/* Right opponent — opposing team = red */}
-                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center overflow-hidden ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice && (gameState.hands?.[rightSlot] || []).length > 0 ? 72 : 40 }}>
+                  <div className={'player-panel p-1 flex-shrink-0 flex flex-col items-center justify-center overflow-hidden ' + (gameState.currentPlayer === rightSlot ? 'active-turn turn-pulse' : '')} style={{ width: 48 }}>
                     <div style={{ position: 'relative', borderRadius: '50%', padding: 2, background: 'rgba(239,68,68,0.7)', boxShadow: '0 0 6px rgba(239,68,68,0.4)' }}>
                       <Avatar profile={profileFromPlayer(gameState.players?.[rightSlot])} size={28} noBorder />
                       {!(gameState.currentPlayer === -1 && !gameState.waitingForStarterChoice) && <div style={{ position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', border: '2px solid #0a2a14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
