@@ -4733,7 +4733,7 @@
                   </div>
 
                   {/* Board */}
-                  <div ref={boardRef} className="board-area flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', height: boardBox.h ? boardBox.h : 'auto' }}>
+                  <div ref={boardRef} className="board-area flex flex-col items-center justify-center" style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', clipPath: 'inset(0)', height: boardBox.h ? boardBox.h : 'auto' }}>
                     {(!gameState.board || gameState.board.length === 0) ? null : (() => {
                       const board = gameState.board;
                       const HW = bDims.hw, VW = bDims.vw;
