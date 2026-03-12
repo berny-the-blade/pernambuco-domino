@@ -511,10 +511,10 @@
         (avoidBR > 0 && x + w > W - avoidBR && y + h > H - avoidBR);
 
       const placed = []; // collision rects: {x, y, w, h}
-      // INVARIANT: COL_MARGIN must always be < gap (currently 8).
+      // INVARIANT: COL_MARGIN must always be < gap (currently gap=1, COL_MARGIN=0).
       // If COL_MARGIN >= gap, every consecutive tile fails the overlap check
       // and the auto-scale loop shrinks tiles to minimum, breaking the board.
-      const COL_MARGIN = 4;
+      const COL_MARGIN = 0;
       const overlaps = (x, y, w, h) => {
         for (const p of placed) {
           if (x < p.x + p.w + COL_MARGIN && x + w + COL_MARGIN > p.x &&
@@ -4774,7 +4774,7 @@
                         // tiny landscape boards can accommodate all 28 tiles.
                         let spiralHW = HW, spiralVW = VW, out;
                         for (let attempt = 0; attempt < 12; attempt++) {
-                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 8,
+                          out = layoutSpiral(board, W, H, spiralHW, spiralVW, 1,
                             SPIRAL_PADS, DIAL_CORNER, DIAL_CORNER);
                           if (out.tiles.length >= board.length) break;
                           spiralHW = Math.max(18, Math.round(spiralHW * 0.88));
