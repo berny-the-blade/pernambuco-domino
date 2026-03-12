@@ -5123,7 +5123,6 @@
                     </div>
                     {/* Tiles row */}
                     <div className="flex flex-wrap gap-1 flex-1 items-center">
-                      {isMyTurn && <span className="text-[8px] px-1 py-0.5 rounded-full font-bold turn-pulse" style={{ background: 'rgba(250,204,21,0.25)', color: '#fde047' }}>SUA VEZ</span>}
                       {gameState.currentPlayer === -1 && gameState.blockedReveal && (() => {
                         const p = gameState.blockedReveal.players?.find(x => x.slot === playerSlot);
                         return p ? <span className="text-[14px] font-extrabold text-yellow-300/90">({p.pips})</span> : null;
