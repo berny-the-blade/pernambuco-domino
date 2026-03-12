@@ -486,7 +486,7 @@
     function layoutSpiral(board, W, H, HW, VW, gap, pads, avoidTL, avoidBR) {
       const n = board.length;
       if (n === 0) return { tiles: [] };
-      gap = gap || 2;
+      gap = (gap != null) ? gap : 2;
       pads = typeof pads === 'number'
         ? { top: pads, right: pads, bottom: pads, left: pads }
         : Object.assign({ top: 6, right: 6, bottom: 20, left: 6 }, pads || {});
@@ -4766,7 +4766,7 @@
                         // The CornerDial SVG is transparent, so tiles placed beneath it
                         // remain visible through the overlay.
                         const DIAL_CORNER = Math.min(110, Math.round(Math.min(W, H) * 0.27));
-                        const SPIRAL_PADS = { top: 2, right: 16, bottom: 8, left: 2 };
+                        const SPIRAL_PADS = { top: 2, right: 20, bottom: 8, left: 2 };
 
                         // Auto-scale: try current size, shrink until all tiles fit.
                         // Use 12 attempts and lower minimums (hw≥18, vw≥9) so even
